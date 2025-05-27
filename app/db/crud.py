@@ -28,6 +28,7 @@ from app.db.models import (
     User,
     UserTemplate,
     UserUsageResetLogs,
+    UserNodeSelection,
 )
 from app.models.admin import AdminCreate, AdminModify, AdminPartialModify
 from app.models.node import NodeCreate, NodeModify, NodeStatus, NodeUsageResponse
@@ -1498,3 +1499,26 @@ def count_online_users(db: Session, hours: int = 24):
     query = db.query(func.count(User.id)).filter(User.online_at.isnot(
         None), User.online_at >= twenty_four_hours_ago)
     return query.scalar()
+
+
+def get_node(db: Session, node_id: int) -> Optional[Node]:
+    """Get a node by ID."""
+    return db.query(Node).filter(Node.id == node_id).first()
+
+
+def add_user_node(db: Session, user: User, node: Node) -> None:
+    """Add a node to the user's selected nodes."""
+    selection = UserNodeSelection(user=user, node=node)
+    db.add(selection)
+    db.commit()
+
+
+def remove_user_node(db: Session, user: User, node: Node) -> None:
+    """Remove a node from the user's selected nodes."""
+    selection = db.query(UserNodeSelection).filter(
+        UserNodeSelection.user_id == user.id,
+        UserNodeSelection.node_id == node.id
+    ).first()
+    if selection:
+        db.delete(selection)
+        db.commit()

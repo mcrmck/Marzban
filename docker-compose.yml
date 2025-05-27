@@ -3,6 +3,8 @@ services:
     image: gozargah/marzban:latest
     restart: always
     env_file: .env
-    network_mode: host
+    ports:
+      - "8000:8000"
     volumes:
       - /var/lib/marzban:/var/lib/marzban
+      - ./certs:/var/lib/marzban/certs:ro

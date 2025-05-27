@@ -103,8 +103,16 @@ def generate_subscription(
         as_base64: bool,
         reverse: bool,
 ) -> str:
+    # Filter proxies based on selected nodes
+    selected_node_ids = {node.id for node in user.selected_nodes} if hasattr(user, 'selected_nodes') else None
+    filtered_proxies = {}
+
+    for proxy_type, proxy_settings in user.proxies.items():
+        if selected_node_ids is None or proxy_settings.get('node_id') in selected_node_ids:
+            filtered_proxies[proxy_type] = proxy_settings
+
     kwargs = {
-        "proxies": user.proxies,
+        "proxies": filtered_proxies,
         "inbounds": user.inbounds,
         "extra_data": user.__dict__,
         "reverse": reverse,

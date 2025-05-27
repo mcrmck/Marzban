@@ -102,6 +102,8 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
+    selected_nodes = relationship("UserNodeSelection", back_populates="user", cascade="all, delete-orphan")
+
     @hybrid_property
     def reseted_usage(self) -> int:
         return int(sum([log.used_traffic_at_reset for log in self.usage_logs]))
@@ -349,4 +351,18 @@ class NotificationReminder(Base):
     type = Column(Enum(ReminderType), nullable=False)
     threshold = Column(Integer, nullable=True)
     expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserNodeSelection(Base):
+    __tablename__ = "user_node_selections"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'node_id'),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    user = relationship("User", back_populates="selected_nodes")
+    node_id = Column(Integer, ForeignKey("nodes.id"))
+    node = relationship("Node")
     created_at = Column(DateTime, default=datetime.utcnow)

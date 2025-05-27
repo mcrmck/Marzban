@@ -1,0 +1,11 @@
+{
+  "nodeSelection": {
+    "title": "Node Selection",
+    "name": "Name",
+    "address": "Address",
+    "status": "Status",
+    "action": "Action",
+    "nodeAdded": "Node added successfully",
+    "nodeRemoved": "Node removed successfully"
+  }
+}

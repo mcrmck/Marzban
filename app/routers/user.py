@@ -16,6 +16,7 @@ from app.models.user import (
     UserStatus,
     UsersUsagesResponse,
     UserUsagesResponse,
+    NodeResponse,
 )
 from app.utils import report, responses
 
@@ -394,3 +395,48 @@ def delete_expired_users(
         )
 
     return removed_users
+
+
+@router.get("/user/{username}/nodes", response_model=List[NodeResponse])
+def get_user_nodes(
+    db: Session = Depends(get_db),
+    dbuser: UserResponse = Depends(get_validated_user),
+    admin: Admin = Depends(Admin.get_current),
+):
+    """Get the list of nodes selected by the user."""
+    return [selection.node for selection in dbuser.selected_nodes]
+
+
+@router.post("/user/{username}/nodes/{node_id}", response_model=UserResponse)
+def add_user_node(
+    node_id: int,
+    db: Session = Depends(get_db),
+    dbuser: UserResponse = Depends(get_validated_user),
+    admin: Admin = Depends(Admin.get_current),
+):
+    """Add a node to the user's selected nodes."""
+    node = crud.get_node(db, node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    if node in [selection.node for selection in dbuser.selected_nodes]:
+        raise HTTPException(status_code=409, detail="Node already selected")
+
+    crud.add_user_node(db, dbuser, node)
+    return UserResponse.model_validate(dbuser)
+
+
+@router.delete("/user/{username}/nodes/{node_id}", response_model=UserResponse)
+def remove_user_node(
+    node_id: int,
+    db: Session = Depends(get_db),
+    dbuser: UserResponse = Depends(get_validated_user),
+    admin: Admin = Depends(Admin.get_current),
+):
+    """Remove a node from the user's selected nodes."""
+    node = crud.get_node(db, node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    crud.remove_user_node(db, dbuser, node)
+    return UserResponse.model_validate(dbuser)
