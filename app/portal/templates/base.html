@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}VPN Portal{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://js.stripe.com/v3/"></script>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex">
+                    <div class="flex-shrink-0 flex items-center">
+                        <a href="/client-portal" class="text-xl font-bold text-gray-800">
+                            VPN Portal
+                        </a>
+                    </div>
+                </div>
+                <div class="flex items-center">
+                    <button id="darkModeToggle" class="ml-4 text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                        </svg>
+                    </button>
+                    {% if user %}
+                    <a href="/client-portal/account" class="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
+                        My Account
+                    </a>
+                    <a href="/client-portal/logout" class="ml-4 text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
+                        Logout
+                    </a>
+                    {% else %}
+                    <a href="/client-portal/login" class="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
+                        Login
+                    </a>
+                    <a href="/client-portal/register" class="ml-4 bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700">
+                        Sign Up
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white mt-12">
+        <div class="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+            <div class="mt-8 border-t border-gray-200 pt-8 md:flex md:items-center md:justify-between">
+                <div class="flex space-x-6 md:order-2">
+                    <a href="#" class="text-gray-400 hover:text-gray-500">
+                        <span class="sr-only">Support</span>
+                        Support
+                    </a>
+                    <a href="#" class="text-gray-400 hover:text-gray-500">
+                        <span class="sr-only">Terms</span>
+                        Terms
+                    </a>
+                    <a href="#" class="text-gray-400 hover:text-gray-500">
+                        <span class="sr-only">Privacy</span>
+                        Privacy
+                    </a>
+                </div>
+                <p class="mt-8 text-base text-gray-400 md:mt-0 md:order-1">
+                    &copy; 2024 VPN Portal. All rights reserved.
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    {% block extra_scripts %}{% endblock %}
+
+    <script>
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        const body = document.body;
+
+        // Initialize dark mode from localStorage
+        const darkMode = localStorage.getItem('chakra-ui-color-mode');
+        if (darkMode === 'dark') {
+            body.classList.add('dark-mode');
+        }
+
+        darkModeToggle.addEventListener('click', () => {
+            body.classList.toggle('dark-mode');
+            const newMode = body.classList.contains('dark-mode') ? 'dark' : 'light';
+            localStorage.setItem('chakra-ui-color-mode', newMode);
+        });
+    </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from fastapi.staticfiles import StaticFiles
 
 from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH
 
@@ -32,6 +33,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount portal static files
+app.mount("/client-portal/static", StaticFiles(directory="app/portal/static"), name="portal_static")
+
 from app import dashboard, jobs, routers, telegram  # noqa
 from app.routers import api_router  # noqa
 

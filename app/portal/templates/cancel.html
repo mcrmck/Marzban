@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Cancelled - VPN Portal{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto text-center">
+    <div class="mb-8">
+        <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+        </svg>
+    </div>
+    <h1 class="text-3xl font-bold text-gray-900 mb-4">Payment Cancelled</h1>
+    <p class="text-xl text-gray-600 mb-8">
+        Your payment was cancelled. No charges were made to your account.
+    </p>
+    <div class="space-y-4">
+        <a href="/client-portal" class="inline-block bg-blue-600 text-white px-6 py-3 rounded-md text-sm font-medium hover:bg-blue-700">
+            Return to Plans
+        </a>
+        <p class="text-sm text-gray-500">
+            If you have any questions, please contact our support team.
+        </p>
+    </div>
+</div>
+{% endblock %}

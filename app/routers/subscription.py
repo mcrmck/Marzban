@@ -13,7 +13,6 @@ from config import (
     SUB_PROFILE_TITLE,
     SUB_SUPPORT_URL,
     SUB_UPDATE_INTERVAL,
-    SUBSCRIPTION_PAGE_TEMPLATE,
     USE_CUSTOM_JSON_DEFAULT,
     USE_CUSTOM_JSON_FOR_HAPP,
     USE_CUSTOM_JSON_FOR_STREISAND,
@@ -23,13 +22,42 @@ from config import (
 )
 
 client_config = {
-    "clash-meta": {"config_format": "clash-meta", "media_type": "text/yaml", "as_base64": False, "reverse": False},
-    "sing-box": {"config_format": "sing-box", "media_type": "application/json", "as_base64": False, "reverse": False},
-    "clash": {"config_format": "clash", "media_type": "text/yaml", "as_base64": False, "reverse": False},
-    "v2ray": {"config_format": "v2ray", "media_type": "text/plain", "as_base64": True, "reverse": False},
-    "outline": {"config_format": "outline", "media_type": "application/json", "as_base64": False, "reverse": False},
-    "v2ray-json": {"config_format": "v2ray-json", "media_type": "application/json", "as_base64": False,
-                   "reverse": False}
+    "clash-meta": {
+        "config_format": "clash-meta",
+        "media_type": "text/yaml",
+        "as_base64": False,
+        "reverse": False
+    },
+    "sing-box": {
+        "config_format": "sing-box",
+        "media_type": "application/json",
+        "as_base64": False,
+        "reverse": False
+    },
+    "clash": {
+        "config_format": "clash",
+        "media_type": "text/yaml",
+        "as_base64": False,
+        "reverse": False
+    },
+    "v2ray": {
+        "config_format": "v2ray",
+        "media_type": "text/plain",
+        "as_base64": True,
+        "reverse": False
+    },
+    "outline": {
+        "config_format": "outline",
+        "media_type": "application/json",
+        "as_base64": False,
+        "reverse": False
+    },
+    "v2ray-json": {
+        "config_format": "v2ray-json",
+        "media_type": "application/json",
+        "as_base64": False,
+        "reverse": False
+    }
 }
 
 router = APIRouter(tags=['Subscription'], prefix=f'/{XRAY_SUBSCRIPTION_PATH}')
@@ -60,7 +88,7 @@ def user_subscription(
     if "text/html" in accept_header:
         return HTMLResponse(
             render_template(
-                SUBSCRIPTION_PAGE_TEMPLATE,
+                "subscription/modern.html",
                 {"user": user}
             )
         )

@@ -3,13 +3,21 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# macOS system files
+.DS_Store
+
+# Build and distribution directories
+build/
+dist/
+**/build/
+**/dist/
+
 # C extensions
 *.so
 
 # Distribution / packaging
 .Python
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -160,3 +168,5 @@ xray-core
 *-dev.yml
 *-dev.yaml
 *-debug.*
+certs/
+
