@@ -1,0 +1,8 @@
+{
+  "expired": "Истекло {{time}} назад",
+  "expires": "Истекает через {{time}}",
+  "header.hostSettings": "Настройки хоста",
+  "header.logout": "Выйти",
+  "header.nodeSettings": "Настройки узлов",
+  "header.nodesUsage": "Использование узлов"
+}

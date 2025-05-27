@@ -16,8 +16,8 @@ from app.models.user import (
     UserStatus,
     UsersUsagesResponse,
     UserUsagesResponse,
-    NodeResponse,
 )
+from app.models.node import NodeResponse
 from app.utils import report, responses
 
 router = APIRouter(tags=["User"], prefix="/api", responses={401: responses._401})

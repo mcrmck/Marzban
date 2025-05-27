@@ -1,0 +1,8 @@
+{
+  "expired": "{{time}}失效",
+  "expires": "{{time}}有效",
+  "header.hostSettings": "设置",
+  "header.logout": "退出",
+  "header.nodeSettings": "节点设置",
+  "header.nodesUsage": "节点统计"
+}

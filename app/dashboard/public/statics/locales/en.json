@@ -29,7 +29,6 @@
   "disabled": "disabled",
   "expired": "Expired {{time}} ago",
   "expires": "Expires in {{time}}",
-  "header.donation": "Donation",
   "header.hostSettings": "Host Settings",
   "header.logout": "Log out",
   "header.nodeSettings": "Node Settings",
