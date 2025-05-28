@@ -4,7 +4,14 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+    EmailStr,  # Import EmailStr
+)
 
 from app import xray
 from app.models.admin import Admin
@@ -57,6 +64,7 @@ class NextPlanModel(BaseModel):
 
 
 class User(BaseModel):
+    email: Optional[EmailStr] = None  # Add email field
     proxies: Dict[ProxyTypes, ProxySettings] = {}
     expire: Optional[int] = Field(None, nullable=True)
     data_limit: Optional[int] = Field(
@@ -120,13 +128,17 @@ class User(BaseModel):
             return None
         return v
 
-
 class UserCreate(User):
     username: str
+    password: str  # Add password field
     status: UserStatusCreate = None
+    inbounds: Optional[Dict[str, List[str]]] = None  # Make inbounds optional
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "username": "user1234",
+            "email": "user@example.com",  # Add email example
+            "password": "password123",  # Add password example
             "proxies": {
                 "vmess": {"id": "35e4e39c-7d5c-4f4b-8b71-558e4f37ff53"},
                 "vless": {},
@@ -154,6 +166,9 @@ class UserCreate(User):
     @property
     def excluded_inbounds(self):
         excluded = {}
+        if not self.inbounds:  # Handle None or empty inbounds
+            return excluded
+
         for proxy_type in self.proxies:
             excluded[proxy_type] = []
             for inbound in xray.config.inbounds_by_protocol.get(proxy_type, []):
@@ -164,6 +179,9 @@ class UserCreate(User):
 
     @field_validator("inbounds", mode="before")
     def validate_inbounds(cls, inbounds, values, **kwargs):
+        if inbounds is None:  # Handle None inbounds
+            return {}
+
         proxies = values.data.get("proxies", [])
 
         # delete inbounds that are for protocols not activated

@@ -63,6 +63,8 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
     username = Column(String(34, collation='NOCASE'), unique=True, index=True)
+    email = Column(String(128), unique=True, index=True, nullable=True)  # Add email column
+    hashed_password = Column(String(128), nullable=True)  # Add hashed_password column
     proxies = relationship("Proxy", back_populates="user", cascade="all, delete-orphan")
     status = Column(Enum(UserStatus), nullable=False, default=UserStatus.active)
     used_traffic = Column(BigInteger, default=0)

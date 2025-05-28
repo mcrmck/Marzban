@@ -207,6 +207,19 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     """
     return get_user_queryset(db).filter(User.id == user_id).first()
 
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    """
+    Retrieves a user by email.
+
+    Args:
+        db (Session): Database session.
+        email (str): The email of the user.
+
+    Returns:
+        Optional[User]: The user object if found, else None.
+    """
+    return get_user_queryset(db).filter(User.email == email).first()
+
 
 UsersSortingOptions = Enum('UsersSortingOptions', {
     'username': User.username.asc(),
@@ -367,11 +380,11 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
     Returns:
         User: The created user object.
     """
-    excluded_inbounds_tags = user.excluded_inbounds
+    excluded_inbounds_tags = user.excluded_inbounds or {}  # Added or {}
     proxies = []
     for proxy_type, settings in user.proxies.items():
         excluded_inbounds = [
-            get_or_create_inbound(db, tag) for tag in excluded_inbounds_tags[proxy_type]
+            get_or_create_inbound(db, tag) for tag in excluded_inbounds_tags.get(proxy_type, [])  # Added .get()
         ]
         proxies.append(
             Proxy(type=proxy_type.value,
@@ -381,6 +394,8 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
 
     dbuser = User(
         username=user.username,
+        email=user.email,  # Add email
+        hashed_password=user.password,  # Add hashed_password
         proxies=proxies,
         status=user.status,
         data_limit=(user.data_limit or None),

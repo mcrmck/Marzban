@@ -1,11 +1,12 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
-from app.db import get_db
+from app.db import get_db, crud
 from app.models.user import UserResponse
 from config import JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 
@@ -50,3 +51,53 @@ async def get_current_user(
         email=f"{username}@example.com",
         is_active=True
     )
+
+
+async def get_current_user_optional(
+    request: Request,
+    db: Session = Depends(get_db) # <--- Inject the DB session
+) -> Optional[UserResponse]:
+    """
+    Attempts to get the current user from the access_token cookie
+    by fetching from the database.
+    """
+    token = request.cookies.get("access_token")
+
+    if not token:
+        return None
+
+    if token.startswith("Bearer "):
+        token = token.split("Bearer ")[1]
+    else:
+        return None
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+
+
+        # --- FETCH REAL USER FROM DB ---
+        db_user = crud.get_user(db, username=username) # Use CRUD function
+
+        if not db_user:
+            return None
+
+
+        # --- VALIDATE WITH PYDANTIC ---
+        try:
+            # Use model_validate for Pydantic v2.
+            # This requires UserResponse to be configured with from_attributes=True
+            user = UserResponse.model_validate(db_user)
+            return user
+        except ValidationError as e:
+            return None
+        # --- END VALIDATE ---
+
+    except JWTError as e:
+        return None
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return None
