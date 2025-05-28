@@ -40,9 +40,9 @@ def add_host_if_needed(new_node: NodeCreate, db: Session):
 
 @router.get("/node/settings", response_model=NodeSettings)
 def get_node_settings(
-    db: Session = Depends(get_db), admin: Admin = Depends(Admin.check_sudo_admin)
+    db: Session = Depends(get_db)
 ):
-    """Retrieve the current node settings, including TLS certificate."""
+    """Retrieve the current node settings, including TLS certificate. Public endpoint."""
     tls = crud.get_tls_certificate(db)
     return NodeSettings(certificate=tls.certificate)
 
@@ -149,9 +149,9 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
 
 @router.get("/nodes", response_model=List[NodeResponse])
 def get_nodes(
-    db: Session = Depends(get_db), _: Admin = Depends(Admin.check_sudo_admin)
+    db: Session = Depends(get_db)
 ):
-    """Retrieve a list of all nodes. Accessible only to sudo admins."""
+    """Retrieve a list of all nodes. Public endpoint."""
     return crud.get_nodes(db)
 
 
