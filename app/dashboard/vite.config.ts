@@ -4,6 +4,7 @@ import svgr from "vite-plugin-svgr";
 import { visualizer } from "rollup-plugin-visualizer";
 import tsconfigPaths from "vite-tsconfig-paths";
 
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -15,4 +16,13 @@ export default defineConfig({
     visualizer(),
     splitVendorChunkPlugin(),
   ],
+  build: {
+    minify: false, // Disable minification completely to preserve console logs
+    sourcemap: true, // Enable source maps for better debugging
+    rollupOptions: {
+      output: {
+        manualChunks: undefined
+      }
+    }
+  }
 });

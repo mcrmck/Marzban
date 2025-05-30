@@ -37,8 +37,8 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        account_number: str = payload.get("sub")
+        if account_number is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
@@ -47,8 +47,7 @@ async def get_current_user(
     # For now, return a mock user for testing
     return UserResponse(
         id="1",
-        username=username,
-        email=f"{username}@example.com",
+        account_number=account_number,
         is_active=True
     )
 
@@ -73,13 +72,13 @@ async def get_current_user_optional(
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        account_number: str = payload.get("sub")
+        if account_number is None:
             return None
 
 
         # --- FETCH REAL USER FROM DB ---
-        db_user = crud.get_user(db, username=username) # Use CRUD function
+        db_user = crud.get_user(db, account_number=account_number) # Use CRUD function
 
         if not db_user:
             return None

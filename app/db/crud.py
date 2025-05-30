@@ -180,18 +180,25 @@ def get_user_queryset(db: Session) -> Query:
     return db.query(User).options(joinedload(User.admin)).options(joinedload(User.next_plan))
 
 
-def get_user(db: Session, username: str) -> Optional[User]:
+def get_user(db: Session, account_number: str) -> Optional[User]:
     """
-    Retrieves a user by username.
-
-    Args:
-        db (Session): Database session.
-        username (str): The username of the user.
-
-    Returns:
-        Optional[User]: The user object if found, else None.
+    Retrieves a user by account number (case-insensitive for the input).
     """
-    return get_user_queryset(db).filter(User.username == username).first()
+    print(f"[DEBUG] crud.get_user: original input account_number: '{account_number}' (type: {type(account_number)})") # DEBUG PRINT
+
+    # Convert to lowercase for comparison, as UUIDs from uuid.uuid4() are lowercase
+    account_number_to_query = account_number.lower()
+    print(f"[DEBUG] crud.get_user: attempting to find user with lowercase account_number: '{account_number_to_query}'") # DEBUG PRINT
+
+    db_user = get_user_queryset(db).filter(User.account_number == account_number_to_query).first()
+
+    if db_user:
+        print(f"[DEBUG] crud.get_user: Found user: {db_user.id}, {db_user.account_number}") # DEBUG PRINT
+    else:
+        print(f"[DEBUG] crud.get_user: No user found for account_number: '{account_number_to_query}'") # DEBUG PRINT
+
+    return db_user
+
 
 
 def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
@@ -207,27 +214,14 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     """
     return get_user_queryset(db).filter(User.id == user_id).first()
 
-def get_user_by_email(db: Session, email: str) -> Optional[User]:
-    """
-    Retrieves a user by email.
-
-    Args:
-        db (Session): Database session.
-        email (str): The email of the user.
-
-    Returns:
-        Optional[User]: The user object if found, else None.
-    """
-    return get_user_queryset(db).filter(User.email == email).first()
-
 
 UsersSortingOptions = Enum('UsersSortingOptions', {
-    'username': User.username.asc(),
+    'account_number': User.account_number.asc(),
     'used_traffic': User.used_traffic.asc(),
     'data_limit': User.data_limit.asc(),
     'expire': User.expire.asc(),
     'created_at': User.created_at.asc(),
-    '-username': User.username.desc(),
+    '-account_number': User.account_number.desc(),
     '-used_traffic': User.used_traffic.desc(),
     '-data_limit': User.data_limit.desc(),
     '-expire': User.expire.desc(),
@@ -238,7 +232,7 @@ UsersSortingOptions = Enum('UsersSortingOptions', {
 def get_users(db: Session,
               offset: Optional[int] = None,
               limit: Optional[int] = None,
-              usernames: Optional[List[str]] = None,
+              account_numbers: Optional[List[str]] = None,
               search: Optional[str] = None,
               status: Optional[Union[UserStatus, list]] = None,
               sort: Optional[List[UsersSortingOptions]] = None,
@@ -267,11 +261,9 @@ def get_users(db: Session,
     """
     query = get_user_queryset(db)
 
-    if search:
-        query = query.filter(or_(User.username.ilike(f"%{search}%"), User.note.ilike(f"%{search}%")))
 
-    if usernames:
-        query = query.filter(User.username.in_(usernames))
+    if account_numbers:
+        query = query.filter(User.account_number.in_(account_numbers))
 
     if status:
         if isinstance(status, list):
@@ -368,7 +360,7 @@ def get_users_count(db: Session, status: UserStatus = None, admin: Admin = None)
     return query.count()
 
 
-def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
+def create_user(db: Session, account_number: str, user: UserCreate, admin: Admin = None) -> User:
     """
     Creates a new user with provided details.
 
@@ -393,9 +385,10 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
         )
 
     dbuser = User(
-        username=user.username,
-        email=user.email,  # Add email
-        hashed_password=user.password,  # Add hashed_password
+        # username=user.username,
+        # email=user.email,  # Add email
+        # hashed_password=user.password,  # Add hashed_password
+        account_number=account_number,
         proxies=proxies,
         status=user.status,
         data_limit=(user.data_limit or None),
@@ -1537,3 +1530,4 @@ def remove_user_node(db: Session, user: User, node: Node) -> None:
     if selection:
         db.delete(selection)
         db.commit()
+

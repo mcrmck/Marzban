@@ -27,81 +27,48 @@ export const ResetIcon = chakra(ArrowPathIcon, {
   },
 });
 
-export type DeleteUserModalProps = {};
+export type ResetUserUsageModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  user: any;
+};
 
-export const ResetUserUsageModal: FC<DeleteUserModalProps> = () => {
-  const [loading, setLoading] = useState(false);
-  const { resetUsageUser: user, resetDataUsage } = useDashboard();
+export const ResetUserUsageModal: FC<ResetUserUsageModalProps> = ({ isOpen, onClose, user }) => {
   const { t } = useTranslation();
-  const toast = useToast();
-  const onClose = () => {
-    useDashboard.setState({ resetUsageUser: null });
-  };
-  const onReset = () => {
-    if (user) {
-      setLoading(true);
-      resetDataUsage(user)
-        .then(() => {
-          toast({
-            title: t("resetUserUsage.success", {username: user.username}),
-            status: "success",
-            isClosable: true,
-            position: "top",
-            duration: 3000,
-          });
-        })
-        .catch(() => {
-          toast({
-            title: t("resetUserUsage.error"),
-            status: "error",
-            isClosable: true,
-            position: "top",
-            duration: 3000,
-          });
-        })
-        .finally(() => {
-          setLoading(false);
-        });
+  const { resetUserUsage } = useDashboard();
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleReset = async () => {
+    setIsResetting(true);
+    try {
+      await resetUserUsage(user.account_number);
+      onClose();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsResetting(false);
     }
   };
+
   return (
-    <Modal isCentered isOpen={!!user} onClose={onClose} size="sm">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3">
-        <ModalHeader pt={6}>
-          <Icon color="blue">
-            <ResetIcon />
-          </Icon>
-        </ModalHeader>
-        <ModalCloseButton mt={3} />
+    <Modal isOpen={isOpen} onClose={onClose}>
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>{t("resetUserUsage")}</ModalHeader>
+        <ModalCloseButton />
         <ModalBody>
-          <Text fontWeight="semibold" fontSize="lg">
-            {t("resetUserUsage.title")}
+          <Text>
+            {t("resetUserUsageConfirm", { account_number: user.account_number })}
           </Text>
-          {user && (
-            <Text
-              mt={1}
-              fontSize="sm"
-              _dark={{ color: "gray.400" }}
-              color="gray.600"
-            >
-              <Trans
-                components={{b: <b /> }}>
-                {t("resetUserUsage.prompt", {username: user.username})}
-              </Trans>
-            </Text>
-          )}
         </ModalBody>
-        <ModalFooter display="flex">
-          <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
+        <ModalFooter>
+          <Button variant="ghost" mr={3} onClick={onClose}>
             {t("cancel")}
           </Button>
           <Button
-            size="sm"
-            w="full"
-            colorScheme="blue"
-            onClick={onReset}
-            leftIcon={loading ? <Spinner size="xs" /> : undefined}
+            colorScheme="primary"
+            onClick={handleReset}
+            isLoading={isResetting}
           >
             {t("reset")}
           </Button>

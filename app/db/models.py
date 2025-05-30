@@ -62,9 +62,11 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    username = Column(String(34, collation='NOCASE'), unique=True, index=True)
-    email = Column(String(128), unique=True, index=True, nullable=True)  # Add email column
-    hashed_password = Column(String(128), nullable=True)  # Add hashed_password column
+    # username = Column(String(34, collation='NOCASE'), unique=True, index=True)
+    # email = Column(String(128), unique=True, index=True, nullable=True)  # Add email column
+    # hashed_password = Column(String(128), nullable=True)  # Add hashed_password column
+    account_number = Column(String(36), unique=True, index=True, nullable=False) # For UUID
+
     proxies = relationship("Proxy", back_populates="user", cascade="all, delete-orphan")
     status = Column(Enum(UserStatus), nullable=False, default=UserStatus.active)
     used_traffic = Column(BigInteger, default=0)

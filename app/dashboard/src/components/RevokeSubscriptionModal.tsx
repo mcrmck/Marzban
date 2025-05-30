@@ -17,6 +17,7 @@ import { useDashboard } from "contexts/DashboardContext";
 import { FC, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Icon } from "./Icon";
+import { User } from "types/User"; // Added import
 
 export const ResetIcon = chakra(ArrowPathIcon, {
   baseStyle: {
@@ -25,80 +26,50 @@ export const ResetIcon = chakra(ArrowPathIcon, {
   },
 });
 
-export type RevokeSubscriptionModalProps = {};
+export type RevokeSubscriptionModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  user: User; // Changed from { account_number: string } to User
+};
 
-export const RevokeSubscriptionModal: FC<RevokeSubscriptionModalProps> = () => {
-  const [loading, setLoading] = useState(false);
-  const { revokeSubscriptionUser: user, revokeSubscription } = useDashboard();
+export const RevokeSubscriptionModal: FC<RevokeSubscriptionModalProps> = ({ isOpen, onClose, user }) => {
   const { t } = useTranslation();
-  const toast = useToast();
-  const onClose = () => {
-    useDashboard.setState({ revokeSubscriptionUser: null });
-  };
-  const onReset = () => {
-    if (user) {
-      setLoading(true);
-      revokeSubscription(user)
-        .then(() => {
-          toast({
-            title: t("revokeUserSub.success", { username: user.username }),
-            status: "success",
-            isClosable: true,
-            position: "top",
-            duration: 3000,
-          });
-        })
-        .catch(() => {
-          toast({
-            title: t("revokeUserSub.error"),
-            status: "error",
-            isClosable: true,
-            position: "top",
-            duration: 3000,
-          });
-        })
-        .finally(() => {
-          setLoading(false);
-        });
+  const { revokeSubscription } = useDashboard();
+  const [isRevoking, setIsRevoking] = useState(false);
+
+  const handleRevoke = async () => {
+    setIsRevoking(true);
+    try {
+      await revokeSubscription(user); // Changed from user.account_number to user
+      onClose();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsRevoking(false);
     }
   };
+
   return (
-    <Modal isCentered isOpen={!!user} onClose={onClose} size="sm">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3">
-        <ModalHeader pt={6}>
-          <Icon color="blue">
-            <ResetIcon />
-          </Icon>
-        </ModalHeader>
-        <ModalCloseButton mt={3} />
+    <Modal isOpen={isOpen} onClose={onClose}>
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>{t("revokeSubscription")}</ModalHeader>
+        <ModalCloseButton />
         <ModalBody>
-          <Text fontWeight="semibold" fontSize="lg">
-            {t("revokeUserSub.title")}
+          <Text>
+            <Trans i18nKey="revokeSubscriptionConfirm" values={{ account_number: user.account_number }}>
+              Are you sure you want to revoke the subscription for user {{ account_number: user.account_number }}?
+            </Trans>
           </Text>
-          {user && (
-            <Text
-              mt={1}
-              fontSize="sm"
-              _dark={{ color: "gray.400" }}
-              color="gray.600"
-            >
-              <Trans components={{ b: <b /> }}>
-                {t("revokeUserSub.prompt", { username: user.username })}
-              </Trans>
-            </Text>
-          )}
         </ModalBody>
-        <ModalFooter display="flex">
-          <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
+        <ModalFooter>
+          <Button variant="ghost" mr={3} onClick={onClose}>
             {t("cancel")}
           </Button>
           <Button
-            size="sm"
-            w="full"
-            colorScheme="blue"
-            onClick={onReset}
-            leftIcon={loading ? <Spinner size="xs" /> : undefined}
+            colorScheme="primary"
+            onClick={handleRevoke}
+            isLoading={isRevoking}
           >
             {t("revoke")}
           </Button>

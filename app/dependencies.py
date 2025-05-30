@@ -1,12 +1,17 @@
 from typing import Optional, Union
 from app.models.admin import AdminInDB, AdminValidationResult, Admin
-from app.models.user import UserResponse, UserStatus
+from app.models.user import UserResponse, UserStatus # UserStatus might not be needed here directly
 from app.db import Session, crud, get_db
-from config import SUDOERS
-from fastapi import Depends, HTTPException
+from config import SUDOERS, SECRET_KEY, ALGORITHM # Ensure SECRET_KEY, ALGORITHM are in config
+from fastapi import Depends, HTTPException, status # Added status
 from datetime import datetime, timezone, timedelta
 from fastapi.security import OAuth2PasswordBearer
-from app.utils.jwt import get_subscription_payload
+from app.utils.jwt import get_subscription_payload # SECRET_KEY, ALGORITHM removed from here if now direct
+from jose import jwt, JWTError # Added jose imports
+
+import logging
+
+logger = logging.getLogger("marzban")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -39,7 +44,7 @@ def get_dbnode(node_id: int, db: Session = Depends(get_db)):
     return dbnode
 
 
-def validate_dates(start: Optional[Union[str, datetime]], end: Optional[Union[str, datetime]]) -> (datetime, datetime):
+def validate_dates(start: Optional[Union[str, datetime]], end: Optional[Union[str, datetime]]) -> tuple[datetime, datetime]:
     """Validate if start and end dates are correct and if end is after start."""
     try:
         if start:
@@ -49,7 +54,7 @@ def validate_dates(start: Optional[Union[str, datetime]], end: Optional[Union[st
             start_date = datetime.now(timezone.utc) - timedelta(days=30)
         if end:
             end_date = end if isinstance(end, datetime) else datetime.fromisoformat(end).astimezone(timezone.utc)
-            if start_date and end_date < start_date:
+            if start_date and end_date < start_date: # start_date will always exist here
                 raise HTTPException(status_code=400, detail="Start date must be before end date")
         else:
             end_date = datetime.now(timezone.utc)
@@ -70,55 +75,115 @@ def get_user_template(template_id: int, db: Session = Depends(get_db)):
 def get_validated_sub(
         token: str,
         db: Session = Depends(get_db)
-) -> UserResponse:
-    sub = get_subscription_payload(token)
-    if not sub:
-        raise HTTPException(status_code=404, detail="Not Found")
+) -> "DBUser": # Return ORM model
+    logger.info(f"get_validated_sub: Attempting to validate token: {token[:20]}...")
 
-    dbuser = crud.get_user(db, sub['username'])
-    if not dbuser or dbuser.created_at > sub['created_at']:
-        raise HTTPException(status_code=404, detail="Not Found")
+    payload = get_subscription_payload(token)
+    if not payload:
+        logger.error("get_validated_sub: get_subscription_payload returned None.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token payload (payload is None)")
 
-    if dbuser.sub_revoked_at and dbuser.sub_revoked_at > sub['created_at']:
-        raise HTTPException(status_code=404, detail="Not Found")
+    logger.info(f"get_validated_sub: Token payload received: {payload}")
 
-    return dbuser
+    account_number_from_sub = payload.get('sub') # Default 'sub' claim for subject
+    if not account_number_from_sub:
+        account_number_from_sub = payload.get('account_number')
+        if not account_number_from_sub:
+            logger.error(f"get_validated_sub: 'sub' or 'account_number' missing in token payload. Keys: {list(payload.keys())}")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account number missing in token")
+
+    logger.info(f"get_validated_sub: Account number from token: {account_number_from_sub}")
+
+    db_orm_user = crud.get_user(db, account_number_from_sub)
+    if not db_orm_user:
+        logger.error(f"get_validated_sub: User not found in DB for account_number: {account_number_from_sub}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found from token")
+
+    logger.info(f"get_validated_sub: User {db_orm_user.account_number} found in DB. Created at: {db_orm_user.created_at}, Sub revoked at: {db_orm_user.sub_revoked_at}")
+
+    token_created_at_val = payload.get('created_at') # This could be 'iat' (issued at) or your custom 'created_at'
+    if token_created_at_val is None:
+        token_created_at_val = payload.get('iat')
+        if token_created_at_val is None:
+            logger.error(f"get_validated_sub: Token creation timestamp ('created_at' or 'iat') missing in payload. Keys: {list(payload.keys())}")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Token creation time missing")
+        else:
+            logger.info(f"get_validated_sub: Using 'iat' as token creation timestamp value: {token_created_at_val}")
+            # 'iat' is typically already a numeric timestamp
+            token_created_at_ts = float(token_created_at_val)
+    else:
+        logger.info(f"get_validated_sub: Token 'created_at' timestamp value: {token_created_at_val}")
+        # If 'created_at' is a datetime object (from get_subscription_payload), convert to timestamp
+        if isinstance(token_created_at_val, datetime):
+            token_created_at_ts = token_created_at_val.timestamp()
+        else: # Assume it's already a numeric timestamp
+            token_created_at_ts = float(token_created_at_val)
+
+    logger.info(f"get_validated_sub: Processed token_created_at_ts: {token_created_at_ts}")
 
 
-def get_validated_user(
-        username: str,
-        admin: Admin = Depends(Admin.get_current),
+    db_user_created_at_ts = db_orm_user.created_at.timestamp() if isinstance(db_orm_user.created_at, datetime) else float(db_orm_user.created_at or 0)
+    logger.info(f"get_validated_sub: DB user created_at_ts: {db_user_created_at_ts}, Token created_at_ts: {token_created_at_ts}")
+
+    if db_user_created_at_ts > token_created_at_ts: # direct comparison of timestamps
+        logger.error(f"get_validated_sub: User record created ({db_user_created_at_ts}) after token issuance ({token_created_at_ts}).")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User record created after token issuance")
+
+    if db_orm_user.sub_revoked_at:
+        db_user_sub_revoked_at_ts = db_orm_user.sub_revoked_at.timestamp() if isinstance(db_orm_user.sub_revoked_at, datetime) else float(db_orm_user.sub_revoked_at)
+        logger.info(f"get_validated_sub: DB user sub_revoked_at_ts: {db_user_sub_revoked_at_ts}, Token created_at_ts: {token_created_at_ts}")
+        if db_user_sub_revoked_at_ts > token_created_at_ts: # direct comparison of timestamps
+            logger.error(f"get_validated_sub: Subscription revoked ({db_user_sub_revoked_at_ts}) after token issuance ({token_created_at_ts}).")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription revoked after token issuance")
+
+    logger.info(f"get_validated_sub: Token validated successfully for user {db_orm_user.account_number}")
+    return db_orm_user
+
+
+def get_validated_user( # This function should return the ORM User model for consistency with CRUD operations
+        account_number: str,
+        admin: Admin = Depends(Admin.get_current), # Admin model from app.models.admin
         db: Session = Depends(get_db)
-) -> UserResponse:
-    dbuser = crud.get_user(db, username)
-    if not dbuser:
+): # Return type should be the ORM User model from app.db.models.User
+    db_orm_user = crud.get_user(db, account_number) # crud.get_user returns ORM model
+    if not db_orm_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if not (admin.is_sudo or (dbuser.admin and dbuser.admin.username == admin.username)):
-        raise HTTPException(status_code=403, detail="You're not allowed")
+    # Ensure admin comparison logic is correct
+    # db_orm_user.admin is the ORM Admin object associated with the user
+    if not admin.is_sudo:
+        # Check if the user has an admin and if that admin's username matches the current admin's username
+        if not db_orm_user.admin or db_orm_user.admin.username != admin.username:
+            raise HTTPException(status_code=403, detail="You're not allowed to access this user")
 
-    return dbuser
+    # Return the ORM model for use in routers that call CRUD functions
+    return db_orm_user
+    # If the router absolutely needs UserResponse, it can convert it: UserResponse.model_validate(db_orm_user)
 
 
-def get_expired_users_list(db: Session, admin: Admin, expired_after: Optional[datetime] = None,
+def get_expired_users_list(db: Session, admin: Admin, expired_after: Optional[datetime] = None, # Admin model from app.models.admin
                            expired_before: Optional[datetime] = None):
     expired_before = expired_before or datetime.now(timezone.utc)
     expired_after = expired_after or datetime.min.replace(tzinfo=timezone.utc)
 
-    dbadmin = crud.get_admin(db, admin.username)
-    dbusers = crud.get_users(
+    # crud.get_admin expects a username string
+    dbadmin_orm = crud.get_admin(db, admin.username) # Fetch the ORM Admin model
+    if not admin.is_sudo and not dbadmin_orm: # Should not happen if admin is validated by Admin.get_current
+         raise HTTPException(status_code=403, detail="Admin performing action not found")
+
+    dbusers_orm_list = crud.get_users(
         db=db,
         status=[UserStatus.expired, UserStatus.limited],
-        admin=dbadmin if not admin.is_sudo else None
+        admin=dbadmin_orm if not admin.is_sudo else None # Pass the ORM admin model
     )
 
     return [
-        u for u in dbusers
+        u for u in dbusers_orm_list
         if u.expire and expired_after.timestamp() <= u.expire <= expired_before.timestamp()
     ]
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)): # Return ORM User
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -126,12 +191,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        account_number: Optional[str] = payload.get("sub")
+        if account_number is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    user = crud.get_user(db, username=username)
-    if user is None:
+
+    user_orm = crud.get_user(db, account_number=account_number) # crud.get_user returns ORM User
+    if user_orm is None:
         raise credentials_exception
-    return user
+    return user_orm # Return ORM User model

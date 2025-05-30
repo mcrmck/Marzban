@@ -1,5 +1,14 @@
 ARG PYTHON_VERSION=3.12
 
+FROM node:20-slim AS node-build
+
+WORKDIR /app
+COPY app/dashboard/package*.json ./
+RUN npm install
+
+COPY app/dashboard/ ./
+RUN npm run build -- --outDir build --assetsDir statics
+
 FROM python:$PYTHON_VERSION-slim AS build
 
 ENV PYTHONUNBUFFERED=1
@@ -25,6 +34,7 @@ RUN rm -rf $PYTHON_LIB_PATH/*
 COPY --from=build $PYTHON_LIB_PATH $PYTHON_LIB_PATH
 COPY --from=build /usr/local/bin /usr/local/bin
 COPY --from=build /usr/local/share/xray /usr/local/share/xray
+COPY --from=node-build /app/build /code/app/dashboard/build
 
 COPY . /code
 

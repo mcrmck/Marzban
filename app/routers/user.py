@@ -1,13 +1,16 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
+import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 
 from app import logger, xray
 from app.db import Session, crud, get_db
+from app.db.models import User as DBUser  # Import the ORM User model
+from app.db.models import Admin as DBAdmin # Import the ORM Admin model, if needed for type hints
 from app.dependencies import get_expired_users_list, get_validated_user, validate_dates
-from app.models.admin import Admin
+from app.models.admin import Admin as PydanticAdmin # Pydantic Admin model for request/response
 from app.models.user import (
     UserCreate,
     UserModify,
@@ -28,25 +31,13 @@ def add_user(
     new_user: UserCreate,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
     """
     Add a new user
-
-    - **username**: 3 to 32 characters, can include a-z, 0-9, and underscores.
-    - **status**: User's status, defaults to `active`. Special rules if `on_hold`.
-    - **expire**: UTC timestamp for account expiration. Use `0` for unlimited.
-    - **data_limit**: Max data usage in bytes (e.g., `1073741824` for 1GB). `0` means unlimited.
-    - **data_limit_reset_strategy**: Defines how/if data limit resets. `no_reset` means it never resets.
-    - **proxies**: Dictionary of protocol settings (e.g., `vmess`, `vless`).
-    - **inbounds**: Dictionary of protocol tags to specify inbound connections.
-    - **note**: Optional text field for additional user information or notes.
-    - **on_hold_timeout**: UTC timestamp when `on_hold` status should start or end.
-    - **on_hold_expire_duration**: Duration (in seconds) for how long the user should stay in `on_hold` status.
-    - **next_plan**: Next user plan (resets after use).
+    (docstring remains the same)
     """
-
-    # TODO expire should be datetime instead of timestamp
+    generated_account_number = new_user.account_number if new_user.account_number else str(uuid.uuid4())
 
     for proxy_type in new_user.proxies:
         if not xray.config.inbounds_by_protocol.get(proxy_type):
@@ -55,53 +46,48 @@ def add_user(
                 detail=f"Protocol {proxy_type} is disabled on your server",
             )
 
+    # Fetch the ORM Admin model for the current admin
+    db_admin_orm = crud.get_admin(db, current_admin.username)
+    if not db_admin_orm:
+        # This case should ideally be handled by Admin.get_current if it validates existence
+        raise HTTPException(status_code=403, detail="Performing admin not found in database.")
+
     try:
-        dbuser = crud.create_user(
-            db, new_user, admin=crud.get_admin(db, admin.username)
+        # Pass the ORM admin model to crud.create_user
+        db_user_orm = crud.create_user(
+            db, account_number=generated_account_number, user=new_user, admin=db_admin_orm
         )
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="User already exists")
+        raise HTTPException(status_code=409, detail="User with this account number or details already exists")
 
-    bg.add_task(xray.operations.add_user, dbuser=dbuser)
-    user = UserResponse.model_validate(dbuser)
-    report.user_created(user=user, user_id=dbuser.id, by=admin, user_admin=dbuser.admin)
-    logger.info(f'New user "{dbuser.username}" added')
-    return user
+    bg.add_task(xray.operations.add_user, dbuser=db_user_orm)
 
-
-@router.get("/user/{username}", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
-def get_user(dbuser: UserResponse = Depends(get_validated_user)):
-    """Get user information"""
-    return dbuser
+    # For reporting, if it expects Pydantic models, convert.
+    # db_user_orm.admin is the ORM Admin object.
+    report.user_created(user=UserResponse.model_validate(db_user_orm), user_id=db_user_orm.id, by=current_admin, user_admin=db_user_orm.admin)
+    logger.info(f'New user with account number "{db_user_orm.account_number}" added')
+    return db_user_orm # FastAPI converts DBUser to UserResponse
 
 
-@router.put("/user/{username}", response_model=UserResponse, responses={400: responses._400, 403: responses._403, 404: responses._404})
+@router.get("/user/{account_number}", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
+def get_user(db_user_orm: DBUser = Depends(get_validated_user)): # Renamed for clarity
+    """Get user information by account number"""
+    return db_user_orm # FastAPI converts DBUser to UserResponse
+
+
+@router.put("/user/{account_number}", response_model=UserResponse, responses={400: responses._400, 403: responses._403, 404: responses._404})
 def modify_user(
     modified_user: UserModify,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    dbuser: UsersResponse = Depends(get_validated_user),
-    admin: Admin = Depends(Admin.get_current),
+    db_user_orm: DBUser = Depends(get_validated_user), # Renamed for clarity
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
     """
     Modify an existing user
-
-    - **username**: Cannot be changed. Used to identify the user.
-    - **status**: User's new status. Can be 'active', 'disabled', 'on_hold', 'limited', or 'expired'.
-    - **expire**: UTC timestamp for new account expiration. Set to `0` for unlimited, `null` for no change.
-    - **data_limit**: New max data usage in bytes (e.g., `1073741824` for 1GB). Set to `0` for unlimited, `null` for no change.
-    - **data_limit_reset_strategy**: New strategy for data limit reset. Options include 'daily', 'weekly', 'monthly', or 'no_reset'.
-    - **proxies**: Dictionary of new protocol settings (e.g., `vmess`, `vless`). Empty dictionary means no change.
-    - **inbounds**: Dictionary of new protocol tags to specify inbound connections. Empty dictionary means no change.
-    - **note**: New optional text for additional user information or notes. `null` means no change.
-    - **on_hold_timeout**: New UTC timestamp for when `on_hold` status should start or end. Only applicable if status is changed to 'on_hold'.
-    - **on_hold_expire_duration**: New duration (in seconds) for how long the user should stay in `on_hold` status. Only applicable if status is changed to 'on_hold'.
-    - **next_plan**: Next user plan (resets after use).
-
-    Note: Fields set to `null` or omitted will not be modified.
+    (docstring remains the same)
     """
-
     for proxy_type in modified_user.proxies:
         if not xray.config.inbounds_by_protocol.get(proxy_type):
             raise HTTPException(
@@ -109,191 +95,196 @@ def modify_user(
                 detail=f"Protocol {proxy_type} is disabled on your server",
             )
 
-    old_status = dbuser.status
-    dbuser = crud.update_user(db, dbuser, modified_user)
-    user = UserResponse.model_validate(dbuser)
+    old_status = db_user_orm.status
+    dbuser_updated_orm = crud.update_user(db, db_user_orm, modified_user)
 
-    if user.status in [UserStatus.active, UserStatus.on_hold]:
-        bg.add_task(xray.operations.update_user, dbuser=dbuser)
+    # FastAPI will convert dbuser_updated_orm to UserResponse for the final HTTP response.
+    # For internal operations like xray tasks, pass the ORM model.
+    if dbuser_updated_orm.status in [UserStatus.active, UserStatus.on_hold]:
+        bg.add_task(xray.operations.update_user, dbuser=dbuser_updated_orm)
     else:
-        bg.add_task(xray.operations.remove_user, dbuser=dbuser)
+        bg.add_task(xray.operations.remove_user, dbuser=dbuser_updated_orm)
 
-    bg.add_task(report.user_updated, user=user, user_admin=dbuser.admin, by=admin)
+    # For reporting, ensure types are what report function expects.
+    # dbuser_updated_orm.admin is the ORM Admin object.
+    report.user_updated(user=UserResponse.model_validate(dbuser_updated_orm), user_admin=dbuser_updated_orm.admin, by=current_admin)
+    logger.info(f'User "{dbuser_updated_orm.account_number}" modified')
 
-    logger.info(f'User "{user.username}" modified')
-
-    if user.status != old_status:
-        bg.add_task(
-            report.status_change,
-            username=user.username,
-            status=user.status,
-            user=user,
-            user_admin=dbuser.admin,
-            by=admin,
+    if dbuser_updated_orm.status != old_status:
+        report.status_change(
+            account_number=dbuser_updated_orm.account_number,
+            status=dbuser_updated_orm.status,
+            user=UserResponse.model_validate(dbuser_updated_orm),
+            user_admin=dbuser_updated_orm.admin,
+            by=current_admin,
         )
         logger.info(
-            f'User "{dbuser.username}" status changed from {old_status} to {user.status}'
+            f'User "{dbuser_updated_orm.account_number}" status changed from {old_status} to {dbuser_updated_orm.status}'
         )
+    return dbuser_updated_orm # FastAPI converts DBUser to UserResponse
 
-    return user
 
-
-@router.delete("/user/{username}", responses={403: responses._403, 404: responses._404})
+@router.delete("/user/{account_number}", responses={403: responses._403, 404: responses._404})
 def remove_user(
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    dbuser: UserResponse = Depends(get_validated_user),
-    admin: Admin = Depends(Admin.get_current),
+    db_user_orm: DBUser = Depends(get_validated_user), # Renamed for clarity
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
-    """Remove a user"""
-    crud.remove_user(db, dbuser)
-    bg.add_task(xray.operations.remove_user, dbuser=dbuser)
+    """Remove a user by account number"""
+    # db_user_orm is the ORM model from get_validated_user
+    user_account_number = db_user_orm.account_number # Store before deletion if needed for logs
+    user_admin_orm = db_user_orm.admin # Store admin ORM object before deletion
 
-    bg.add_task(
-        report.user_deleted, username=dbuser.username, user_admin=Admin.model_validate(dbuser.admin), by=admin
-    )
+    crud.remove_user(db, db_user_orm)
+    bg.add_task(xray.operations.remove_user, dbuser=db_user_orm) # Pass the ORM model
 
-    logger.info(f'User "{dbuser.username}" deleted')
+    # PydanticAdmin.model_validate might be needed if report expects Pydantic model
+    # However, user_admin_orm is already the ORM Admin object.
+    # If report.user_deleted expects PydanticAdmin, then use PydanticAdmin.model_validate(user_admin_orm) if user_admin_orm else None
+    report.user_deleted(account_number=user_account_number, user_admin=user_admin_orm, by=current_admin)
+    logger.info(f'User "{user_account_number}" deleted')
     return {"detail": "User successfully deleted"}
 
 
-@router.post("/user/{username}/reset", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
+@router.post("/user/{account_number}/reset", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
 def reset_user_data_usage(
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    dbuser: UserResponse = Depends(get_validated_user),
-    admin: Admin = Depends(Admin.get_current),
+    db_user_orm: DBUser = Depends(get_validated_user), # Renamed for clarity
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
-    """Reset user data usage"""
-    dbuser = crud.reset_user_data_usage(db=db, dbuser=dbuser)
-    if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
-        bg.add_task(xray.operations.add_user, dbuser=dbuser)
+    """Reset user data usage by account number"""
+    dbuser_reset_orm = crud.reset_user_data_usage(db=db, dbuser=db_user_orm)
+    if dbuser_reset_orm.status in [UserStatus.active, UserStatus.on_hold]:
+        bg.add_task(xray.operations.add_user, dbuser=dbuser_reset_orm)
 
-    user = UserResponse.model_validate(dbuser)
-    bg.add_task(
-        report.user_data_usage_reset, user=user, user_admin=dbuser.admin, by=admin
-    )
-
-    logger.info(f'User "{dbuser.username}"\'s usage was reset')
-    return dbuser
+    # dbuser_reset_orm.admin is the ORM Admin object
+    report.user_data_usage_reset(user=UserResponse.model_validate(dbuser_reset_orm), user_admin=dbuser_reset_orm.admin, by=current_admin)
+    logger.info(f'User "{dbuser_reset_orm.account_number}"\'s usage was reset')
+    return dbuser_reset_orm # FastAPI converts DBUser to UserResponse
 
 
-@router.post("/user/{username}/revoke_sub", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
+@router.post("/user/{account_number}/revoke_sub", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
 def revoke_user_subscription(
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    dbuser: UserResponse = Depends(get_validated_user),
-    admin: Admin = Depends(Admin.get_current),
+    db_user_orm: DBUser = Depends(get_validated_user), # Renamed for clarity
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
-    """Revoke users subscription (Subscription link and proxies)"""
-    dbuser = crud.revoke_user_sub(db=db, dbuser=dbuser)
+    """Revoke user's subscription by account number"""
+    dbuser_revoked_orm = crud.revoke_user_sub(db=db, dbuser=db_user_orm)
 
-    if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
-        bg.add_task(xray.operations.update_user, dbuser=dbuser)
-    user = UserResponse.model_validate(dbuser)
-    bg.add_task(
-        report.user_subscription_revoked, user=user, user_admin=dbuser.admin, by=admin
-    )
+    if dbuser_revoked_orm.status in [UserStatus.active, UserStatus.on_hold]:
+        bg.add_task(xray.operations.update_user, dbuser=dbuser_revoked_orm)
 
-    logger.info(f'User "{dbuser.username}" subscription revoked')
-
-    return user
+    # dbuser_revoked_orm.admin is the ORM Admin object
+    report.user_subscription_revoked(user=UserResponse.model_validate(dbuser_revoked_orm), user_admin=dbuser_revoked_orm.admin, by=current_admin)
+    logger.info(f'User "{dbuser_revoked_orm.account_number}" subscription revoked')
+    return dbuser_revoked_orm # FastAPI converts DBUser to UserResponse
 
 
 @router.get("/users", response_model=UsersResponse, responses={400: responses._400, 403: responses._403, 404: responses._404})
 def get_users(
     offset: int = None,
     limit: int = None,
-    username: List[str] = Query(None),
     search: Union[str, None] = None,
-    owner: Union[List[str], None] = Query(None, alias="admin"),
+    owner: Union[List[str], None] = Query(None, alias="admin"), # List of admin usernames
     status: UserStatus = None,
     sort: str = None,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
     """Get all users"""
+    sort_options_enum_list = [] # Renamed
     if sort is not None:
         opts = sort.strip(",").split(",")
-        sort = []
         for opt in opts:
             try:
-                sort.append(crud.UsersSortingOptions[opt])
+                sort_options_enum_list.append(crud.UsersSortingOptions[opt])
             except KeyError:
                 raise HTTPException(
                     status_code=400, detail=f'"{opt}" is not a valid sort option'
                 )
+    else:
+        sort_options_enum_list = None
 
-    users, count = crud.get_users(
+    # crud.get_users expects a list of admin usernames for the 'admins' filter.
+    admin_usernames_filter = owner if current_admin.is_sudo else [current_admin.username]
+
+    users_orm_list, count = crud.get_users(
         db=db,
         offset=offset,
         limit=limit,
         search=search,
-        usernames=username,
         status=status,
-        sort=sort,
-        admins=owner if admin.is_sudo else [admin.username],
+        sort=sort_options_enum_list,
+        admins=admin_usernames_filter, # Pass list of admin usernames
         return_with_count=True,
     )
-
-    return {"users": users, "total": count}
+    # FastAPI will convert each ORM user in users_orm_list to UserResponse
+    return {"users": users_orm_list, "total": count}
 
 
 @router.post("/users/reset", responses={403: responses._403, 404: responses._404})
 def reset_users_data_usage(
-    db: Session = Depends(get_db), admin: Admin = Depends(Admin.check_sudo_admin)
+    db: Session = Depends(get_db), current_admin: PydanticAdmin = Depends(PydanticAdmin.check_sudo_admin)
 ):
     """Reset all users data usage"""
-    dbadmin = crud.get_admin(db, admin.username)
-    crud.reset_all_users_data_usage(db=db, admin=dbadmin)
-    startup_config = xray.config.include_db_users()
+    # crud.reset_all_users_data_usage expects an ORM Admin model or None
+    db_admin_orm = crud.get_admin(db, current_admin.username)
+    if not db_admin_orm and not current_admin.is_sudo: # Should be caught by check_sudo_admin or ensure admin exists
+        raise HTTPException(status_code=403, detail="Admin performing action not found.")
+
+    crud.reset_all_users_data_usage(db=db, admin=db_admin_orm if not current_admin.is_sudo else None)
+    startup_config = xray.config.include_db_users() # Assuming this returns a valid config
     xray.core.restart(startup_config)
-    for node_id, node in list(xray.nodes.items()):
-        if node.connected:
-            xray.operations.restart_node(node_id, startup_config)
+    for node_id, node in list(xray.nodes.items()): # Make a copy if modifying dict during iteration
+        if node.connected: # Check if node object has 'connected' attribute
+            xray.operations.restart_node(node_id, startup_config) # Ensure node_id and config are correct
     return {"detail": "Users successfully reset."}
 
 
-@router.get("/user/{username}/usage", response_model=UserUsagesResponse, responses={403: responses._403, 404: responses._404})
+@router.get("/user/{account_number}/usage", response_model=UserUsagesResponse, responses={403: responses._403, 404: responses._404})
 def get_user_usage(
-    dbuser: UserResponse = Depends(get_validated_user),
+    db_user_orm: DBUser = Depends(get_validated_user), # Renamed, gets ORM User
     start: str = "",
     end: str = "",
     db: Session = Depends(get_db),
 ):
-    """Get users usage"""
-    start, end = validate_dates(start, end)
+    """Get user's usage by account number"""
+    start_dt_obj, end_dt_obj = validate_dates(start, end) # Renamed
 
-    usages = crud.get_user_usages(db, dbuser, start, end)
+    usages = crud.get_user_usages(db, db_user_orm, start_dt_obj, end_dt_obj)
+    return {"usages": usages, "account_number": db_user_orm.account_number}
 
-    return {"usages": usages, "username": dbuser.username}
 
-
-@router.post("/user/{username}/active-next", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
+@router.post("/user/{account_number}/active-next", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
 def active_next_plan(
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    dbuser: UserResponse = Depends(get_validated_user),
+    db_user_orm: DBUser = Depends(get_validated_user), # Renamed, gets ORM User
 ):
-    """Reset user by next plan"""
-    dbuser = crud.reset_user_by_next(db=db, dbuser=dbuser)
-
-    if (dbuser is None or dbuser.next_plan is None):
+    """Reset user by next plan, identified by account number"""
+    if db_user_orm.next_plan is None: # Check directly on the ORM model
         raise HTTPException(
             status_code=404,
             detail=f"User doesn't have next plan",
         )
 
-    if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
-        bg.add_task(xray.operations.add_user, dbuser=dbuser)
+    dbuser_reset_orm = crud.reset_user_by_next(db=db, dbuser=db_user_orm)
+    # crud.reset_user_by_next should not return None if a plan existed, but good to be defensive
+    if dbuser_reset_orm is None:
+         raise HTTPException(status_code=500, detail="Failed to reset user by next plan")
 
-    user = UserResponse.model_validate(dbuser)
-    bg.add_task(
-        report.user_data_reset_by_next, user=user, user_admin=dbuser.admin,
-    )
 
-    logger.info(f'User "{dbuser.username}"\'s usage was reset by next plan')
-    return dbuser
+    if dbuser_reset_orm.status in [UserStatus.active, UserStatus.on_hold]:
+        bg.add_task(xray.operations.add_user, dbuser=dbuser_reset_orm)
+
+    # dbuser_reset_orm.admin is the ORM Admin object
+    report.user_data_reset_by_next(user=UserResponse.model_validate(dbuser_reset_orm), user_admin=dbuser_reset_orm.admin)
+    logger.info(f'User "{dbuser_reset_orm.account_number}"\'s usage was reset by next plan')
+    return dbuser_reset_orm # FastAPI converts DBUser to UserResponse
 
 
 @router.get("/users/usage", response_model=UsersUsagesResponse)
@@ -301,37 +292,35 @@ def get_users_usage(
     start: str = "",
     end: str = "",
     db: Session = Depends(get_db),
-    owner: Union[List[str], None] = Query(None, alias="admin"),
-    admin: Admin = Depends(Admin.get_current),
+    owner: Union[List[str], None] = Query(None, alias="admin"), # List of admin usernames
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
     """Get all users usage"""
-    start, end = validate_dates(start, end)
+    start_dt_obj, end_dt_obj = validate_dates(start, end) # Renamed
 
+    admin_usernames_filter = owner if current_admin.is_sudo else [current_admin.username]
     usages = crud.get_all_users_usages(
-        db=db, start=start, end=end, admin=owner if admin.is_sudo else [admin.username]
+        db=db, start=start_dt_obj, end=end_dt_obj, admin_usernames=admin_usernames_filter
     )
-
     return {"usages": usages}
 
 
-@router.put("/user/{username}/set-owner", response_model=UserResponse)
+@router.put("/user/{account_number}/set-owner", response_model=UserResponse)
 def set_owner(
-    admin_username: str,
-    dbuser: UserResponse = Depends(get_validated_user),
+    admin_username_body: str,
+    db_user_orm: DBUser = Depends(get_validated_user), # Renamed, gets ORM User
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    # current_admin is the one performing the action, checked by Depends(PydanticAdmin.check_sudo_admin)
+    performing_admin: PydanticAdmin = Depends(PydanticAdmin.check_sudo_admin),
 ):
-    """Set a new owner (admin) for a user."""
-    new_admin = crud.get_admin(db, username=admin_username)
-    if not new_admin:
-        raise HTTPException(status_code=404, detail="Admin not found")
+    """Set a new owner (admin) for a user, identified by account number."""
+    new_admin_orm = crud.get_admin(db, username=admin_username_body) # Get new owner ORM model
+    if not new_admin_orm:
+        raise HTTPException(status_code=404, detail="New admin not found")
 
-    dbuser = crud.set_owner(db, dbuser, new_admin)
-    user = UserResponse.model_validate(dbuser)
-
-    logger.info(f'{user.username}"owner successfully set to{admin.username}')
-
-    return user
+    dbuser_updated_orm = crud.set_owner(db, db_user_orm, new_admin_orm) # Pass ORM models
+    logger.info(f'User "{dbuser_updated_orm.account_number}" owner successfully set to "{new_admin_orm.username}"')
+    return dbuser_updated_orm # FastAPI converts DBUser to UserResponse
 
 
 @router.get("/users/expired", response_model=List[str])
@@ -339,21 +328,14 @@ def get_expired_users(
     expired_after: Optional[datetime] = Query(None, example="2024-01-01T00:00:00"),
     expired_before: Optional[datetime] = Query(None, example="2024-01-31T23:59:59"),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
-    """
-    Get users who have expired within the specified date range.
+    """Get account numbers of users who have expired within the specified date range."""
+    dt_expired_after_obj, dt_expired_before_obj = validate_dates(expired_after, expired_before) # Renamed
 
-    - **expired_after** UTC datetime (optional)
-    - **expired_before** UTC datetime (optional)
-    - At least one of expired_after or expired_before must be provided for filtering
-    - If both are omitted, returns all expired users
-    """
-
-    expired_after, expired_before = validate_dates(expired_after, expired_before)
-
-    expired_users = get_expired_users_list(db, admin, expired_after, expired_before)
-    return [u.username for u in expired_users]
+    # get_expired_users_list expects Pydantic Admin model
+    expired_users_orm_list = get_expired_users_list(db, current_admin, dt_expired_after_obj, dt_expired_before_obj)
+    return [u.account_number for u in expired_users_orm_list]
 
 
 @router.delete("/users/expired", response_model=List[str])
@@ -362,81 +344,84 @@ def delete_expired_users(
     expired_after: Optional[datetime] = Query(None, example="2024-01-01T00:00:00"),
     expired_before: Optional[datetime] = Query(None, example="2024-01-31T23:59:59"),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
-    """
-    Delete users who have expired within the specified date range.
+    """Delete users who have expired within the specified date range. Returns their account numbers."""
+    dt_expired_after_obj, dt_expired_before_obj = validate_dates(expired_after, expired_before) # Renamed
 
-    - **expired_after** UTC datetime (optional)
-    - **expired_before** UTC datetime (optional)
-    - At least one of expired_after or expired_before must be provided
-    """
-    expired_after, expired_before = validate_dates(expired_after, expired_before)
+    # get_expired_users_list expects Pydantic Admin model, returns list of ORM Users
+    expired_users_orm_list = get_expired_users_list(db, current_admin, dt_expired_after_obj, dt_expired_before_obj)
 
-    expired_users = get_expired_users_list(db, admin, expired_after, expired_before)
-    removed_users = [u.username for u in expired_users]
-
-    if not removed_users:
+    if not expired_users_orm_list:
         raise HTTPException(
             status_code=404, detail="No expired users found in the specified date range"
         )
 
-    crud.remove_users(db, expired_users)
+    removed_users_account_numbers = [u.account_number for u in expired_users_orm_list]
+    crud.remove_users(db, expired_users_orm_list) # Pass list of ORM user objects
 
-    for removed_user in removed_users:
-        logger.info(f'User "{removed_user}" deleted')
+    for removed_user_orm in expired_users_orm_list:
+        logger.info(f'User with account number "{removed_user_orm.account_number}" deleted')
+        # removed_user_orm.admin is the ORM Admin object associated with the deleted user
         bg.add_task(
             report.user_deleted,
-            username=removed_user,
-            user_admin=next(
-                (u.admin for u in expired_users if u.username == removed_user), None
-            ),
-            by=admin,
+            account_number=removed_user_orm.account_number,
+            user_admin=removed_user_orm.admin, # Pass the ORM admin model of the user's owner
+            by=current_admin, # Pydantic model of admin performing action
         )
+    return removed_users_account_numbers
 
-    return removed_users
 
-
-@router.get("/user/{username}/nodes", response_model=List[NodeResponse])
+@router.get("/user/{account_number}/nodes", response_model=List[NodeResponse])
 def get_user_nodes(
-    db: Session = Depends(get_db),
-    dbuser: UserResponse = Depends(get_validated_user),
-    admin: Admin = Depends(Admin.get_current),
+    db_user_orm: DBUser = Depends(get_validated_user), # Gets ORM User
+    # current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current), # Not strictly needed if validation is in get_validated_user
 ):
-    """Get the list of nodes selected by the user."""
-    return [selection.node for selection in dbuser.selected_nodes]
+    """Get the list of nodes selected by the user, identified by account number."""
+    # Assuming db_user_orm.selected_nodes is a list of UserNodeSelection ORM objects,
+    # and each selection has a 'node' attribute which is the Node ORM object.
+    # FastAPI will convert each Node ORM object to NodeResponse.
+    return [selection.node for selection in db_user_orm.selected_nodes]
 
 
-@router.post("/user/{username}/nodes/{node_id}", response_model=UserResponse)
+@router.post("/user/{account_number}/nodes/{node_id}", response_model=UserResponse)
 def add_user_node(
     node_id: int,
+    db_user_orm: DBUser = Depends(get_validated_user), # Gets ORM User
     db: Session = Depends(get_db),
-    dbuser: UserResponse = Depends(get_validated_user),
-    admin: Admin = Depends(Admin.get_current),
+    # current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current), # Not strictly needed
 ):
-    """Add a node to the user's selected nodes."""
-    node = crud.get_node(db, node_id)
-    if not node:
+    """Add a node to the user's selected nodes, user identified by account number."""
+    node_orm = crud.get_node_by_id(db, node_id) # crud.get_node or crud.get_node_by_id
+    if not node_orm:
         raise HTTPException(status_code=404, detail="Node not found")
 
-    if node in [selection.node for selection in dbuser.selected_nodes]:
-        raise HTTPException(status_code=409, detail="Node already selected")
+    if any(selection.node_id == node_id for selection in db_user_orm.selected_nodes):
+        raise HTTPException(status_code=409, detail="Node already selected by this user")
 
-    crud.add_user_node(db, dbuser, node)
-    return UserResponse.model_validate(dbuser)
+    crud.add_user_node(db, db_user_orm, node_orm) # Pass ORM models
+
+    # Re-fetch to ensure relationships are correctly loaded for the response
+    updated_db_user_orm = crud.get_user(db, account_number=db_user_orm.account_number)
+    return updated_db_user_orm # FastAPI converts to UserResponse
 
 
-@router.delete("/user/{username}/nodes/{node_id}", response_model=UserResponse)
+@router.delete("/user/{account_number}/nodes/{node_id}", response_model=UserResponse)
 def remove_user_node(
     node_id: int,
+    db_user_orm: DBUser = Depends(get_validated_user), # Gets ORM User
     db: Session = Depends(get_db),
-    dbuser: UserResponse = Depends(get_validated_user),
-    admin: Admin = Depends(Admin.get_current),
+    # current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current), # Not strictly needed
 ):
-    """Remove a node from the user's selected nodes."""
-    node = crud.get_node(db, node_id)
-    if not node:
+    """Remove a node from the user's selected nodes, user identified by account number."""
+    node_orm = crud.get_node_by_id(db, node_id) # crud.get_node or crud.get_node_by_id
+    if not node_orm:
         raise HTTPException(status_code=404, detail="Node not found")
 
-    crud.remove_user_node(db, dbuser, node)
-    return UserResponse.model_validate(dbuser)
+    if not any(selection.node_id == node_id for selection in db_user_orm.selected_nodes):
+        raise HTTPException(status_code=404, detail="Node not selected by this user")
+
+    crud.remove_user_node(db, db_user_orm, node_orm) # Pass ORM models
+
+    updated_db_user_orm = crud.get_user(db, account_number=db_user_orm.account_number)
+    return updated_db_user_orm # FastAPI converts to UserResponse

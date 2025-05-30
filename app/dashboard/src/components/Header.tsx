@@ -69,7 +69,7 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
   const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
 
   const isSudo = () => {
-    if (!getUserIsPending && getUserIsSuccess) {
+    if (!getUserIsPending && getUserIsSuccess && userData) { // Added check for userData
       return userData.is_sudo;
     }
     return false;
@@ -106,7 +106,7 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
       </Text>
       <Box overflow="auto" css={{ direction: "rtl" }}>
         <HStack alignItems="center">
-          <Menu>
+          <Menu onClose={handleOnClose}> {/* Assuming handleOnClose was meant for Menu */}
             <MenuButton
               as={IconButton}
               size="sm"
@@ -114,6 +114,7 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
               icon={
                 <>
                   <SettingsIcon />
+                  {/* Logic for NotificationCircle would go here if needed */}
                 </>
               }
               position="relative"
@@ -183,7 +184,7 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
             variant="outline"
             aria-label="switch theme"
             onClick={() => {
-              updateThemeColor(colorMode == "dark" ? "light" : "dark");
+              updateThemeColor(colorMode === "dark" ? "light" : "dark");
               toggleColorMode();
             }}
           >

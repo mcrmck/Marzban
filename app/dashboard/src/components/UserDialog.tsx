@@ -51,6 +51,8 @@ import {
   User,
   UserCreate,
   UserInbounds,
+  Status,
+  DataLimitResetStrategy,
 } from "types/User";
 import { relativeExpiryDate } from "utils/dateFormatter";
 import { z } from "zod";
@@ -85,8 +87,30 @@ const UserUsageIcon = chakra(ChartPieIcon, {
 
 export type UserDialogProps = {};
 
-export type FormType = Pick<UserCreate, keyof UserCreate> & {
-  selected_proxies: ProxyKeys;
+export type FormType = {
+  account_number: string;
+  proxies: ProxyType;
+  expire: number | null;
+  data_limit: number | null;
+  data_limit_reset_strategy: DataLimitResetStrategy;
+  on_hold_expire_duration: number | null;
+  status: Status;
+  note: string;
+  inbounds: UserInbounds;
+  selected_proxies: string[];
+};
+
+const defaultValues: FormType = {
+  selected_proxies: [],
+  data_limit: null,
+  expire: null,
+  account_number: "",
+  data_limit_reset_strategy: "no_reset",
+  status: "active",
+  on_hold_expire_duration: null,
+  note: "",
+  inbounds: {},
+  proxies: {},
 };
 
 const formatUser = (user: User): FormType => {
@@ -101,6 +125,7 @@ const formatUser = (user: User): FormType => {
     selected_proxies: Object.keys(user.proxies) as ProxyKeys,
   };
 };
+
 const getDefaultValues = (): FormType => {
   const defaultInbounds = Object.fromEntries(useDashboard.getState().inbounds);
   const inbounds: UserInbounds = {};
@@ -108,10 +133,10 @@ const getDefaultValues = (): FormType => {
     inbounds[key] = defaultInbounds[key].map((i) => i.tag);
   }
   return {
-    selected_proxies: Object.keys(defaultInbounds) as ProxyKeys,
+    selected_proxies: [],
     data_limit: null,
     expire: null,
-    username: "",
+    account_number: "",
     data_limit_reset_strategy: "no_reset",
     status: "active",
     on_hold_expire_duration: null,
@@ -127,7 +152,7 @@ const getDefaultValues = (): FormType => {
 };
 
 const mergeProxies = (
-  proxyKeys: ProxyKeys,
+  proxyKeys: string[],
   proxyType: ProxyType | undefined
 ): ProxyType => {
   const proxies: ProxyType = proxyKeys.reduce(
@@ -136,18 +161,16 @@ const mergeProxies = (
   );
   if (!proxyType) return proxies;
   proxyKeys.forEach((proxy) => {
-    if (proxyType[proxy]) {
-      proxies[proxy] = proxyType[proxy];
+    if (proxyType[proxy as keyof ProxyType]) {
+      proxies[proxy as keyof ProxyType] = proxyType[proxy as keyof ProxyType];
     }
   });
   return proxies;
 };
 
 const baseSchema = {
-  username: z.string().min(1, { message: "Required" }),
-  selected_proxies: z.array(z.string()).refine((value) => value.length > 0, {
-    message: "userDialog.selectOneProtocol",
-  }),
+  account_number: z.string().min(1, { message: "Required" }),
+  selected_proxies: z.array(z.string()).optional().default([]),
   note: z.string().nullable(),
   proxies: z
     .record(z.string(), z.record(z.string(), z.any()))
@@ -313,7 +336,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
         toast({
           title: t(
             isEditing ? "userDialog.userEdited" : "userDialog.userCreated",
-            { username: values.username }
+            { username: values.account_number }
           ),
           status: "success",
           isClosable: true,
@@ -329,7 +352,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
           Object.keys(err.response._data.detail).forEach((key) => {
             setError(err?.response._data.detail[key] as string);
             form.setError(
-              key as "proxies" | "username" | "data_limit" | "expire",
+              key as "proxies" | "account_number" | "data_limit" | "expire",
               {
                 type: "custom",
                 message: err.response._data.detail[key],
@@ -421,7 +444,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                         <FormControl mb={"10px"}>
                           <FormLabel>
                             <Flex gap={2} alignItems={"center"}>
-                              {t("username")}
+                              {t("accountNumber")}
                               {!isEditing && (
                                 <ReloadIcon
                                   cursor={"pointer"}
@@ -431,7 +454,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                   onClick={() => {
                                     const randomUsername =
                                       createRandomUsername();
-                                    form.setValue("username", randomUsername);
+                                    form.setValue("account_number", randomUsername);
                                     setTimeout(() => {
                                       setrandomUsernameLoading(false);
                                     }, 350);
@@ -445,9 +468,9 @@ export const UserDialog: FC<UserDialogProps> = () => {
                               size="sm"
                               type="text"
                               borderRadius="6px"
-                              error={form.formState.errors.username?.message}
+                              error={form.formState.errors.account_number?.message}
                               disabled={disabled || isEditing}
-                              {...form.register("username")}
+                              {...form.register("account_number")}
                             />
                             {isEditing && (
                               <HStack px={1}>

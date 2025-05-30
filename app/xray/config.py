@@ -364,7 +364,7 @@ class XRayConfig(dict):
         with GetDB() as db:
             query = db.query(
                 db_models.User.id,
-                db_models.User.username,
+                db_models.User.account_number,
                 func.lower(db_models.Proxy.type).label('type'),
                 db_models.Proxy.settings,
                 func.group_concat(db_models.excluded_inbounds_association.c.inbound_tag).label('excluded_inbound_tags')
@@ -378,7 +378,7 @@ class XRayConfig(dict):
             ).group_by(
                 func.lower(db_models.Proxy.type),
                 db_models.User.id,
-                db_models.User.username,
+                db_models.User.account_number,
                 db_models.Proxy.settings,
             )
             result = query.all()
@@ -388,7 +388,7 @@ class XRayConfig(dict):
             for row in result:
                 grouped_data[row.type].append((
                     row.id,
-                    row.username,
+                    row.account_number,
                     row.settings,
                     [i for i in row.excluded_inbound_tags.split(',') if i] if row.excluded_inbound_tags else None
                 ))
@@ -403,13 +403,13 @@ class XRayConfig(dict):
                     clients = config.get_inbound(inbound['tag'])['settings']['clients']
 
                     for row in rows:
-                        user_id, username, settings, excluded_inbound_tags = row
+                        user_id, account_number, settings, excluded_inbound_tags = row
 
                         if excluded_inbound_tags and inbound['tag'] in excluded_inbound_tags:
                             continue
 
                         client = {
-                            "email": f"{user_id}.{username}",
+                            "email": f"{user_id}.{account_number}",
                             **settings
                         }
 

@@ -17,6 +17,7 @@ import { useDashboard } from "contexts/DashboardContext";
 import { FC, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Icon } from "./Icon";
+import { User } from "types/User"; // Added import
 
 export const DeleteIcon = chakra(TrashIcon, {
   baseStyle: {
@@ -26,71 +27,51 @@ export const DeleteIcon = chakra(TrashIcon, {
 });
 
 export type DeleteUserModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  user: User;
   deleteCallback?: () => void;
 };
 
-export const DeleteUserModal: FC<DeleteUserModalProps> = () => {
-  const [loading, setLoading] = useState(false);
-  const { deletingUser: user, onDeletingUser, deleteUser } = useDashboard();
+export const DeleteUserModal: FC<DeleteUserModalProps> = ({ isOpen, onClose, user }) => {
   const { t } = useTranslation();
-  const toast = useToast();
-  const onClose = () => {
-    onDeletingUser(null);
-  };
-  const onDelete = () => {
-    if (user) {
-      setLoading(true);
-      deleteUser(user)
-        .then(() => {
-          toast({
-            title: t("deleteUser.deleteSuccess", { username: user.username }),
-            status: "success",
-            isClosable: true,
-            position: "top",
-            duration: 3000,
-          });
-        })
-        .then(onClose)
-        .finally(setLoading.bind(null, false));
+  const { deleteUser } = useDashboard();
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteUser(user); // Changed from user.account_number to user
+      onClose();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsDeleting(false);
     }
   };
+
   return (
-    <Modal isCentered isOpen={!!user} onClose={onClose} size="sm">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3">
-        <ModalHeader pt={6}>
-          <Icon color="red">
-            <DeleteIcon />
-          </Icon>
-        </ModalHeader>
-        <ModalCloseButton mt={3} />
+    <Modal isOpen={isOpen} onClose={onClose}>
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>{t("deleteUser")}</ModalHeader>
+        <ModalCloseButton />
         <ModalBody>
-          <Text fontWeight="semibold" fontSize="lg">
-            {t("deleteUser.title")}
+          <Text>
+            {/* Using user.account_number for display is fine */}
+            <Trans i18nKey="deleteUserConfirm" values={{ account_number: user.account_number }}>
+              Are you sure you want to delete user {{ account_number: user.account_number }}? This action cannot be undone.
+            </Trans>
           </Text>
-          {user && (
-            <Text
-              mt={1}
-              fontSize="sm"
-              _dark={{ color: "gray.400" }}
-              color="gray.600"
-            >
-              <Trans components={{ b: <b /> }}>
-                {t("deleteUser.prompt", { username: user.username })}
-              </Trans>
-            </Text>
-          )}
         </ModalBody>
-        <ModalFooter display="flex">
-          <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
+        <ModalFooter>
+          <Button variant="ghost" mr={3} onClick={onClose}>
             {t("cancel")}
           </Button>
           <Button
-            size="sm"
-            w="full"
             colorScheme="red"
-            onClick={onDelete}
-            leftIcon={loading ? <Spinner size="xs" /> : undefined}
+            onClick={handleDelete}
+            isLoading={isDeleting}
           >
             {t("delete")}
           </Button>

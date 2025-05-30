@@ -88,7 +88,7 @@
   "login": "Login",
   "login.fieldRequired": "This field is required",
   "login.loginYourAccount": "Login to your account",
-  "login.welcomeBack": "Welcome back, please enter your details",
+  "login.welcomeBack": "Welcome back, please TEST TEST TEST your details",
   "memoryUsage": "memory usage",
   "next": "Next",
   "nodes.addHostForEveryInbound": "Add this node as a new host for every inbound",
@@ -178,7 +178,6 @@
   "userDialog.vmessDesc": "Fast and secure",
   "userDialog.warningNoProtocol": "Please select at least one protocol",
   "userDialog.weeks": "Weeks",
-  "username": "Username",
   "users": "Users",
   "usersTable.copied": "Copied",
   "usersTable.copyConfigs": "Copy Configs",
@@ -187,5 +186,7 @@
   "usersTable.noUser": "There is no user added to the system",
   "usersTable.noUserMatched": "It seems there is no user matched with what you are looking for",
   "usersTable.status": "status",
-  "usersTable.total": "Total"
+  "usersTable.total": "Total",
+  "usersTable.accountNumber": "Account Number",
+  "usersTable.copyConfigs": "Copy All Configs"
 }

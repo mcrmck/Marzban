@@ -1,4 +1,0 @@
-[flake8]
-ignore = E,F,W
-max-line-length = 999
-max-complexity = 999
