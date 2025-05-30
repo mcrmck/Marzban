@@ -1,5 +1,5 @@
 from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer # Will be replaced for cookie auth
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
@@ -7,14 +7,21 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.db import get_db, crud
-from app.models.user import UserResponse
-from config import JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+from app.models.user import UserResponse # Ensure this is the Pydantic model
+from config import JWT_ACCESS_TOKEN_EXPIRE_MINUTES, PORTAL_JWT_SECRET_KEY # Using PORTAL_JWT_SECRET_KEY from config
 
-# This should be a secure secret key in production
-SECRET_KEY = "your-secret-key-here"  # TODO: Move to environment variables
+# Ensure PORTAL_JWT_SECRET_KEY is defined in your config.py or environment
+# Example: PORTAL_JWT_SECRET_KEY = "your-very-secure-secret-key-for-portal"
+# SECRET_KEY = os.getenv("PORTAL_JWT_SECRET_KEY", "a-default-fallback-secret-if-not-set") # Get from env
+SECRET_KEY = PORTAL_JWT_SECRET_KEY # Directly use from config import
 ALGORITHM = "HS256"
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# oauth2_scheme is not directly used by get_current_user for cookie auth anymore,
+# but can be kept if other parts of your API (not client-portal) use it for header-based auth.
+# For client portal cookie auth, we'll read directly from the request.
+# If tokenUrl is for a different auth system, it can remain.
+# If it was intended for client-portal login, it's superseded by the form post to /client-portal/token.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/client-portal/token") # Or adjust if tokenUrl is different
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -26,77 +33,101 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+async def get_current_user( # Renamed parameter for clarity
+    request: Request, # Changed dependency to Request to access cookies
     db: Session = Depends(get_db)
 ) -> UserResponse:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+        detail="Could not validate credentials - user not logged in", # More specific detail
+        headers={"WWW-Authenticate": "Bearer"}, # Keep for consistency if other parts use Bearer
     )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        account_number: str = payload.get("sub")
-        if account_number is None:
-            raise credentials_exception
-    except JWTError:
+
+    token = request.cookies.get("access_token")
+
+    if not token:
+        # print("[DEBUG] get_current_user: No access_token cookie found.")
         raise credentials_exception
 
-    # TODO: Implement actual user lookup from database
-    # For now, return a mock user for testing
-    return UserResponse(
-        id="1",
-        account_number=account_number,
-        is_active=True
-    )
+    if token.startswith("Bearer "):
+        token = token.split("Bearer ")[1]
+    else:
+        # print("[DEBUG] get_current_user: Token does not start with Bearer.")
+        # Depending on strictness, you might raise credentials_exception or try to decode anyway
+        # For now, let's be strict as we set it with "Bearer "
+        raise credentials_exception
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        account_number: Optional[str] = payload.get("sub")
+        if account_number is None:
+            # print("[DEBUG] get_current_user: Token payload does not contain 'sub' (account_number).")
+            raise credentials_exception
+    except JWTError as e:
+        # print(f"[DEBUG] get_current_user: JWTError decoding token: {e}")
+        raise credentials_exception
+    except Exception as e: # Catch any other decoding errors
+        # print(f"[DEBUG] get_current_user: Generic exception decoding token: {e}")
+        raise credentials_exception
+
+    # --- FETCH REAL USER FROM DB ---
+    db_user_orm = crud.get_user(db, account_number=account_number)
+
+    if not db_user_orm:
+        # print(f"[DEBUG] get_current_user: User with account_number '{account_number}' not found in DB.")
+        raise credentials_exception # Or a more specific "User not found" if desired
+
+    # --- VALIDATE WITH PYDANTIC ---
+    try:
+        # Ensure UserResponse.model_config has from_attributes = True
+        user = UserResponse.model_validate(db_user_orm)
+        # print(f"[DEBUG] get_current_user: Successfully validated user: {user.account_number}")
+        return user
+    except ValidationError as e:
+        # print(f"[DEBUG] get_current_user: Pydantic ValidationError for user '{account_number}': {e}")
+        # This case means DB data doesn't match Pydantic model, which is a server-side issue.
+        # For security, still raise credentials_exception to the client.
+        raise credentials_exception
+    except Exception as e:
+        # print(f"[DEBUG] get_current_user: Generic exception during Pydantic validation for user '{account_number}': {e}")
+        raise credentials_exception
 
 
 async def get_current_user_optional(
     request: Request,
-    db: Session = Depends(get_db) # <--- Inject the DB session
+    db: Session = Depends(get_db)
 ) -> Optional[UserResponse]:
     """
     Attempts to get the current user from the access_token cookie
-    by fetching from the database.
+    by fetching from the database. Returns None if not authenticated.
     """
     token = request.cookies.get("access_token")
 
     if not token:
         return None
 
+    # Ensure the "Bearer " prefix is handled consistently
     if token.startswith("Bearer "):
         token = token.split("Bearer ")[1]
     else:
+        # If the token doesn't have the prefix, it's likely invalid or not set by our system
         return None
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        account_number: str = payload.get("sub")
+        account_number: Optional[str] = payload.get("sub")
         if account_number is None:
             return None
 
-
-        # --- FETCH REAL USER FROM DB ---
-        db_user = crud.get_user(db, account_number=account_number) # Use CRUD function
-
-        if not db_user:
+        db_user_orm = crud.get_user(db, account_number=account_number)
+        if not db_user_orm:
             return None
 
-
-        # --- VALIDATE WITH PYDANTIC ---
-        try:
-            # Use model_validate for Pydantic v2.
-            # This requires UserResponse to be configured with from_attributes=True
-            user = UserResponse.model_validate(db_user)
-            return user
-        except ValidationError as e:
-            return None
-        # --- END VALIDATE ---
-
-    except JWTError as e:
+        user = UserResponse.model_validate(db_user_orm)
+        return user
+    except (JWTError, ValidationError): # Catch both JWT and Pydantic validation errors
         return None
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
+    except Exception: # Catch any other unexpected errors
+        # import traceback
+        # traceback.print_exc() # Good for server-side debugging
         return None

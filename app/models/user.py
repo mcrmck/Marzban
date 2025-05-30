@@ -1,4 +1,3 @@
-import re
 import secrets
 from datetime import datetime
 from enum import Enum
@@ -20,9 +19,6 @@ from app.subscription.share import generate_v2ray_links # Check if this uses use
 from app.utils.jwt import create_subscription_token # Check if this uses username
 from config import XRAY_SUBSCRIPTION_PATH, XRAY_SUBSCRIPTION_URL_PREFIX
 
-# USERNAME_REGEXP is not needed anymore
-# USERNAME_REGEXP = re.compile(r"^(?=\w{3,32}\b)[a-zA-Z0-9-_@.]+(?:_[a-zA-Z0-9-_@.]+)*$")
-
 
 class ReminderType(str, Enum):
     expiration_date = "expiration_date"
@@ -31,7 +27,7 @@ class ReminderType(str, Enum):
 
 class UserStatus(str, Enum):
     active = "active"
-    disabled = "disabled"
+    disabled = "disabled"  # Represents pending payment or manually disabled
     limited = "limited"
     expired = "expired"
     on_hold = "on_hold"
@@ -45,7 +41,8 @@ class UserStatusModify(str, Enum):
 
 class UserStatusCreate(str, Enum):
     active = "active"
-    on_hold = "on_hold" # No 'disabled' on create
+    on_hold = "on_hold"
+    disabled = "disabled" # Added: for initial registration, pending payment
 
 
 class UserDataLimitResetStrategy(str, Enum):
@@ -136,7 +133,7 @@ class UserCreate(User):
     # username: str # Removed
     # password: str # Removed, as per migration script logic
     account_number: Optional[str] = Field(None, description="Account number (UUID), auto-generated if not provided") # Made optional for auto-generation
-    status: UserStatusCreate = UserStatusCreate.active # Default to active
+    status: UserStatusCreate = UserStatusCreate.disabled # Changed default to disabled
     inbounds: Optional[Dict[str, List[str]]] = Field(default_factory=dict) # Default to empty dict
 
     model_config = ConfigDict(json_schema_extra={
@@ -161,7 +158,7 @@ class UserCreate(User):
             "expire": 0,
             "data_limit": 0,
             "data_limit_reset_strategy": "no_reset",
-            "status": "active",
+            "status": "disabled", # Updated example
             "note": "Sample user note",
             "on_hold_timeout": "2023-11-03T20:30:00",
             "on_hold_expire_duration": 0, # This would be problematic if status is on_hold
@@ -269,7 +266,7 @@ class UserModify(User):
         return excluded
 
     @field_validator("inbounds", mode="before")
-    def validate_inbounds(cls, inbounds, values, **kwargs):
+    def validate_inbounds_modify(cls, inbounds, values, **kwargs): # Renamed to avoid conflict
         if not inbounds: return {} # Allow empty inbounds on modify
 
         proxies_in_payload = values.data.get("proxies") # Check if proxies are being modified too
@@ -370,14 +367,15 @@ class UserResponse(User):
         # Call User.validate_proxies or its equivalent logic if needed for structure
         # For now, assuming `super().validate_proxies` or direct validation
         validated_proxies = {}
-        for proxy_type_key, settings_val in v.items():
-            try:
-                # Assuming ProxyTypes enum can be created from string key
-                proxy_type_enum = ProxyTypes(str(proxy_type_key))
-                validated_proxies[proxy_type_enum] = ProxySettings.from_dict(proxy_type_enum, settings_val if settings_val else {})
-            except ValueError:
-                # Handle invalid proxy_type_key if necessary
-                pass # Or log a warning
+        if v: # Ensure v is not None
+            for proxy_type_key, settings_val in v.items():
+                try:
+                    # Assuming ProxyTypes enum can be created from string key
+                    proxy_type_enum = ProxyTypes(str(proxy_type_key))
+                    validated_proxies[proxy_type_enum] = ProxySettings.from_dict(proxy_type_enum, settings_val if settings_val else {})
+                except ValueError:
+                    # Handle invalid proxy_type_key if necessary
+                    pass # Or log a warning
         return validated_proxies
 
 

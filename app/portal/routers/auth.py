@@ -5,15 +5,65 @@ from sqlalchemy.orm import Session
 
 from app.portal.auth import create_access_token
 from app.db import get_db, crud
-from app.models.user import UserCreate, UserStatusCreate # Make sure to import UserStatusCreate
-# from app.models.user import UserDataLimitResetStrategy # Import if used in UserCreate defaults
+from app.models.user import UserCreate, UserStatusCreate, UserStatus # Make sure UserStatus is imported if used directly
 
 import uuid
+import os
+from datetime import datetime # Import datetime
 
 router = APIRouter(prefix="/client-portal", tags=["Client Portal Auth"])
 templates = Jinja2Templates(directory="app/portal/templates")
+templates.env.globals['datetime'] = datetime # Make datetime available in templates
+templates.env.globals['UserStatus'] = UserStatus # Also ensure UserStatus enum is available if compared in templates
 
-# Password-related context and functions are removed as they are no longer needed.
+# ... (rest of your auth.py code)
+# Make sure placeholder filters from previous response are also handled here if base.html is rendered from auth routes directly
+# For example, if login_page or register_page directly render base.html without extending.
+# However, they extend base.html, so filters defined in main.py's template instance should be available if main.py is the primary entry.
+# To be safe, if these routes render templates that extend base.html, the globals should be consistent.
+# The Jinja filters like readable_bytes were added to main.py's templates instance.
+# If auth.py renders a page that itself extends base.html, it will use its own 'templates' instance.
+# Thus, globals and filters should ideally be defined centrally or on each instance.
+
+# For simplicity, adding the same filters here too, assuming they might be needed.
+def readable_bytes_filter_auth(size_in_bytes):
+    if size_in_bytes is None: return "Unlimited"
+    if size_in_bytes == 0 and isinstance(size_in_bytes, int): return "0 B"
+    if not isinstance(size_in_bytes, (int, float)) or size_in_bytes < 0:
+         return "N/A"
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size_in_bytes < 1024.0:
+            return f"{size_in_bytes:.1f} {unit}"
+        size_in_bytes /= 1024.0
+    return f"{size_in_bytes:.1f} PB"
+
+def timestamp_to_datetime_str_filter_auth(timestamp, format="%Y-%m-%d %H:%M"):
+    if timestamp is None: return "N/A"
+    try:
+        return datetime.fromtimestamp(int(timestamp)).strftime(format)
+    except:
+        return "Invalid Date"
+
+def time_until_expiry_filter_auth(timestamp):
+    if timestamp is None: return "Never"
+    now = datetime.utcnow()
+    expire_dt = datetime.fromtimestamp(int(timestamp))
+    if now >= expire_dt:
+        return "Expired"
+    delta = expire_dt - now
+    if delta.days > 0:
+        return f"{delta.days} days left"
+    elif delta.seconds // 3600 > 0:
+        return f"{delta.seconds // 3600} hours left"
+    elif delta.seconds // 60 > 0:
+        return f"{delta.seconds // 60} minutes left"
+    return "Soon"
+
+templates.env.filters["readable_bytes"] = readable_bytes_filter_auth
+templates.env.filters["timestamp_to_datetime_str"] = timestamp_to_datetime_str_filter_auth
+templates.env.filters["time_until_expiry"] = time_until_expiry_filter_auth
+templates.env.globals["os"] = os
+
 
 @router.get("/login", response_class=HTMLResponse, name="login_page")
 async def login_page(request: Request):
@@ -32,80 +82,87 @@ async def register_page(request: Request):
     )
 
 @router.post("/token", name="login") # For url_for('login') in login.html form
-async def login(
+async def login_for_access_token(
     request: Request,
     db: Session = Depends(get_db)
 ):
     form_data = await request.form()
     account_number = form_data.get("account_number")
 
-    print(f"[DEBUG] Received form data: {form_data}") # DEBUG PRINT
-    print(f"[DEBUG] Account number from form: '{account_number}' (type: {type(account_number)})") # DEBUG PRINT
-
     if not account_number:
-        print("[DEBUG] Account Number is missing from form.") # DEBUG PRINT
-        raise HTTPException(status_code=400, detail="Account Number is required.")
+        # Pass error to template for display
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Account Number is required."},
+            status_code=400
+        )
 
-    # Convert account number to lowercase for case-insensitive comparison
     account_number = account_number.lower()
-
-    print(f"[DEBUG] Calling crud.get_user with account_number: '{account_number}'") # DEBUG PRINT
     user = crud.get_user(db, account_number=account_number)
 
     if not user:
-        print(f"[DEBUG] crud.get_user did not find user for account_number: '{account_number}'") # DEBUG PRINT
-        raise HTTPException(status_code=400, detail="Invalid Account Number or account not found.")
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid Account Number or account not found."},
+            status_code=400
+        )
 
-    print(f"[DEBUG] User found: {user.account_number if user else 'None'}") # DEBUG PRINT
     access_token = create_access_token(data={"sub": user.account_number})
 
-    redirect_response = RedirectResponse(url="/client-portal/", status_code=303)
-    redirect_response.set_cookie(
+    redirect_url = request.url_for("account_page")
+    response = RedirectResponse(url=redirect_url, status_code=303)
+    response.set_cookie(
         key="access_token",
         value=f"Bearer {access_token}",
         httponly=True,
-        path='/',
+        path='/client-portal',
         samesite='lax',
-        secure=True, # Assuming HTTPS
-        max_age=1800 # 30 minutes
+        secure= request.url.scheme == "https",
+        max_age=1800
     )
-    return redirect_response
+    return response
 
 @router.post("/register", name="register")
-async def register(
+async def register_user(
     request: Request,
     db: Session = Depends(get_db)
 ):
     generated_account_number = str(uuid.uuid4())
 
-    # Create the Pydantic model payload, NOW INCLUDING the generated_account_number
     user_payload = UserCreate(
-        account_number=generated_account_number, # <--- CRITICAL CHANGE
-        proxies={}, # Default as per your existing code
-        inbounds=None, # Default as per your existing code
-        status=UserStatusCreate.active # Example default status
-        # Ensure other required fields in UserCreate (if any beyond account_number)
-        # have defaults in the model or are provided here.
-        # e.g. data_limit_reset_strategy might need a default or to be set here.
-        # Check UserCreate and User model definitions for other non-optional fields without defaults.
+        account_number=generated_account_number,
+        proxies={},
+        inbounds=None,
+        status=UserStatusCreate.disabled
     )
 
     try:
-        # crud.create_user expects 'account_number' as a separate argument,
-        # and the 'user' Pydantic model.
         new_db_user = crud.create_user(db=db, account_number=generated_account_number, user=user_payload)
     except Exception as e:
-        # It's good practice to log the actual error `e` here for debugging
-        # import logging
-        # logging.error(f"Error creating user: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not create account due to an internal error.")
+        return templates.TemplateResponse(
+            "register.html",
+            {"request": request, "error": "Could not create account due to an internal error. Please try again."},
+            status_code=500
+        )
 
-    # You're returning JSON, which is fine if your frontend handles it.
-    return {"account_number": new_db_user.account_number, "message": "Account created successfully!"}
+    access_token = create_access_token(data={"sub": new_db_user.account_number})
+
+    redirect_url = request.url_for("account_page")
+    response = RedirectResponse(url=redirect_url, status_code=303)
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {access_token}",
+        httponly=True,
+        path='/client-portal',
+        samesite='lax',
+        secure=request.url.scheme == "https",
+        max_age=1800
+    )
+    return response
 
 
-@router.get("/logout", name="logout")
-async def logout_route(response: Response):
-    """Handle user logout by deleting the access_token cookie and redirecting."""
-    response.delete_cookie(key="access_token", path='/')
-    return RedirectResponse(url=router.url_path_for("login_page"), status_code=303)
+@router.get("/logout", name="logout_route")
+async def logout_and_redirect(request: Request, response: Response):
+    redirect_response = RedirectResponse(url=request.url_for("login_page"), status_code=303)
+    redirect_response.delete_cookie(key="access_token", path='/client-portal')
+    return redirect_response
