@@ -16,6 +16,7 @@ export const fetcher = <T = any>(
       Authorization: `Bearer ${getAuthToken()}`,
     };
   }
+  console.log("[DEBUG] service/http: Making request to URL:", url); // <--- ADD THIS LINE
   return $fetch<T>(url, ops);
 };
 
