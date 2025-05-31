@@ -18,7 +18,9 @@ from app.models.node import (
     NodeStatus,
     NodesUsageResponse,
 )
-from app.models.proxy import ProxyHost
+from app.models.proxy import ProxyHostModify
+from app.models.node import DBNode
+
 from app.utils import responses
 
 router = APIRouter(
@@ -26,16 +28,32 @@ router = APIRouter(
 )
 
 
-def add_host_if_needed(new_node: NodeCreate, db: Session):
-    """Add a host if specified in the new node settings."""
-    if new_node.add_as_new_host:
-        host = ProxyHost(
-            remark=f"{new_node.name} ({{USERNAME}}) [{{PROTOCOL}} - {{TRANSPORT}}]",
-            address=new_node.address,
-        )
-        for inbound_tag in xray.config.inbounds_by_tag:
-            crud.add_host(db, inbound_tag, host)
-        xray.hosts.update()
+def add_host_if_needed(dbnode: "DBNode", create_hosts_flag: bool, db: Session):
+    """Add a host for every inbound if specified in the new node settings, linked to the node."""
+    if create_hosts_flag:
+        logger.info(f"Node '{dbnode.name}': add_as_new_host is true. Creating ProxyHost entries linked to node ID {dbnode.id}.")
+        for inbound_tag, inbound_details in xray.config.inbounds_by_tag.items():
+            protocol = inbound_details.get("protocol", "PROTOCOL").upper()
+            transport = inbound_details.get("streamSettings", {}).get("network", "TRANSPORT").upper()
+
+            # Create a Pydantic model instance for the new ProxyHost
+            host_data = ProxyHostModify( # app.models.proxy.ProxyHost
+                remark=f"{dbnode.name} ({{USERNAME}}) [{protocol} - {transport}]",
+                address=dbnode.address, # Use the node's address
+                node_id=dbnode.id,      # Crucially, link this host to the new node
+                port=inbound_details.get("port"), # Attempt to use port from inbound config
+                # For a truly robust generic host, SNI, path, security etc.
+                # might need more intelligent defaults or be left for manual configuration.
+                # Using node's address as a placeholder for SNI/Host if applicable.
+                sni=dbnode.address,
+                host=dbnode.address,
+                security=inbound_details.get("streamSettings", {}).get("security"),
+                # ... set other ProxyHostModify fields to sensible defaults or None ...
+                path=inbound_details.get("streamSettings", {}).get(transport + "Settings", {}).get("path"), # Example for ws/grpc
+                is_disabled=False
+            )
+            crud.add_host(db, inbound_tag, host_data) # crud.add_host will use host_data.node_id
+        xray.hosts.update() # Presumed to reload host configurations
 
 
 @router.get("/node/settings", response_model=NodeSettings)
