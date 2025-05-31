@@ -89,10 +89,19 @@ class TrojanSettings(ProxySettings):
 
 class ShadowsocksSettings(ProxySettings):
     password: str = Field(default_factory=random_password)
-    method: ShadowsocksMethods = ShadowsocksMethods.CHACHA20_POLY1305
+    method: ShadowsocksMethods = Field(default=ShadowsocksMethods.CHACHA20_POLY1305)
 
     def revoke(self):
         self.password = random_password()
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        if 'method' in data:
+            method_value = data['method']
+            if hasattr(method_value, 'value'):  # If it's an enum
+                data['method'] = method_value.value
+            # If it's already a string, leave it as is
+        return data
 
 
 class ProxyHostSecurity(str, Enum):

@@ -10,6 +10,8 @@ from sqlalchemy import and_, delete, func, or_
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
 
+from app import logger  # Add logger import
+
 from app.db.models import (
     JWT,
     TLS,
@@ -21,31 +23,34 @@ from app.db.models import (
     NodeUserUsage,
     NotificationReminder,
     Proxy,
-    ProxyHost,
+    ProxyHost as DBProxyHost, # Renamed to avoid conflict with Pydantic model
     ProxyInbound,
-    # ProxyTypes, # Not directly used here, but by models.py
     System,
-    User,
-    # UserNodeSelection, # Removed model
+    User as DBUser, # Renamed to avoid conflict with Pydantic model
     UserTemplate,
     UserUsageResetLogs,
 )
 from app.models.admin import AdminCreate, AdminModify, AdminPartialModify
 from app.models.node import NodeCreate, NodeModify, NodeStatus, NodeUsageResponse
-from app.models.proxy import ProxyHost as ProxyHostModify
-from app.models.proxy import ProxyTypes # Import if needed for type hints or direct use
+from app.models.proxy import ProxyHost as ProxyHostModify # Pydantic model
+from app.models.proxy import ProxyTypes
 from app.models.user import (
     ReminderType,
     UserCreate,
     UserDataLimitResetStrategy,
     UserModify,
-    UserResponse, # Used in revoke_user_sub
+    UserResponse,
     UserStatus,
     UserUsageResponse
 )
 from app.models.user_template import UserTemplateCreate, UserTemplateModify
 from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
 from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODELETE_DAYS
+import logging
+
+
+# Set logging level to DEBUG
+logger.setLevel(logging.DEBUG)
 
 
 def add_default_host(db: Session, inbound: ProxyInbound):
@@ -56,7 +61,7 @@ def add_default_host(db: Session, inbound: ProxyInbound):
         db (Session): Database session.
         inbound (ProxyInbound): Proxy inbound to add the default host to.
     """
-    host = ProxyHost(remark="🚀 Marz ({USERNAME}) [{PROTOCOL} - {TRANSPORT}]", address="{SERVER_IP}", inbound=inbound)
+    host = DBProxyHost(remark="🚀 Marz ({USERNAME}) [{PROTOCOL} - {TRANSPORT}]", address="{SERVER_IP}", inbound=inbound)
     db.add(host)
     db.commit()
 
@@ -82,81 +87,96 @@ def get_or_create_inbound(db: Session, inbound_tag: str) -> ProxyInbound:
     return inbound
 
 
-def get_hosts(db: Session, inbound_tag: str) -> List[ProxyHost]:
+def get_hosts(db: Session, inbound_tag: str) -> List[DBProxyHost]:
     """
     Retrieves hosts for a given inbound tag.
+    Note: For the new model, you'll likely use get_proxy_hosts_by_node_id more often.
 
     Args:
         db (Session): Database session.
         inbound_tag (str): The tag of the inbound.
 
     Returns:
-        List[ProxyHost]: List of hosts for the inbound.
+        List[DBProxyHost]: List of hosts for the inbound.
     """
     inbound = get_or_create_inbound(db, inbound_tag)
     return inbound.hosts
 
 
-def add_host(db: Session, inbound_tag: str, host: ProxyHostModify) -> List[ProxyHost]:
+def add_host(db: Session, inbound_tag: str, host_data: ProxyHostModify, node_id: Optional[int] = None) -> List[DBProxyHost]:
     """
-    Adds a new host to a proxy inbound.
+    Adds a new host to a proxy inbound, optionally associating it with a node.
 
     Args:
         db (Session): Database session.
         inbound_tag (str): The tag of the inbound.
-        host (ProxyHostModify): Host details to be added.
+        host_data (ProxyHostModify): Host details to be added (Pydantic model).
+        node_id (Optional[int]): The ID of the node this host is associated with.
+
 
     Returns:
-        List[ProxyHost]: Updated list of hosts for the inbound.
+        List[DBProxyHost]: Updated list of hosts for the inbound.
     """
     inbound = get_or_create_inbound(db, inbound_tag)
-    new_db_host = ProxyHost( # Renamed to avoid conflict with host argument
-            remark=host.remark,
-            address=host.address,
-            port=host.port,
-            path=host.path,
-            sni=host.sni,
-            host=host.host, # This is ProxyHostModify.host which is the HTTP host header
-            inbound=inbound,
-            security=host.security,
-            alpn=host.alpn,
-            fingerprint=host.fingerprint
-        )
-    inbound.hosts.append(new_db_host)
-    db.commit()
-    db.refresh(inbound)
-    return inbound.hosts
-
-
-def update_hosts(db: Session, inbound_tag: str, modified_hosts: List[ProxyHostModify]) -> List[ProxyHost]:
-    """
-    Updates hosts for a given inbound tag. This replaces all existing hosts for the inbound.
-
-    Args:
-        db (Session): Database session.
-        inbound_tag (str): The tag of the inbound.
-        modified_hosts (List[ProxyHostModify]): List of modified hosts.
-
-    Returns:
-        List[ProxyHost]: Updated list of hosts for the inbound.
-    """
-    inbound = get_or_create_inbound(db, inbound_tag)
-    # Clear existing hosts first by assigning an empty list or deleting them
-    # For simple replacement:
-    inbound.hosts.clear() # Or delete existing host objects if cascade isn't set up to do so upon clear
-    db.flush() # Ensure deletes are processed before adding new ones if there are unique constraints
-
-    new_host_objects = []
-    for host_data in modified_hosts:
-        new_db_host = ProxyHost(
+    new_db_host = DBProxyHost(
             remark=host_data.remark,
             address=host_data.address,
             port=host_data.port,
             path=host_data.path,
             sni=host_data.sni,
-            host=host_data.host, # HTTP Host header from ProxyHostModify
-            inbound_tag=inbound.tag, # Explicitly set if inbound relationship isn't enough or for clarity
-            # inbound=inbound, # Relationship should handle this if appended
+            host=host_data.host,
+            inbound_tag=inbound.tag, # Set inbound_tag directly
+            node_id=node_id, # Associate with a node
+            security=host_data.security,
+            alpn=host_data.alpn,
+            fingerprint=host_data.fingerprint,
+            allowinsecure=host_data.allowinsecure,
+            is_disabled=host_data.is_disabled,
+            mux_enable=host_data.mux_enable,
+            fragment_setting=host_data.fragment_setting,
+            noise_setting=host_data.noise_setting,
+            random_user_agent=host_data.random_user_agent,
+            use_sni_as_host=host_data.use_sni_as_host
+        )
+    # inbound.hosts.append(new_db_host) # Adding directly to session is fine
+    db.add(new_db_host)
+    db.commit()
+    db.refresh(inbound) # Refresh inbound to reflect new host in its collection if needed by caller
+    return inbound.hosts
+
+
+def update_hosts(db: Session, inbound_tag: str, modified_hosts_data: List[ProxyHostModify]) -> List[DBProxyHost]:
+    """
+    Updates hosts for a given inbound tag. This replaces all existing hosts for the inbound.
+    NOTE: This function replaces ALL hosts for an inbound_tag. If hosts can be associated with different nodes
+    but share an inbound_tag, this wholesale replacement might be too broad. Consider if you need
+    to update hosts on a per-node basis for a given inbound_tag instead.
+
+    Args:
+        db (Session): Database session.
+        inbound_tag (str): The tag of the inbound.
+        modified_hosts_data (List[ProxyHostModify]): List of modified hosts (Pydantic models).
+
+    Returns:
+        List[DBProxyHost]: Updated list of hosts for the inbound.
+    """
+    inbound = get_or_create_inbound(db, inbound_tag)
+
+    # Delete existing hosts for this specific inbound tag
+    db.query(DBProxyHost).filter(DBProxyHost.inbound_tag == inbound_tag).delete(synchronize_session=False)
+    db.flush()
+
+    new_host_objects = []
+    for host_data in modified_hosts_data:
+        new_db_host = DBProxyHost(
+            remark=host_data.remark,
+            address=host_data.address,
+            port=host_data.port,
+            path=host_data.path,
+            sni=host_data.sni,
+            host=host_data.host,
+            inbound_tag=inbound.tag,
+            node_id=host_data.node_id, # Assuming ProxyHostModify Pydantic model now includes node_id
             security=host_data.security,
             alpn=host_data.alpn,
             fingerprint=host_data.fingerprint,
@@ -170,177 +190,142 @@ def update_hosts(db: Session, inbound_tag: str, modified_hosts: List[ProxyHostMo
         )
         new_host_objects.append(new_db_host)
 
-    inbound.hosts.extend(new_host_objects) # Add all new hosts
-
+    db.add_all(new_host_objects)
     db.commit()
-    db.refresh(inbound) # Refresh to get the updated list with IDs etc.
+    db.refresh(inbound)
     return inbound.hosts
 
 
 def get_user_queryset(db: Session) -> Query:
-    """
-    Retrieves the base user query with joinedload for admin, next_plan, proxies, and usage_logs.
-    This helps prevent DetachedInstanceErrors when these relationships are accessed later,
-    especially if the User object is passed to background tasks or other contexts
-    where the original session might be closed.
-
-    Args:
-        db (Session): Database session.
-
-    Returns:
-        Query: Base user query with eagerly loaded relationships.
-    """
-    return db.query(User).options(
-        joinedload(User.admin),
-        joinedload(User.next_plan),
-        joinedload(User.proxies),      # Eager load proxies
-        joinedload(User.usage_logs)    # Eager load usage_logs (for lifetime_used_traffic)
+    return db.query(DBUser).options(
+        joinedload(DBUser.admin),
+        joinedload(DBUser.next_plan),
+        joinedload(DBUser.proxies),
+        joinedload(DBUser.usage_logs),
+        joinedload(DBUser.active_node) # Eager load the active_node
     )
 
 
-def get_user(db: Session, account_number: str) -> Optional[User]:
-    """
-    Retrieves a user by account number (case-insensitive for the input),
-    with related admin, next_plan, proxies, and usage_logs eagerly loaded.
-    """
-    # Debug prints from user, kept for now
-    print(f"[DEBUG] crud.get_user: original input account_number: '{account_number}' (type: {type(account_number)})")
-
+def get_user(db: Session, account_number: str) -> Optional[DBUser]:
     account_number_to_query = account_number.lower()
-    print(f"[DEBUG] crud.get_user: attempting to find user with lowercase account_number: '{account_number_to_query}'")
-
-    db_user = get_user_queryset(db).filter(User.account_number == account_number_to_query).first()
-
-    if db_user:
-        print(f"[DEBUG] crud.get_user: Found user: {db_user.id}, {db_user.account_number}")
-    else:
-        print(f"[DEBUG] crud.get_user: No user found for account_number: '{account_number_to_query}'")
-
-    return db_user
+    return get_user_queryset(db).filter(DBUser.account_number == account_number_to_query).first()
 
 
-def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
-    """
-    Retrieves a user by user ID, with related admin, next_plan, proxies, and usage_logs eagerly loaded.
+def get_user_by_id(db: Session, user_id: int) -> Optional[DBUser]:
+    return get_user_queryset(db).filter(DBUser.id == user_id).first()
 
-    Args:
-        db (Session): Database session.
-        user_id (int): The ID of the user.
-
-    Returns:
-        Optional[User]: The user object if found, else None.
-    """
-    return get_user_queryset(db).filter(User.id == user_id).first()
+def get_user_by_sub_token(db: Session, token: str) -> Optional[DBUser]: # Added for subscription
+    # Assuming token is the account_number for subscriptions
+    return get_user(db, token)
 
 
-UsersSortingOptions = Enum('UsersSortingOptions', {
-    'account_number': User.account_number.asc(),
-    'used_traffic': User.used_traffic.asc(),
-    'data_limit': User.data_limit.asc(),
-    'expire': User.expire.asc(),
-    'created_at': User.created_at.asc(),
-    '-account_number': User.account_number.desc(),
-    '-used_traffic': User.used_traffic.desc(),
-    '-data_limit': User.data_limit.desc(),
-    '-expire': User.expire.desc(),
-    '-created_at': User.created_at.desc(),
-})
+class UsersSortingOptionsEnum(Enum): # Changed to class for better type hinting if needed
+    account_number_asc = DBUser.account_number.asc()
+    used_traffic_asc = DBUser.used_traffic.asc()
+    data_limit_asc = DBUser.data_limit.asc()
+    expire_asc = DBUser.expire.asc()
+    created_at_asc = DBUser.created_at.asc()
+    account_number_desc = DBUser.account_number.desc()
+    used_traffic_desc = DBUser.used_traffic.desc()
+    data_limit_desc = DBUser.data_limit.desc()
+    expire_desc = DBUser.expire.desc()
+    created_at_desc = DBUser.created_at.desc()
+
+    @classmethod
+    def from_string(cls, s: str) -> Optional['UsersSortingOptionsEnum']:
+        try:
+            if s.startswith("-"):
+                return cls[s[1:] + "_desc"]
+            else:
+                return cls[s + "_asc"]
+        except KeyError:
+            return None
 
 
 def get_users(db: Session,
               offset: Optional[int] = None,
               limit: Optional[int] = None,
-              account_numbers: Optional[List[str]] = None, # Changed from usernames
+              account_numbers: Optional[List[str]] = None,
               search: Optional[str] = None,
               status: Optional[Union[UserStatus, list]] = None,
-              sort: Optional[List[UsersSortingOptions]] = None,
-              admin: Optional[Admin] = None, # Specific Admin ORM object
-              admins: Optional[List[str]] = None, # List of admin usernames
+              sort: Optional[List[UsersSortingOptionsEnum]] = None, # Use the class
+              admins: Optional[List[str]] = None, # List of admin usernames for filtering
               reset_strategy: Optional[Union[UserDataLimitResetStrategy, list]] = None,
-              return_with_count: bool = False) -> Union[List[User], Tuple[List[User], int]]:
-    """
-    Retrieves users based on various filters and options, with related data eagerly loaded.
-    """
+              return_with_count: bool = False) -> Union[List[DBUser], Tuple[List[DBUser], int]]:
     query = get_user_queryset(db)
 
     if account_numbers:
-        # Ensure account numbers are queried in lowercase if they are stored as such
         lowercase_account_numbers = [acc_num.lower() for acc_num in account_numbers]
-        query = query.filter(User.account_number.in_(lowercase_account_numbers))
+        query = query.filter(DBUser.account_number.in_(lowercase_account_numbers))
 
-    if search: # Add search functionality if it was missing or adapt
+    if search:
         search_term = f"%{search.lower()}%"
         query = query.filter(
             or_(
-                User.account_number.ilike(search_term), # Search by account number
-                User.note.ilike(search_term)             # Search by note
+                DBUser.account_number.ilike(search_term),
+                DBUser.note.ilike(search_term)
             )
         )
 
     if status:
         if isinstance(status, list):
-            query = query.filter(User.status.in_(status))
+            query = query.filter(DBUser.status.in_(status))
         else:
-            query = query.filter(User.status == status)
+            query = query.filter(DBUser.status == status)
 
     if reset_strategy:
         if isinstance(reset_strategy, list):
-            query = query.filter(User.data_limit_reset_strategy.in_(reset_strategy))
+            query = query.filter(DBUser.data_limit_reset_strategy.in_(reset_strategy))
         else:
-            query = query.filter(User.data_limit_reset_strategy == reset_strategy)
+            query = query.filter(DBUser.data_limit_reset_strategy == reset_strategy)
 
-    if admin: # Filter by specific Admin ORM object
-        query = query.filter(User.admin_id == admin.id) # Assuming User.admin_id exists
+    if admins:
+        query = query.join(DBUser.admin).filter(Admin.username.in_(admins))
 
-    if admins: # Filter by list of admin usernames
-        query = query.join(User.admin).filter(Admin.username.in_(admins))
-
-
-    count_query = query # Store query before applying order, offset, limit for count
+    count_query = query.with_session(db) # Create a new query for count based on current filters
 
     if sort:
-        # Ensure sort options are applied correctly. Example: query.order_by(User.created_at.desc())
-        # The UsersSortingOptions enum approach is fine if opt.value is the SQLAlchemy sort expression
-        query = query.order_by(*(opt.value for opt in sort))
+        # Convert string sort options to enum values if they are passed as strings
+        processed_sort_options = []
+        for opt_val in sort:
+            if isinstance(opt_val, str):
+                enum_opt = UsersSortingOptionsEnum.from_string(opt_val)
+                if enum_opt:
+                    processed_sort_options.append(enum_opt.value)
+            elif isinstance(opt_val, UsersSortingOptionsEnum):
+                 processed_sort_options.append(opt_val.value)
 
-    if offset is not None: # Check for None explicitly
+        if processed_sort_options:
+            query = query.order_by(*processed_sort_options)
+        else: # Default sort if provided sort strings are invalid
+            query = query.order_by(DBUser.id.desc())
+    else: # Default sort
+        query = query.order_by(DBUser.id.desc())
+
+
+    if offset is not None:
         query = query.offset(offset)
-    if limit is not None: # Check for None explicitly
+    if limit is not None:
         query = query.limit(limit)
 
     if return_with_count:
-        # Use the query before ordering and pagination for a correct total count
-        # Count distinct users if joins might produce multiple rows per user before distinct()
-        # However, get_user_queryset is db.query(User)... so it should be fine.
-        total_count = count_query.distinct(User.id).count()
+        # For an accurate count with joins and potential duplicates before distinct User.id
+        total_count = count_query.distinct(DBUser.id).count()
         return query.all(), total_count
 
     return query.all()
 
 
-def get_user_usages(db: Session, dbuser: User, start: datetime, end: datetime) -> List[UserUsageResponse]:
-    """
-    Retrieves user usages within a specified date range.
-
-    Args:
-        db (Session): Database session.
-        dbuser (User): The user object.
-        start (datetime): Start date for usage retrieval.
-        end (datetime): End date for usage retrieval.
-
-    Returns:
-        List[UserUsageResponse]: List of user usage responses.
-    """
-
-    usages: Dict[Union[int, None], UserUsageResponse] = { # Type hint for dict key
-        0: UserUsageResponse(  # Main Core (assuming 0 is a conventional ID for master/core if node_id is nullable)
-            node_id=None, # Explicitly None for Master
-            node_name="Master",
+def get_user_usages(db: Session, dbuser: DBUser, start: datetime, end: datetime) -> List[UserUsageResponse]:
+    usages: Dict[Union[int, None], UserUsageResponse] = {
+        None: UserUsageResponse( # Use None as key for Master/Core
+            node_id=None,
+            node_name="Master", # Or however you identify core traffic not on a specific node
             used_traffic=0
         )
     }
 
-    for node in db.query(Node).all():
+    for node in db.query(Node).all(): # Pre-populate with all known nodes
         usages[node.id] = UserUsageResponse(
             node_id=node.id,
             node_name=node.name,
@@ -352,55 +337,53 @@ def get_user_usages(db: Session, dbuser: User, start: datetime, end: datetime) -
                 NodeUserUsage.created_at <= end)
 
     for v in db.query(NodeUserUsage).filter(cond):
-        # Use v.node_id directly. If it's None, it should map to key 0 (Master)
-        key_to_use = v.node_id if v.node_id is not None else 0
+        # v.node_id can be None for traffic not associated with a specific slave node
+        key_to_use = v.node_id # This will be None or an int
         if key_to_use in usages:
             usages[key_to_use].used_traffic += v.used_traffic
-        # else: # Optionally handle case where node_id from usage log isn't in pre-populated usages dict
-        #     print(f"Warning: Usage logged for unknown node_id {v.node_id}")
+        else:
+            # This case implies usage was logged for a node_id that doesn't exist in Node table
+            # or wasn't pre-populated. Could create an entry on the fly or log.
+            logger.warning(f"Usage logged for user {dbuser.id} on unknown or unexpected node_id {v.node_id}. Creating ad-hoc entry.")
+            # To handle this gracefully, you might fetch node name if it's a new valid node_id
+            # For now, let's assume it should have been in `usages`
+            usages[key_to_use] = UserUsageResponse(node_id=v.node_id, node_name=f"Unknown Node {v.node_id}", used_traffic=v.used_traffic)
 
 
     return list(usages.values())
 
 
 def get_users_count(db: Session, status: Optional[UserStatus] = None, admin: Optional[Admin] = None) -> int:
-    """
-    Retrieves the count of users based on status and admin filters.
-
-    Args:
-        db (Session): Database session.
-        status (UserStatus, optional): Status to filter users by.
-        admin (Admin, optional): Admin to filter users by.
-
-    Returns:
-        int: Count of users matching the criteria.
-    """
-    query = db.query(func.count(User.id)) # Use func.count for efficiency
+    query = db.query(func.count(DBUser.id))
     if admin:
-        query = query.filter(User.admin_id == admin.id) # Filter by admin_id
+        query = query.join(DBUser.admin).filter(Admin.id == admin.id) # Filter by Admin object's ID
     if status:
-        query = query.filter(User.status == status)
-    return query.scalar() or 0 # Use scalar() instead of scalar_one() and handle None case
+        query = query.filter(DBUser.status == status)
+    count = query.scalar()
+    return count if count is not None else 0
 
 
-def create_user(db: Session, account_number: str, user: UserCreate, admin: Optional[Admin] = None) -> User:
-    """
-    Creates a new user with provided details.
-    Returns the created user object, with relationships potentially needing eager loading
-    if passed directly to background tasks that then create Pydantic models.
-    Consider re-fetching with get_user_by_id if full eager loading is needed immediately.
-    """
-    proxies_list = [] # Renamed to avoid conflict
-    for proxy_type_enum, settings_model in user.proxies.items():
-        proxies_list.append(
-            Proxy(
-                type=proxy_type_enum, # Store enum directly if column type supports it, or .value
-                settings=settings_model.model_dump(exclude_none=True) # Use model_dump for Pydantic v2
+def create_user(db: Session, account_number: str, user: UserCreate, admin: Optional[Admin] = None) -> DBUser:
+    print(f"[DEBUG] create_user: Starting user creation for account {account_number}")
+    print(f"[DEBUG] create_user: User data: {user.model_dump()}")
+
+    proxies_list = []
+    if user.proxies: # Ensure proxies is not None
+        print(f"[DEBUG] create_user: Processing proxies: {user.proxies}")
+        for proxy_type_enum, settings_model in user.proxies.items():
+            # Convert settings to dict. Pydantic's model_dump handles enum serialization.
+            settings_dict = settings_model.model_dump(exclude_none=True)
+            print(f"[DEBUG] create_user: Adding proxy type {proxy_type_enum} with settings {settings_dict}")
+            proxies_list.append(
+                Proxy(
+                    type=proxy_type_enum,
+                    settings=settings_dict
+                )
             )
-        )
 
     next_plan_orm = None
     if user.next_plan:
+        print(f"[DEBUG] create_user: Processing next plan: {user.next_plan}")
         next_plan_orm = NextPlan(
             data_limit=user.next_plan.data_limit,
             expire=user.next_plan.expire,
@@ -408,927 +391,664 @@ def create_user(db: Session, account_number: str, user: UserCreate, admin: Optio
             fire_on_either=user.next_plan.fire_on_either,
         )
 
-    dbuser = User(
-        account_number=account_number.lower(), # Store lowercase
+    print(f"[DEBUG] create_user: Creating DBUser object")
+    dbuser = DBUser(
+        account_number=account_number.lower(),
         proxies=proxies_list,
-        status=user.status,
-        data_limit=(user.data_limit if user.data_limit is not None else None), # Ensure 0 is preserved
-        expire=(user.expire if user.expire is not None else None),
-        admin_id=admin.id if admin else None, # Assign admin_id
-        # admin=admin, # Relationship will be set via admin_id and backref if configured
+        status=user.status if user.status is not None else UserStatus.disabled, # Default status
+        data_limit=user.data_limit,
+        expire=user.expire,
+        admin_id=admin.id if admin else None,
         data_limit_reset_strategy=user.data_limit_reset_strategy,
         note=user.note,
-        on_hold_expire_duration=(user.on_hold_expire_duration if user.on_hold_expire_duration is not None else None),
-        on_hold_timeout=(user.on_hold_timeout if user.on_hold_timeout is not None else None),
+        on_hold_expire_duration=user.on_hold_expire_duration,
+        on_hold_timeout=user.on_hold_timeout,
         auto_delete_in_days=user.auto_delete_in_days,
-        next_plan=next_plan_orm
+        next_plan=next_plan_orm,
+        active_node_id=None # New users don't have an active node
     )
+    print(f"[DEBUG] create_user: Adding user to database")
     db.add(dbuser)
+    print(f"[DEBUG] create_user: Committing changes")
     db.commit()
-    db.refresh(dbuser) # Refresh to get IDs and load default values
-
-    # For full eager loading consistent with get_user, re-fetch:
-    # return get_user_by_id(db, dbuser.id)
-    # However, for now, returning the refreshed instance. Callers should be aware if using in background tasks.
-    return dbuser
+    print(f"[DEBUG] create_user: Refreshing user object")
+    db.refresh(dbuser)
+    print(f"[DEBUG] create_user: User created successfully with ID {dbuser.id}")
+    return get_user_by_id(db, dbuser.id) or dbuser # Re-fetch to ensure all relations are loaded
 
 
-def remove_user(db: Session, dbuser: User) -> User:
-    """
-    Removes a user from the database.
-
-    Args:
-        db (Session): Database session.
-        dbuser (User): The user object to be removed.
-
-    Returns:
-        User: The (detached) user object that was removed.
-    """
+def remove_user(db: Session, dbuser: DBUser) -> DBUser:
     db.delete(dbuser)
     db.commit()
     return dbuser
 
 
-def remove_users(db: Session, dbusers: List[User]):
-    """
-    Removes multiple users from the database.
-
-    Args:
-        db (Session): Database session.
-        dbusers (List[User]): List of user objects to be removed.
-    """
-    for dbuser in dbusers:
-        db.delete(dbuser)
+def remove_users(db: Session, dbusers: List[DBUser]):
+    for dbuser_obj in dbusers: # Renamed to avoid conflict
+        db.delete(dbuser_obj)
     db.commit()
-    # No return needed, or return the list of (detached) users if required by caller
-    return
 
 
-def update_user(db: Session, dbuser: User, modify: UserModify) -> User:
-    """
-    Updates a user with new details.
-    The dbuser passed in should ideally be fetched with get_user_queryset for eager loading.
-    """
-    # Update proxies
-    if modify.proxies is not None: # Check if proxies field is present in modify payload
-        current_proxy_types_in_db = {p.type for p in dbuser.proxies}
-        modify_proxy_types = set(modify.proxies.keys())
+def update_user(db: Session, dbuser: DBUser, modify: UserModify) -> DBUser:
+    print(f"[DEBUG] update_user: Starting update for user {dbuser.account_number}")
+    print(f"[DEBUG] update_user: Current user state: {dbuser.__dict__}")
+    print(f"[DEBUG] update_user: Modify data: {modify.model_dump()}")
 
-        # Add or Update proxies
+    if modify.proxies is not None:
+        print(f"[DEBUG] update_user: Updating proxies")
+        # Clear existing proxies for this user
+        for p in list(dbuser.proxies): # Iterate over a copy
+            print(f"[DEBUG] update_user: Removing proxy {p.type}")
+            db.delete(p)
+        dbuser.proxies.clear() # Clear the collection
+        db.flush() # Process deletes
+
+        # Add new/updated proxies from modify payload
         for proxy_type_enum, settings_model in modify.proxies.items():
-            existing_proxy = next((p for p in dbuser.proxies if p.type == proxy_type_enum), None)
-            if existing_proxy:
-                existing_proxy.settings = settings_model.model_dump(exclude_none=True)
-            else:
-                new_proxy = Proxy(
-                    type=proxy_type_enum,
-                    settings=settings_model.model_dump(exclude_none=True),
-                    user_id=dbuser.id # Explicitly set user_id
-                )
-                dbuser.proxies.append(new_proxy) # Add to relationship collection
+            print(f"[DEBUG] update_user: Adding proxy type {proxy_type_enum}")
+            dbuser.proxies.append(
+                Proxy(type=proxy_type_enum, settings=settings_model.model_dump(exclude_none=True))
+            )
 
-        # Remove proxies not in modify payload
-        proxies_to_remove = [p for p in dbuser.proxies if p.type not in modify_proxy_types]
-        for p_to_remove in proxies_to_remove:
-            db.delete(p_to_remove) # Delete from session
-            # dbuser.proxies.remove(p_to_remove) # Also remove from collection if not cascaded by delete
-
-    # Update scalar fields
-    update_data = modify.model_dump(exclude_unset=True, exclude={'proxies'}) # Get other fields
-
-    original_status = dbuser.status # Store for later comparison
+    update_data = modify.model_dump(exclude_unset=True, exclude={'proxies', 'active_node_id'})
+    print(f"[DEBUG] update_user: Update data after processing: {update_data}")
+    original_status = dbuser.status
 
     for key, value in update_data.items():
-        if key == "next_plan": # Handle nested NextPlan separately
-            if value is None: # If next_plan is explicitly set to null
+        print(f"[DEBUG] update_user: Processing field {key} with value {value}")
+        if key == "next_plan":
+            if value is None:
                 if dbuser.next_plan:
+                    print(f"[DEBUG] update_user: Removing next plan")
                     db.delete(dbuser.next_plan)
                     dbuser.next_plan = None
-            else: # If next_plan data is provided
-                if dbuser.next_plan: # Update existing
+            else:
+                if dbuser.next_plan:
+                    print(f"[DEBUG] update_user: Updating existing next plan")
                     for np_key, np_value in value.items():
                         setattr(dbuser.next_plan, np_key, np_value)
-                else: # Create new
+                else:
+                    print(f"[DEBUG] update_user: Creating new next plan")
                     dbuser.next_plan = NextPlan(**value, user_id=dbuser.id)
         elif hasattr(dbuser, key):
+            print(f"[DEBUG] update_user: Setting {key} to {value}")
             setattr(dbuser, key, value)
-            # Special handling for status changes and dependent reminders
-            if key == "status" and value != original_status:
+
+    # Status change side effects
+    if 'status' in update_data and dbuser.status != original_status:
+        print(f"[DEBUG] update_user: Status changed from {original_status} to {dbuser.status}")
+        dbuser.last_status_change = datetime.utcnow()
+
+    # Data limit change side effects
+    if 'data_limit' in update_data:
+        value = update_data['data_limit']
+        print(f"[DEBUG] update_user: Processing data limit change to {value}")
+        if dbuser.status not in (UserStatus.expired, UserStatus.disabled):
+            if not value or (dbuser.used_traffic < value if value is not None else True):
+                if dbuser.status == UserStatus.limited and dbuser.status != UserStatus.on_hold:
+                    print(f"[DEBUG] update_user: Setting status to active due to data limit change")
+                    setattr(dbuser, 'status', UserStatus.active)
+                    dbuser.last_status_change = datetime.utcnow()
+            elif value is not None and dbuser.used_traffic >= value:
+                print(f"[DEBUG] update_user: Setting status to limited due to data limit change")
+                setattr(dbuser, 'status', UserStatus.limited)
                 dbuser.last_status_change = datetime.utcnow()
 
-            if key == "data_limit":
-                if dbuser.status not in (UserStatus.expired, UserStatus.disabled):
-                    if not value or (dbuser.used_traffic < value if value is not None else True): # Check against new data_limit
-                        if dbuser.status == UserStatus.limited and dbuser.status != UserStatus.on_hold: # If un-limiting
-                            setattr(dbuser, 'status', UserStatus.active) # Set status to active
-                    elif value is not None and dbuser.used_traffic >= value: # If new limit makes user limited
-                        setattr(dbuser, 'status', UserStatus.limited)
-                # Clear data usage reminders if limit changes
-                if value is not None:
-                    for percent in sorted(NOTIFY_REACHED_USAGE_PERCENT, reverse=True):
-                        delete_notification_reminder_by_type(db, dbuser.id, ReminderType.data_usage, threshold=percent)
+    # Expire change side effects
+    if 'expire' in update_data:
+        value = update_data['expire']
+        print(f"[DEBUG] update_user: Processing expire change to {value}")
+        if dbuser.status in (UserStatus.active, UserStatus.expired, UserStatus.limited):
+            if not value or (datetime.fromtimestamp(value) > datetime.utcnow() if value is not None else True):
+                if dbuser.status == UserStatus.expired:
+                    print(f"[DEBUG] update_user: Setting status to active due to expire change")
+                    setattr(dbuser, 'status', UserStatus.active)
+                    dbuser.last_status_change = datetime.utcnow()
+            elif value is not None and datetime.fromtimestamp(value) <= datetime.utcnow():
+                print(f"[DEBUG] update_user: Setting status to expired due to expire change")
+                setattr(dbuser, 'status', UserStatus.expired)
+                dbuser.last_status_change = datetime.utcnow()
 
-
-            if key == "expire":
-                if dbuser.status in (UserStatus.active, UserStatus.expired, UserStatus.limited): # Check if status could change due to expire
-                    if not value or (datetime.fromtimestamp(value) > datetime.utcnow() if value is not None else True): # Check new expire
-                        if dbuser.status == UserStatus.expired: # If un-expiring
-                             setattr(dbuser, 'status', UserStatus.active)
-                    elif value is not None and datetime.fromtimestamp(value) <= datetime.utcnow(): # If new expire makes user expired
-                        setattr(dbuser, 'status', UserStatus.expired)
-                # Clear expiration reminders if expire date changes
-                if value is not None:
-                    for days_left in sorted(NOTIFY_DAYS_LEFT):
-                        delete_notification_reminder_by_type(db, dbuser.id, ReminderType.expiration_date, threshold=days_left)
-
-
-    if 'status' in update_data and dbuser.status != original_status:
-        dbuser.last_status_change = datetime.utcnow() # Ensure last_status_change is updated if status changed directly
-
+    print(f"[DEBUG] update_user: Committing changes")
     dbuser.edit_at = datetime.utcnow()
-
     db.commit()
+    print(f"[DEBUG] update_user: Refreshing user object")
     db.refresh(dbuser)
-    # For full eager loading consistent with get_user, re-fetch:
-    # return get_user_by_id(db, dbuser.id)
-    return dbuser
+    print(f"[DEBUG] update_user: Update complete for user {dbuser.account_number}")
+    return get_user_by_id(db, dbuser.id) or dbuser
 
 
-def reset_user_data_usage(db: Session, dbuser: User) -> User:
-    """
-    Resets the data usage of a user and logs the reset.
-    """
-    usage_log = UserUsageResetLogs(
-        user_id=dbuser.id, # Set user_id directly
-        used_traffic_at_reset=dbuser.used_traffic,
-    )
+def reset_user_data_usage(db: Session, dbuser: DBUser) -> DBUser:
+    usage_log = UserUsageResetLogs(user_id=dbuser.id, used_traffic_at_reset=dbuser.used_traffic)
     db.add(usage_log)
-
     dbuser.used_traffic = 0
-
-    # Clear specific NodeUserUsage records
     db.query(NodeUserUsage).filter(NodeUserUsage.user_id == dbuser.id).delete(synchronize_session=False)
 
-    if dbuser.status not in (UserStatus.expired, UserStatus.disabled, UserStatus.on_hold): # Keep on_hold status
-        # If user was limited due to data, and data_limit exists, make active.
-        # Otherwise, status might depend on other factors like expire.
-        if dbuser.data_limit is None or dbuser.data_limit > 0 : # only make active if there's a limit or no limit
+    if dbuser.status not in (UserStatus.expired, UserStatus.disabled, UserStatus.on_hold):
+        if dbuser.data_limit is None or dbuser.data_limit > 0:
             dbuser.status = UserStatus.active
+            dbuser.last_status_change = datetime.utcnow()
 
-    if dbuser.next_plan: # If resetting usage, typically next_plan should be cleared
+    if dbuser.next_plan:
         db.delete(dbuser.next_plan)
         dbuser.next_plan = None
 
-    db.add(dbuser) # dbuser is already in session, this is more like a flush marker
     db.commit()
     db.refresh(dbuser)
-    # return get_user_by_id(db, dbuser.id) # Re-fetch with eager loads
-    return dbuser
+    return get_user_by_id(db, dbuser.id) or dbuser
 
 
-def reset_user_by_next(db: Session, dbuser: User) -> User:
-    """
-    Resets the data usage of a user based on their next_plan.
-    """
-    if dbuser.next_plan is None:
-        # This should ideally be checked by the caller, but as a safeguard:
-        return dbuser # Or raise an error
+def reset_user_by_next(db: Session, dbuser: DBUser) -> DBUser:
+    if dbuser.next_plan is None: return dbuser
 
-    usage_log = UserUsageResetLogs(
-        user_id=dbuser.id,
-        used_traffic_at_reset=dbuser.used_traffic,
-    )
+    usage_log = UserUsageResetLogs(user_id=dbuser.id, used_traffic_at_reset=dbuser.used_traffic)
     db.add(usage_log)
-
     db.query(NodeUserUsage).filter(NodeUserUsage.user_id == dbuser.id).delete(synchronize_session=False)
 
-    # Calculate remaining traffic if needed
     remaining_traffic = 0
     if dbuser.next_plan.add_remaining_traffic and dbuser.data_limit is not None:
         remaining_traffic = max(0, dbuser.data_limit - dbuser.used_traffic)
 
-    dbuser.data_limit = dbuser.next_plan.data_limit + remaining_traffic if dbuser.next_plan.data_limit is not None else None
+    dbuser.data_limit = (dbuser.next_plan.data_limit + remaining_traffic) if dbuser.next_plan.data_limit is not None else None
     dbuser.expire = dbuser.next_plan.expire
-
     dbuser.used_traffic = 0
-    dbuser.status = UserStatus.active # Activating with new plan
+    dbuser.status = UserStatus.active
     dbuser.last_status_change = datetime.utcnow()
 
     db.delete(dbuser.next_plan)
     dbuser.next_plan = None
-
-    db.add(dbuser)
     db.commit()
     db.refresh(dbuser)
-    # return get_user_by_id(db, dbuser.id) # Re-fetch with eager loads
-    return dbuser
+    return get_user_by_id(db, dbuser.id) or dbuser
 
 
-def revoke_user_sub(db: Session, dbuser: User) -> User:
-    """
-    Revokes the subscription of a user and updates proxies settings by regenerating their IDs.
-    The dbuser passed in should be eagerly loaded.
-    """
+def revoke_user_sub(db: Session, dbuser: DBUser) -> DBUser:
     dbuser.sub_revoked_at = datetime.utcnow()
 
-    # If UserResponse.model_validate accesses lazy-loaded fields not covered by get_user_queryset,
-    # this could still be an issue if dbuser is detached.
-    # Assuming get_user_queryset covers necessary fields for UserResponse (like proxies).
-    user_pydantic = UserResponse.model_validate(dbuser) # Create Pydantic model from (hopefully) loaded ORM obj
+    # Re-fetch with eager loaded proxies to ensure UserResponse has them for revoke()
+    # If dbuser comes from get_validated_user, it should already have them via get_user_queryset
+    # If not, an explicit re-fetch or ensuring proxies are loaded is crucial here.
+    # For safety, let's assume dbuser might be detached or proxies not loaded by caller:
+    user_with_proxies = get_user_by_id(db, dbuser.id)
+    if not user_with_proxies: return dbuser # Should not happen if dbuser is valid
+
+    user_pydantic = UserResponse.model_validate(user_with_proxies)
 
     new_proxy_settings_list = []
-    for proxy_type, pydantic_proxy_settings in user_pydantic.proxies.items():
-        pydantic_proxy_settings.revoke() # This method should modify the Pydantic model's settings (e.g., new UUID)
-        new_proxy_settings_list.append({
-            "type": proxy_type,
-            "settings": pydantic_proxy_settings.model_dump(exclude_none=True)
-        })
+    if user_pydantic.proxies: # Check if proxies is not None
+        for proxy_type, pydantic_proxy_settings in user_pydantic.proxies.items():
+            if hasattr(pydantic_proxy_settings, 'revoke'): # Ensure method exists
+                pydantic_proxy_settings.revoke()
+            new_proxy_settings_list.append({
+                "type": proxy_type,
+                "settings": pydantic_proxy_settings.model_dump(exclude_none=True)
+            })
 
     # Update proxies in the database
-    # Delete existing proxies
-    for p in list(dbuser.proxies): # Iterate over a copy
-        db.delete(p)
-    db.flush() # Ensure deletes happen before adds if unique constraints matter on user_id+type
+    for p in list(user_with_proxies.proxies): db.delete(p) # Use user_with_proxies
+    user_with_proxies.proxies.clear()
+    db.flush()
 
-    # Add new proxies with revoked settings
     for new_proxy_data in new_proxy_settings_list:
-        dbuser.proxies.append(
+        user_with_proxies.proxies.append(
             Proxy(type=new_proxy_data["type"], settings=new_proxy_data["settings"])
         )
 
+    # Update the original dbuser object's fields if it's a different instance
+    if dbuser.id == user_with_proxies.id:
+        dbuser.sub_revoked_at = user_with_proxies.sub_revoked_at # Sync this field
+
     db.commit()
-    db.refresh(dbuser)
-    # return get_user_by_id(db, dbuser.id) # Re-fetch with eager loads including new proxies
-    return dbuser
+    db.refresh(user_with_proxies) # Refresh the instance that had proxies modified
+    return get_user_by_id(db, user_with_proxies.id) or user_with_proxies # Re-fetch fully
 
 
-def update_user_sub(db: Session, dbuser: User, user_agent: str) -> User:
-    """
-    Updates the user's subscription details (last update time and user agent).
-    """
+def update_user_sub(db: Session, dbuser: DBUser, user_agent: str) -> DBUser:
     dbuser.sub_updated_at = datetime.utcnow()
     dbuser.sub_last_user_agent = user_agent
-
     db.commit()
     db.refresh(dbuser)
     return dbuser
 
 
 def reset_all_users_data_usage(db: Session, admin: Optional[Admin] = None):
-    """
-    Resets the data usage for all users or users under a specific admin.
-    """
-    query = get_user_queryset(db) # Get users with relations preloaded if needed for status logic
-
+    query = get_user_queryset(db) # Use queryset for potential eager loads if status logic becomes complex
     if admin:
-        query = query.filter(User.admin_id == admin.id)
+        query = query.join(DBUser.admin).filter(Admin.id == admin.id) # Correctly filter by Admin object
 
-    for dbuser_item in query.all(): # Renamed to avoid conflict
-        dbuser_item.used_traffic = 0
-        # Clear related NodeUserUsage records
-        db.query(NodeUserUsage).filter(NodeUserUsage.user_id == dbuser_item.id).delete(synchronize_session=False)
-
-        if dbuser_item.status not in [UserStatus.on_hold, UserStatus.expired, UserStatus.disabled]:
-            dbuser_item.status = UserStatus.active
-
-        # Assuming UserUsageResetLogs are not created for mass reset, or add logic if they are
-        # dbuser_item.usage_logs.clear() # This would delete historical reset logs, be careful
-
-        if dbuser_item.next_plan:
-            db.delete(dbuser_item.next_plan)
-            dbuser_item.next_plan = None
-        # No db.add(dbuser_item) needed if modifying existing tracked objects
+    for user_item in query.all(): # Renamed var
+        user_item.used_traffic = 0
+        db.query(NodeUserUsage).filter(NodeUserUsage.user_id == user_item.id).delete(synchronize_session=False)
+        if user_item.status not in [UserStatus.on_hold, UserStatus.expired, UserStatus.disabled]:
+            user_item.status = UserStatus.active
+            user_item.last_status_change = datetime.utcnow() # Update if status changed
+        if user_item.next_plan:
+            db.delete(user_item.next_plan)
+            user_item.next_plan = None
     db.commit()
 
 
 def disable_all_active_users(db: Session, admin: Optional[Admin] = None):
-    """
-    Disable all active or on_hold users for a specific admin or all admins.
-    """
-    query = db.query(User).filter(User.status.in_([UserStatus.active, UserStatus.on_hold]))
+    query = db.query(DBUser).filter(DBUser.status.in_([UserStatus.active, UserStatus.on_hold]))
     if admin:
-        query = query.filter(User.admin_id == admin.id)
-
+        query = query.join(DBUser.admin).filter(Admin.id == admin.id)
     query.update(
-        {User.status: UserStatus.disabled, User.last_status_change: datetime.utcnow()},
-        synchronize_session=False # Recommended for bulk updates
+        {DBUser.status: UserStatus.disabled, DBUser.last_status_change: datetime.utcnow()},
+        synchronize_session=False
     )
     db.commit()
 
 
 def activate_all_disabled_users(db: Session, admin: Optional[Admin] = None):
-    """
-    Activate all disabled users for a specific admin or all admins.
-    Users who were on_hold (and are now disabled) might need special handling if they should return to on_hold.
-    This implementation activates them to 'active'.
-    """
-    # Users that should become 'on_hold'
-    # These are users currently 'disabled', had an on_hold_expire_duration, no specific expire date, and were not online.
-    on_hold_criteria_users_query = db.query(User).filter(
-        User.status == UserStatus.disabled,
-        User.on_hold_expire_duration.isnot(None), # Had a duration for on_hold
-        User.on_hold_timeout.isnot(None), # Indicates they were on hold
-        # User.expire.is_(None), # This was part of original query for on_hold
-        # User.online_at.is_(None) # This was part of original query for on_hold
+    on_hold_criteria_users_query = db.query(DBUser).filter(
+        DBUser.status == UserStatus.disabled,
+        DBUser.on_hold_expire_duration.isnot(None),
+        DBUser.on_hold_timeout.isnot(None),
     )
-
-    # Users that should become 'active' (all other disabled users)
-    active_criteria_users_query = db.query(User).filter(User.status == UserStatus.disabled)
+    active_criteria_users_query = db.query(DBUser).filter(DBUser.status == UserStatus.disabled)
 
     if admin:
-        on_hold_criteria_users_query = on_hold_criteria_users_query.filter(User.admin_id == admin.id)
-        active_criteria_users_query = active_criteria_users_query.filter(User.admin_id == admin.id)
-        # Exclude users matched by on_hold_criteria from the active_criteria
-        on_hold_user_ids = [u.id for u in on_hold_criteria_users_query.all()] # Get IDs first
-        if on_hold_user_ids:
-            active_criteria_users_query = active_criteria_users_query.filter(User.id.notin_(on_hold_user_ids))
+        on_hold_criteria_users_query = on_hold_criteria_users_query.join(DBUser.admin).filter(Admin.id == admin.id)
+        active_criteria_users_query = active_criteria_users_query.join(DBUser.admin).filter(Admin.id == admin.id)
 
+        on_hold_user_ids = [u.id for u in on_hold_criteria_users_query.with_session(db).all()] # Ensure session
+        if on_hold_user_ids: # type: ignore
+            active_criteria_users_query = active_criteria_users_query.filter(DBUser.id.notin_(on_hold_user_ids)) # type: ignore
 
     on_hold_criteria_users_query.update(
-        {User.status: UserStatus.on_hold, User.last_status_change: datetime.utcnow()},
+        {DBUser.status: UserStatus.on_hold, DBUser.last_status_change: datetime.utcnow()},
         synchronize_session=False
     )
     active_criteria_users_query.update(
-        {User.status: UserStatus.active, User.last_status_change: datetime.utcnow()},
+        {DBUser.status: UserStatus.active, DBUser.last_status_change: datetime.utcnow()},
         synchronize_session=False
     )
     db.commit()
 
 
-def autodelete_expired_users(db: Session,
-                             include_limited_users: bool = False) -> List[User]:
-    """
-    Deletes expired (optionally also limited) users whose auto-delete time has passed.
-    """
-    target_status = (
-        [UserStatus.expired, UserStatus.limited] if include_limited_users
-        else [UserStatus.expired]
-    )
+def autodelete_expired_users(db: Session, include_limited_users: bool = False) -> List[DBUser]:
+    target_status = [UserStatus.expired]
+    if include_limited_users:
+        target_status.append(UserStatus.limited)
 
-    # Use coalesce for auto_delete_in_days, falling back to USERS_AUTODELETE_DAYS if user's setting is NULL
-    effective_auto_delete_days = coalesce(User.auto_delete_in_days, USERS_AUTODELETE_DAYS)
+    effective_auto_delete_days = coalesce(DBUser.auto_delete_in_days, USERS_AUTODELETE_DAYS) # type: ignore
+    query = db.query(DBUser, effective_auto_delete_days.label("effective_days")) \
+              .filter(effective_auto_delete_days >= 0) \
+              .filter(DBUser.status.in_(target_status)) \
+              .options(joinedload(DBUser.admin))
 
-    # Filter for users who are eligible for auto-deletion (non-negative auto_delete setting)
-    # and whose last_status_change + auto_delete_days is in the past.
-    # SQLAlchemy does not directly support arithmetic with INTERVAL 'X days' in a generic way for all DBs in filter.
-    # So, fetching candidates and then filtering in Python is one approach, as was done.
-    # For database-level filtering, one might need to use DB-specific functions.
+    users_to_delete_list = [] # Renamed variable
+    for user_obj, auto_delete_val in query.all(): # Renamed variable
+        if user_obj.last_status_change and (user_obj.last_status_change + timedelta(days=auto_delete_val)) <= datetime.utcnow():
+            users_to_delete_list.append(user_obj)
 
-    query = db.query(
-        User, effective_auto_delete_days.label("effective_days")
-    ).filter(
-        effective_auto_delete_days >= 0,  # auto_delete_in_days is positive or zero, or global is
-        User.status.in_(target_status),
-    ).options(joinedload(User.admin)) # Eager load admin for reporting or other use after potential deletion
-
-    users_to_delete = []
-    for user, auto_delete_val in query.all():
-        if user.last_status_change: # Ensure last_status_change is not None
-            # auto_delete_val can be from user.auto_delete_in_days or USERS_AUTODELETE_DAYS
-            if user.last_status_change + timedelta(days=auto_delete_val) <= datetime.utcnow():
-                users_to_delete.append(user)
-
-    if users_to_delete:
-        # It's important to pass the list of actual User objects to remove_users
-        remove_users(db, users_to_delete)
-
-    return users_to_delete # Returns (now detached) user objects that were deleted
+    if users_to_delete_list:
+        # Deactivation from XRay should be handled by the caller job (e.g., remove_expired_users job)
+        # by iterating `users_to_delete_list` and calling `xray.operations.deactivate_user_from_active_node`
+        # *before* calling this `remove_users`.
+        # This CRUD function focuses on DB deletion.
+        remove_users(db, users_to_delete_list)
+    return users_to_delete_list
 
 
-def get_all_users_usages( # Renamed parameter `admin` to `admin_filter_obj` for clarity
-        db: Session, admin_filter_obj: Optional[Admin], start: datetime, end: datetime # admin can be None
+def get_all_users_usages(
+        db: Session, admin_usernames: Optional[List[str]], start: datetime, end: datetime # Changed param name for clarity
 ) -> List[UserUsageResponse]:
-    """
-    Retrieves usage data for all users (optionally filtered by an admin) within a specified time range.
-    """
     usages: Dict[Union[int, None], UserUsageResponse] = {
-        0: UserUsageResponse(node_id=None, node_name="Master", used_traffic=0)
+        None: UserUsageResponse(node_id=None, node_name="Master", used_traffic=0)
     }
-    for node in db.query(Node).all():
-        usages[node.id] = UserUsageResponse(node_id=node.id, node_name=node.name, used_traffic=0)
+    for node_obj in db.query(Node).all(): # Renamed var
+        usages[node_obj.id] = UserUsageResponse(node_id=node_obj.id, node_name=node_obj.name, used_traffic=0)
 
-    # Build user ID filter based on admin_filter_obj
-    user_id_filter_condition = None
-    if admin_filter_obj:
-        # Get IDs of users belonging to this admin
-        admin_user_ids = db.query(User.id).filter(User.admin_id == admin_filter_obj.id).subquery()
-        user_id_filter_condition = NodeUserUsage.user_id.in_(admin_user_ids)
-
-    # Base condition for date range
     usage_query_conditions = [
         NodeUserUsage.created_at >= start,
         NodeUserUsage.created_at <= end
     ]
-    if user_id_filter_condition is not None:
-        usage_query_conditions.append(user_id_filter_condition)
+    if admin_usernames: # If a list of admin usernames is provided
+        admin_ids_subquery = db.query(Admin.id).filter(Admin.username.in_(admin_usernames)).subquery()
+        user_ids_subquery = db.query(DBUser.id).filter(DBUser.admin_id.in_(admin_ids_subquery)).subquery()
+        usage_query_conditions.append(NodeUserUsage.user_id.in_(user_ids_subquery)) # type: ignore
 
-    for v in db.query(NodeUserUsage).filter(and_(*usage_query_conditions)):
-        key_to_use = v.node_id if v.node_id is not None else 0
-        if key_to_use in usages: # Ensure the node_id exists in our prepared dict
-            usages[key_to_use].used_traffic += v.used_traffic
-        # else:
-            # Optional: log if usage is found for a node_id not in the Node table (should not happen with FKs)
-            # print(f"Warning: Usage found for unexpected node_id: {v.node_id}")
+    for v_usage in db.query(NodeUserUsage).filter(and_(*usage_query_conditions)): # Renamed var
+        key_to_use = v_usage.node_id
+        if key_to_use in usages:
+            usages[key_to_use].used_traffic += v_usage.used_traffic
+        else:
+            logger.warning(f"Usage found for unexpected node_id: {v_usage.node_id} in get_all_users_usages")
+            usages[key_to_use] = UserUsageResponse(node_id=v_usage.node_id, node_name=f"Unknown Node {v_usage.node_id}", used_traffic=v_usage.used_traffic)
 
 
     return list(usages.values())
 
 
-def update_user_status(db: Session, dbuser: User, status: UserStatus) -> User:
-    """
-    Updates a user's status and records the time of change.
-    """
-    if dbuser.status != status: # Only update if status actually changes
+def update_user_status(db: Session, dbuser: DBUser, status: UserStatus) -> DBUser:
+    if dbuser.status != status:
         dbuser.status = status
         dbuser.last_status_change = datetime.utcnow()
+        # If status change implies XRay deactivation (e.g., to disabled/expired)
+        # and user has an active node, this should be handled by xray.operations.update_user.
+        # This CRUD is just for DB state.
+        # if status not in [UserStatus.active, UserStatus.on_hold] and dbuser.active_node_id is not None:
+        #     dbuser.active_node_id = None # Potentially clear active node if status becomes inactive
         db.commit()
         db.refresh(dbuser)
     return dbuser
 
 
-def set_owner(db: Session, dbuser: User, admin: Admin) -> User:
-    """
-    Sets the owner (admin) of a user.
-    """
-    dbuser.admin_id = admin.id # Set by admin_id
-    # dbuser.admin = admin # Relationship will update
+def set_owner(db: Session, dbuser: DBUser, admin: Admin) -> DBUser:
+    dbuser.admin_id = admin.id
     db.commit()
     db.refresh(dbuser)
-    # return get_user_by_id(db, dbuser.id) # Re-fetch with eager loads
-    return dbuser
+    return get_user_by_id(db, dbuser.id) or dbuser
 
 
-def start_user_expire(db: Session, dbuser: User) -> User:
-    """
-    Starts the expiration timer for a user if they were on hold.
-    """
-    if dbuser.on_hold_expire_duration is not None: # Check if there was a duration
+def start_user_expire(db: Session, dbuser: DBUser) -> DBUser:
+    if dbuser.on_hold_expire_duration is not None:
         expire_timestamp = int(datetime.utcnow().timestamp()) + dbuser.on_hold_expire_duration
         dbuser.expire = expire_timestamp
-        dbuser.on_hold_expire_duration = None # Clear on_hold specific fields
+        dbuser.on_hold_expire_duration = None
         dbuser.on_hold_timeout = None
-        if dbuser.status == UserStatus.on_hold : # If status was on_hold, make it active
+        if dbuser.status == UserStatus.on_hold:
             dbuser.status = UserStatus.active
             dbuser.last_status_change = datetime.utcnow()
         db.commit()
         db.refresh(dbuser)
     return dbuser
 
-
-def get_system_usage(db: Session) -> Optional[System]: # Can be Optional if table is empty
-    """
-    Retrieves system usage information.
-    """
+# --- System, JWT, TLS --- (Largely unchanged unless related to new model)
+def get_system_usage(db: Session) -> Optional[System]:
     return db.query(System).first()
 
-
-def get_jwt_secret_key(db: Session) -> Optional[str]: # Can be Optional
-    """
-    Retrieves the JWT secret key.
-    """
+def get_jwt_secret_key(db: Session) -> Optional[str]:
     jwt_record = db.query(JWT).first()
     return jwt_record.secret_key if jwt_record else None
 
-
-def get_tls_certificate(db: Session) -> Optional[TLS]: # Can be Optional
-    """
-    Retrieves the TLS certificate.
-    """
+def get_tls_certificate(db: Session) -> Optional[TLS]:
     return db.query(TLS).first()
 
+# --- Admin --- (Largely unchanged unless related to new user model interactions)
+def get_admin(db: Session, username: str) -> Optional[Admin]:
+    return db.query(Admin).filter(func.lower(Admin.username) == func.lower(username)).first() # Case-insensitive
 
-def get_admin(db: Session, username: str) -> Optional[Admin]: # Can be Optional
-    """
-    Retrieves an admin by username.
-    """
-    return db.query(Admin).filter(Admin.username == username).first()
-
-
-def create_admin(db: Session, admin: AdminCreate) -> Admin:
-    """
-    Creates a new admin in the database.
-    """
+def create_admin(db: Session, admin_data: AdminCreate) -> Admin: # Renamed param
     dbadmin = Admin(
-        username=admin.username,
-        # Assuming AdminCreate has hashed_password, not plain password
-        hashed_password=admin.password, # If AdminCreate.password is already hashed
-        is_sudo=admin.is_sudo if admin.is_sudo is not None else False, # Default for is_sudo
-        telegram_id=admin.telegram_id, # Keep as is, None is valid
-        discord_webhook=admin.discord_webhook
+        username=admin_data.username,
+        hashed_password=admin_data.password, # Assuming AdminCreate.password is already hashed
+        is_sudo=admin_data.is_sudo if admin_data.is_sudo is not None else False,
+        telegram_id=admin_data.telegram_id,
+        discord_webhook=admin_data.discord_webhook
     )
     db.add(dbadmin)
     db.commit()
     db.refresh(dbadmin)
     return dbadmin
 
-
-def update_admin(db: Session, dbadmin: Admin, modified_admin: AdminModify) -> Admin:
-    """
-    Updates an admin's details.
-    """
-    # AdminModify likely has all fields optional or required as per its definition
-    # This was from user's code. Assuming AdminModify has hashed_password.
-    if modified_admin.password is not None and dbadmin.hashed_password != modified_admin.password:
-        dbadmin.hashed_password = modified_admin.password
+def update_admin(db: Session, dbadmin: Admin, modified_admin_data: AdminModify) -> Admin: # Renamed param
+    if modified_admin_data.password is not None and dbadmin.hashed_password != modified_admin_data.password:
+        dbadmin.hashed_password = modified_admin_data.password # Assuming already hashed
         dbadmin.password_reset_at = datetime.utcnow()
 
-    # is_sudo is required boolean in AdminModify based on user's original file
-    dbadmin.is_sudo = modified_admin.is_sudo
+    dbadmin.is_sudo = modified_admin_data.is_sudo # is_sudo is required in AdminModify
 
-    if modified_admin.telegram_id is not None: # Allow setting to None
-        dbadmin.telegram_id = modified_admin.telegram_id
-
-    if modified_admin.discord_webhook is not None: # Allow setting to None
-        dbadmin.discord_webhook = modified_admin.discord_webhook
+    # Allow clearing telegram_id and discord_webhook by passing None
+    dbadmin.telegram_id = modified_admin_data.telegram_id
+    dbadmin.discord_webhook = modified_admin_data.discord_webhook
 
     db.commit()
     db.refresh(dbadmin)
     return dbadmin
 
-
-def partial_update_admin(db: Session, dbadmin: Admin, modified_admin: AdminPartialModify) -> Admin:
-    """
-    Partially updates an admin's details. Fields in AdminPartialModify are all Optional.
-    """
-    update_data = modified_admin.model_dump(exclude_unset=True)
-
+def partial_update_admin(db: Session, dbadmin: Admin, modified_admin_data: AdminPartialModify) -> Admin: # Renamed param
+    update_data = modified_admin_data.model_dump(exclude_unset=True)
     if "password" in update_data and dbadmin.hashed_password != update_data["password"]:
-        dbadmin.hashed_password = update_data["password"]
+        dbadmin.hashed_password = update_data["password"] # Assuming already hashed
         dbadmin.password_reset_at = datetime.utcnow()
-
     for key, value in update_data.items():
         if key != "password" and hasattr(dbadmin, key):
             setattr(dbadmin, key, value)
-
     db.commit()
     db.refresh(dbadmin)
     return dbadmin
 
-
 def remove_admin(db: Session, dbadmin: Admin) -> Admin:
-    """
-    Removes an admin from the database.
-    """
     db.delete(dbadmin)
     db.commit()
     return dbadmin
 
+def get_admin_by_id(db: Session, admin_id: int) -> Optional[Admin]: # Renamed param
+    return db.query(Admin).filter(Admin.id == admin_id).first()
 
-def get_admin_by_id(db: Session, id: int) -> Optional[Admin]: # Can be Optional
-    """
-    Retrieves an admin by their ID.
-    """
-    return db.query(Admin).filter(Admin.id == id).first()
-
-
-def get_admin_by_telegram_id(db: Session, telegram_id: int) -> Optional[Admin]: # Can be Optional
-    """
-    Retrieves an admin by their Telegram ID.
-    """
+def get_admin_by_telegram_id(db: Session, telegram_id: int) -> Optional[Admin]:
     return db.query(Admin).filter(Admin.telegram_id == telegram_id).first()
 
-
-def get_admins(db: Session,
-               offset: Optional[int] = None,
-               limit: Optional[int] = None,
-               username: Optional[str] = None) -> List[Admin]:
-    """
-    Retrieves a list of admins with optional filters and pagination.
-    """
+def get_admins(db: Session, offset: Optional[int] = None, limit: Optional[int] = None, username: Optional[str] = None) -> List[Admin]:
     query = db.query(Admin)
     if username:
-        query = query.filter(Admin.username.ilike(f'%{username}%')) # Case-insensitive search
-    if offset is not None:
-        query = query.offset(offset)
-    if limit is not None:
-        query = query.limit(limit)
+        query = query.filter(Admin.username.ilike(f'%{username}%'))
+    if offset is not None: query = query.offset(offset)
+    if limit is not None: query = query.limit(limit)
     return query.all()
 
-
-def reset_admin_usage(db: Session, dbadmin: Admin) -> Admin: # Return type Admin
-    """
-    Resets an admin's user_usage count and logs the previous usage.
-    """
-    if dbadmin.users_usage == 0: # No usage to reset
-        return dbadmin
-
-    usage_log = AdminUsageLogs(
-        admin_id=dbadmin.id, # Set admin_id
-        used_traffic_at_reset=dbadmin.users_usage
-    )
+def reset_admin_usage(db: Session, dbadmin: Admin) -> Admin:
+    if dbadmin.users_usage == 0: return dbadmin
+    usage_log = AdminUsageLogs(admin_id=dbadmin.id, used_traffic_at_reset=dbadmin.users_usage)
     db.add(usage_log)
     dbadmin.users_usage = 0
-
     db.commit()
     db.refresh(dbadmin)
     return dbadmin
 
+# --- User Template --- (Largely unchanged)
+def create_user_template(db: Session, user_template_data: UserTemplateCreate) -> UserTemplate: # Renamed param
+    inbound_tags_list: List[str] = [] # Renamed param
+    if user_template_data.inbounds:
+        for _, tag_list_val in user_template_data.inbounds.items(): # Renamed param
+            inbound_tags_list.extend(tag_list_val)
 
-def create_user_template(db: Session, user_template: UserTemplateCreate) -> UserTemplate:
-    """
-    Creates a new user template in the database.
-    Note: The `inbounds` logic here assumes UserTemplates still restrict inbounds.
-    If templates should also allow all inbounds, this part needs refactoring.
-    """
-    inbound_tags: List[str] = []
-    if user_template.inbounds: # Check if inbounds is provided
-        for _, tag_list in user_template.inbounds.items(): # Iterate over protocol: [tags]
-            inbound_tags.extend(tag_list)
+    db_inbounds_for_template_list = [] # Renamed param
+    if inbound_tags_list:
+        db_inbounds_for_template_list = db.query(ProxyInbound).filter(ProxyInbound.tag.in_(inbound_tags_list)).all()
 
-    db_inbounds_for_template = []
-    if inbound_tags: # Only query if there are tags specified
-        db_inbounds_for_template = db.query(ProxyInbound).filter(ProxyInbound.tag.in_(inbound_tags)).all()
-
-    dbuser_template = UserTemplate(
-        name=user_template.name,
-        data_limit=user_template.data_limit if user_template.data_limit is not None else 0,
-        expire_duration=user_template.expire_duration if user_template.expire_duration is not None else 0,
-        username_prefix=user_template.username_prefix,
-        username_suffix=user_template.username_suffix,
-        inbounds=db_inbounds_for_template # Assign the fetched ProxyInbound objects
+    dbuser_template_obj = UserTemplate( # Renamed param
+        name=user_template_data.name,
+        data_limit=user_template_data.data_limit if user_template_data.data_limit is not None else 0,
+        expire_duration=user_template_data.expire_duration if user_template_data.expire_duration is not None else 0,
+        username_prefix=user_template_data.username_prefix,
+        username_suffix=user_template_data.username_suffix,
+        inbounds=db_inbounds_for_template_list
     )
-    db.add(dbuser_template)
+    db.add(dbuser_template_obj)
     db.commit()
-    db.refresh(dbuser_template)
-    return dbuser_template
+    db.refresh(dbuser_template_obj)
+    return dbuser_template_obj
 
-
-def update_user_template(
-        db: Session, dbuser_template: UserTemplate, modified_user_template: UserTemplateModify) -> UserTemplate:
-    """
-    Updates a user template's details.
-    Note: The `inbounds` logic here assumes UserTemplates still restrict inbounds.
-    """
-    update_data = modified_user_template.model_dump(exclude_unset=True, exclude={'inbounds'})
-
+def update_user_template(db: Session, dbuser_template_obj: UserTemplate, modified_user_template_data: UserTemplateModify) -> UserTemplate: # Renamed params
+    update_data = modified_user_template_data.model_dump(exclude_unset=True, exclude={'inbounds'})
     for key, value in update_data.items():
-        if hasattr(dbuser_template, key):
-            setattr(dbuser_template, key, value)
+        if hasattr(dbuser_template_obj, key): setattr(dbuser_template_obj, key, value)
 
-    if modified_user_template.inbounds is not None: # If inbounds are part of the modification payload
-        inbound_tags: List[str] = []
-        for _, tag_list in modified_user_template.inbounds.items():
-            inbound_tags.extend(tag_list)
+    if modified_user_template_data.inbounds is not None:
+        inbound_tags_list: List[str] = [] # Renamed
+        for _, tag_list_val in modified_user_template_data.inbounds.items(): # Renamed
+            inbound_tags_list.extend(tag_list_val)
 
-        db_inbounds_for_template = []
-        if inbound_tags: # Only query if there are tags specified
-            db_inbounds_for_template = db.query(ProxyInbound).filter(ProxyInbound.tag.in_(inbound_tags)).all()
-        dbuser_template.inbounds = db_inbounds_for_template # Replace existing inbounds
+        db_inbounds_for_template_list = [] # Renamed
+        if inbound_tags_list:
+            db_inbounds_for_template_list = db.query(ProxyInbound).filter(ProxyInbound.tag.in_(inbound_tags_list)).all()
+        dbuser_template_obj.inbounds = db_inbounds_for_template_list
 
     db.commit()
-    db.refresh(dbuser_template)
-    return dbuser_template
+    db.refresh(dbuser_template_obj)
+    return dbuser_template_obj
 
-
-def remove_user_template(db: Session, dbuser_template: UserTemplate):
-    """
-    Removes a user template from the database.
-    """
-    db.delete(dbuser_template)
+def remove_user_template(db: Session, dbuser_template_obj: UserTemplate): # Renamed param
+    db.delete(dbuser_template_obj)
     db.commit()
 
-
-def get_user_template(db: Session, user_template_id: int) -> Optional[UserTemplate]: # Can be Optional
-    """
-    Retrieves a user template by its ID.
-    """
+def get_user_template(db: Session, user_template_id: int) -> Optional[UserTemplate]:
     return db.query(UserTemplate).options(joinedload(UserTemplate.inbounds)).filter(UserTemplate.id == user_template_id).first()
 
-
-def get_user_templates(
-        db: Session, offset: Optional[int] = None, limit: Optional[int] = None) -> List[UserTemplate]:
-    """
-    Retrieves a list of user templates with optional pagination.
-    """
-    query = db.query(UserTemplate).options(joinedload(UserTemplate.inbounds)) # Eager load inbounds
-    if offset is not None:
-        query = query.offset(offset)
-    if limit is not None:
-        query = query.limit(limit)
-
+def get_user_templates(db: Session, offset: Optional[int] = None, limit: Optional[int] = None) -> List[UserTemplate]:
+    query = db.query(UserTemplate).options(joinedload(UserTemplate.inbounds))
+    if offset is not None: query = query.offset(offset)
+    if limit is not None: query = query.limit(limit)
     return query.all()
 
-
-def get_node(db: Session, name: str) -> Optional[Node]: # node_id was used in the end of file, use name here as per signature
-    """
-    Retrieves a node by its name.
-    """
-    return db.query(Node).filter(func.lower(Node.name) == func.lower(name)).first() # Case-insensitive name search
-
+# --- Node --- (Largely unchanged regarding direct user linking in these CRUDs)
+def get_node(db: Session, name: str) -> Optional[Node]:
+    return db.query(Node).filter(func.lower(Node.name) == func.lower(name)).first()
 
 def get_node_by_id(db: Session, node_id: int) -> Optional[Node]:
-    """
-    Retrieves a node by its ID.
-    """
     return db.query(Node).filter(Node.id == node_id).first()
 
-
-def get_nodes(db: Session,
-              status: Optional[Union[NodeStatus, list]] = None,
-              enabled: Optional[bool] = None) -> List[Node]: # enabled can be None
-    """
-    Retrieves nodes based on optional status and enabled filters.
-    """
+def get_nodes(db: Session, status: Optional[Union[NodeStatus, list]] = None, enabled: Optional[bool] = None) -> List[Node]:
     query = db.query(Node)
-
     if status:
-        if isinstance(status, list):
-            query = query.filter(Node.status.in_(status))
-        else:
-            query = query.filter(Node.status == status)
-
-    if enabled is not None: # Check if enabled filter is applied
-        if enabled: # True: only enabled nodes (not disabled)
-            query = query.filter(Node.status != NodeStatus.disabled)
-        # else: # False: only disabled nodes (if that's the desired interpretation)
-            # query = query.filter(Node.status == NodeStatus.disabled)
-
+        if isinstance(status, list): query = query.filter(Node.status.in_(status))
+        else: query = query.filter(Node.status == status)
+    if enabled is not None:
+        if enabled: query = query.filter(Node.status != NodeStatus.disabled)
+        # else: query = query.filter(Node.status == NodeStatus.disabled) # Only if explicit "show only disabled" is needed
     return query.all()
 
-
 def get_nodes_usage(db: Session, start: datetime, end: datetime) -> List[NodeUsageResponse]:
-    """
-    Retrieves usage data for all nodes within a specified time range.
-    """
-    usages: Dict[Union[int, None], NodeUsageResponse] = { # type hint for key
-        0: NodeUsageResponse(node_id=None, node_name="Master", uplink=0, downlink=0)
+    usages: Dict[Union[int, None], NodeUsageResponse] = {
+        None: NodeUsageResponse(node_id=None, node_name="Master", uplink=0, downlink=0)
     }
-
-    for node in db.query(Node).all():
-        usages[node.id] = NodeUsageResponse(
-            node_id=node.id,
-            node_name=node.name,
-            uplink=0,
-            downlink=0
-        )
+    for node_obj in db.query(Node).all(): # Renamed var
+        usages[node_obj.id] = NodeUsageResponse(node_id=node_obj.id, node_name=node_obj.name, uplink=0, downlink=0)
 
     cond = and_(NodeUsage.created_at >= start, NodeUsage.created_at <= end)
-
-    for v in db.query(NodeUsage).filter(cond):
-        key_to_use = v.node_id if v.node_id is not None else 0
+    for v_usage in db.query(NodeUsage).filter(cond): # Renamed var
+        key_to_use = v_usage.node_id
         if key_to_use in usages:
-            usages[key_to_use].uplink += v.uplink
-            usages[key_to_use].downlink += v.downlink
-        # else:
-            # print(f"Warning: Usage logged for unknown node_id {v.node_id} in get_nodes_usage")
-
+            usages[key_to_use].uplink += v_usage.uplink
+            usages[key_to_use].downlink += v_usage.downlink
+        else:
+            logger.warning(f"Usage found for unexpected node_id: {v_usage.node_id} in get_nodes_usage")
+            usages[key_to_use] = NodeUsageResponse(node_id=v_usage.node_id, node_name=f"Unknown Node {v_usage.node_id}", uplink=v_usage.uplink, downlink=v_usage.downlink)
 
     return list(usages.values())
 
-
-def create_node(db: Session, node: NodeCreate) -> Node:
-    """
-    Creates a new node in the database.
-    """
+def create_node(db: Session, node_data: NodeCreate) -> Node: # Renamed param
     dbnode = Node(
-        name=node.name,
-        address=node.address,
-        port=node.port,
-        api_port=node.api_port,
-        usage_coefficient=node.usage_coefficient # Added from NodeCreate model
+        name=node_data.name,
+        address=node_data.address,
+        port=node_data.port,
+        api_port=node_data.api_port,
+        usage_coefficient=node_data.usage_coefficient
     )
     db.add(dbnode)
     db.commit()
     db.refresh(dbnode)
     return dbnode
 
-
-def remove_node(db: Session, dbnode: Node) -> Node:
-    """
-    Removes a node from the database.
-    """
-    db.delete(dbnode)
+def remove_node(db: Session, dbnode_obj: Node) -> Node: # Renamed param
+    # Important: Consider what happens to users whose active_node_id points to this node.
+    # The API layer or a service layer should handle deactivating users from this node
+    # or reassigning them *before* calling this low-level CRUD remove_node.
+    # This function will just delete the node.
+    # db.query(DBUser).filter(DBUser.active_node_id == dbnode_obj.id).update({"active_node_id": None}, synchronize_session=False)
+    db.delete(dbnode_obj)
     db.commit()
-    return dbnode
+    return dbnode_obj
 
-
-def update_node(db: Session, dbnode: Node, modify: NodeModify) -> Node:
-    """
-    Updates an existing node with new information.
-    """
-    update_data = modify.model_dump(exclude_unset=True)
-    original_status = dbnode.status
+def update_node(db: Session, dbnode_obj: Node, modify_data: NodeModify) -> Node: # Renamed params
+    update_data = modify_data.model_dump(exclude_unset=True)
+    original_status = dbnode_obj.status
 
     for key, value in update_data.items():
-        if hasattr(dbnode, key):
-            setattr(dbnode, key, value)
+        if hasattr(dbnode_obj, key): setattr(dbnode_obj, key, value)
 
-    # If status is changed to disabled, clear version and message
-    if 'status' in update_data and dbnode.status == NodeStatus.disabled:
-        dbnode.xray_version = None
-        dbnode.message = None
-    # If status is changed from disabled to something else (and not just being set), set to connecting
-    elif 'status' in update_data and original_status == NodeStatus.disabled and dbnode.status != NodeStatus.disabled:
-        dbnode.status = NodeStatus.connecting # Default to connecting when re-enabling
-        dbnode.last_status_change = datetime.utcnow() # Also update change time
+    if 'status' in update_data:
+        if dbnode_obj.status == NodeStatus.disabled:
+            dbnode_obj.xray_version = None
+            dbnode_obj.message = None
+        elif original_status == NodeStatus.disabled and dbnode_obj.status != NodeStatus.disabled:
+            dbnode_obj.status = NodeStatus.connecting
 
-    if 'status' in update_data and dbnode.status != original_status:
-         dbnode.last_status_change = datetime.utcnow()
-
+        if dbnode_obj.status != original_status:
+            dbnode_obj.last_status_change = datetime.utcnow()
 
     db.commit()
-    db.refresh(dbnode)
-    return dbnode
+    db.refresh(dbnode_obj)
+    return dbnode_obj
 
-
-def update_node_status(db: Session, dbnode: Node, status: NodeStatus, message: Optional[str] = None, version: Optional[str] = None) -> Node:
-    """
-    Updates the status of a node.
-    """
-    if dbnode.status != status or dbnode.message != message or dbnode.xray_version != version:
-        dbnode.status = status
-        dbnode.message = message
-        dbnode.xray_version = version
-        dbnode.last_status_change = datetime.utcnow()
+def update_node_status(db: Session, dbnode_obj: Node, status: NodeStatus, message: Optional[str] = None, version: Optional[str] = None) -> Node: # Renamed param
+    if dbnode_obj.status != status or dbnode_obj.message != message or (version is not None and dbnode_obj.xray_version != version):
+        dbnode_obj.status = status
+        dbnode_obj.message = message
+        if version is not None: dbnode_obj.xray_version = version
+        dbnode_obj.last_status_change = datetime.utcnow()
         db.commit()
-        db.refresh(dbnode)
-    return dbnode
+        db.refresh(dbnode_obj)
+    return dbnode_obj
 
-
-def create_notification_reminder(
-        db: Session, reminder_type: ReminderType, expires_at: datetime, user_id: int, threshold: Optional[int] = None) -> NotificationReminder:
-    """
-    Creates a new notification reminder.
-    """
-    reminder = NotificationReminder(
-        type=reminder_type,
-        expires_at=expires_at,
-        user_id=user_id,
-        threshold=threshold # threshold can be None
-    )
+# --- Notification Reminders --- (Largely unchanged)
+def create_notification_reminder(db: Session, reminder_type: ReminderType, expires_at: datetime, user_id: int, threshold: Optional[int] = None) -> NotificationReminder:
+    reminder = NotificationReminder(type=reminder_type, expires_at=expires_at, user_id=user_id, threshold=threshold)
     db.add(reminder)
     db.commit()
     db.refresh(reminder)
     return reminder
 
-
-def get_notification_reminder(
-        db: Session, user_id: int, reminder_type: ReminderType, threshold: Optional[int] = None
-) -> Optional[NotificationReminder]: # Return type can be Optional
-    """
-    Retrieves a notification reminder for a user. If expired, it's deleted and None is returned.
-    """
+def get_notification_reminder(db: Session, user_id: int, reminder_type: ReminderType, threshold: Optional[int] = None) -> Optional[NotificationReminder]:
     query = db.query(NotificationReminder).filter(
         NotificationReminder.user_id == user_id,
         NotificationReminder.type == reminder_type
     )
-
-    if threshold is not None:
-        query = query.filter(NotificationReminder.threshold == threshold)
-    # else: # If threshold is None, explicitly filter for reminders where threshold is NULL
-    #     query = query.filter(NotificationReminder.threshold.is_(None))
-
+    if threshold is not None: query = query.filter(NotificationReminder.threshold == threshold)
+    else: query = query.filter(NotificationReminder.threshold.is_(None)) # Match NULL thresholds if arg is None
 
     reminder = query.first()
-
-    if reminder is None:
-        return None
-
-    if reminder.expires_at and reminder.expires_at < datetime.utcnow():
+    if reminder and reminder.expires_at and reminder.expires_at < datetime.utcnow():
         db.delete(reminder)
         db.commit()
         return None
-
     return reminder
 
-
-def delete_notification_reminder_by_type(
-        db: Session, user_id: int, reminder_type: ReminderType, threshold: Optional[int] = None
-) -> None:
-    """
-    Deletes a notification reminder for a user based on the reminder type and optional threshold.
-    """
+def delete_notification_reminder_by_type(db: Session, user_id: int, reminder_type: ReminderType, threshold: Optional[int] = None):
     stmt = delete(NotificationReminder).where(
         NotificationReminder.user_id == user_id,
         NotificationReminder.type == reminder_type
     )
-
-    if threshold is not None:
-        stmt = stmt.where(NotificationReminder.threshold == threshold)
-    # else: # If threshold is None, delete reminders of that type where threshold is NULL
-    #     stmt = stmt.where(NotificationReminder.threshold.is_(None))
-
-
+    if threshold is not None: stmt = stmt.where(NotificationReminder.threshold == threshold)
+    else: stmt = stmt.where(NotificationReminder.threshold.is_(None))
     db.execute(stmt)
     db.commit()
 
-
-def delete_notification_reminder(db: Session, dbreminder: NotificationReminder) -> None:
-    """
-    Deletes a specific notification reminder.
-    """
-    db.delete(dbreminder)
+def delete_notification_reminder(db: Session, dbreminder_obj: NotificationReminder): # Renamed param
+    db.delete(dbreminder_obj)
     db.commit()
-    # No return needed
 
-
+# --- Misc ---
 def count_online_users(db: Session, hours: int = 24) -> int:
-    """Counts users who were online in the last N hours."""
     time_threshold = datetime.utcnow() - timedelta(hours=hours)
-    query = db.query(func.count(User.id)).filter(
-        User.online_at.isnot(None),
-        User.online_at >= time_threshold
-    )
-    count = query.scalar() # Use scalar() instead of scalar_one_or_none
+    count = db.query(func.count(DBUser.id)).filter(DBUser.online_at.isnot(None), DBUser.online_at >= time_threshold).scalar()
     return count if count is not None else 0
 
+
+# --- New CRUD functions for active node model ---
+def get_users_by_active_node(db: Session, node_id: int) -> List[DBUser]:
+    """
+    Retrieves all users who have the specified node_id as their active_node_id.
+    Eager loads relations consistent with get_user_queryset.
+    """
+    return get_user_queryset(db).filter(DBUser.active_node_id == node_id).all()
+
+
+def get_proxy_hosts_by_node_id(db: Session, node_id: int) -> List[DBProxyHost]:
+    """
+    Retrieves all ProxyHost records associated with a specific node_id.
+    """
+    return db.query(DBProxyHost).filter(DBProxyHost.node_id == node_id).all()
+
+def update_user_instance(db: Session, db_user: DBUser) -> DBUser:
+    """
+    Generic update for a user instance that's already been modified in the session.
+    Adds to session (idempotent if already there), commits, and refreshes.
+    """
+    db.add(db_user) # Ensures the object is in the session if it wasn't already attached or was modified
+    db.commit()
+    db.refresh(db_user)
+    return db_user

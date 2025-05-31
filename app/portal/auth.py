@@ -43,53 +43,54 @@ async def get_current_user( # Renamed parameter for clarity
         headers={"WWW-Authenticate": "Bearer"}, # Keep for consistency if other parts use Bearer
     )
 
+    print("[DEBUG] get_current_user: Checking cookies")
+    print(f"[DEBUG] get_current_user: All cookies: {request.cookies}")
     token = request.cookies.get("access_token")
+    print(f"[DEBUG] get_current_user: access_token cookie value: {token}")
 
     if not token:
-        # print("[DEBUG] get_current_user: No access_token cookie found.")
+        print("[DEBUG] get_current_user: No access_token cookie found.")
         raise credentials_exception
 
     if token.startswith("Bearer "):
         token = token.split("Bearer ")[1]
+        print(f"[DEBUG] get_current_user: Token after removing Bearer prefix: {token}")
     else:
-        # print("[DEBUG] get_current_user: Token does not start with Bearer.")
-        # Depending on strictness, you might raise credentials_exception or try to decode anyway
-        # For now, let's be strict as we set it with "Bearer "
+        print("[DEBUG] get_current_user: Token does not start with Bearer.")
         raise credentials_exception
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"[DEBUG] get_current_user: Successfully decoded JWT payload: {payload}")
         account_number: Optional[str] = payload.get("sub")
         if account_number is None:
-            # print("[DEBUG] get_current_user: Token payload does not contain 'sub' (account_number).")
+            print("[DEBUG] get_current_user: Token payload does not contain 'sub' (account_number).")
             raise credentials_exception
     except JWTError as e:
-        # print(f"[DEBUG] get_current_user: JWTError decoding token: {e}")
+        print(f"[DEBUG] get_current_user: JWTError decoding token: {e}")
         raise credentials_exception
-    except Exception as e: # Catch any other decoding errors
-        # print(f"[DEBUG] get_current_user: Generic exception decoding token: {e}")
+    except Exception as e:
+        print(f"[DEBUG] get_current_user: Generic exception decoding token: {e}")
         raise credentials_exception
 
     # --- FETCH REAL USER FROM DB ---
     db_user_orm = crud.get_user(db, account_number=account_number)
+    print(f"[DEBUG] get_current_user: Fetched user from DB: {db_user_orm.account_number if db_user_orm else None}")
 
     if not db_user_orm:
-        # print(f"[DEBUG] get_current_user: User with account_number '{account_number}' not found in DB.")
-        raise credentials_exception # Or a more specific "User not found" if desired
+        print(f"[DEBUG] get_current_user: User with account_number '{account_number}' not found in DB.")
+        raise credentials_exception
 
     # --- VALIDATE WITH PYDANTIC ---
     try:
-        # Ensure UserResponse.model_config has from_attributes = True
         user = UserResponse.model_validate(db_user_orm)
-        # print(f"[DEBUG] get_current_user: Successfully validated user: {user.account_number}")
+        print(f"[DEBUG] get_current_user: Successfully validated user: {user.account_number}")
         return user
     except ValidationError as e:
-        # print(f"[DEBUG] get_current_user: Pydantic ValidationError for user '{account_number}': {e}")
-        # This case means DB data doesn't match Pydantic model, which is a server-side issue.
-        # For security, still raise credentials_exception to the client.
+        print(f"[DEBUG] get_current_user: Pydantic ValidationError for user '{account_number}': {e}")
         raise credentials_exception
     except Exception as e:
-        # print(f"[DEBUG] get_current_user: Generic exception during Pydantic validation for user '{account_number}': {e}")
+        print(f"[DEBUG] get_current_user: Generic exception during Pydantic validation for user '{account_number}': {e}")
         raise credentials_exception
 
 

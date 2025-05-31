@@ -61,19 +61,16 @@ class NextPlanModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class User(BaseModel): # This is the base Pydantic model for User data
+class User(BaseModel):
     account_number: str = Field(..., description="Account number for the user (UUID)")
     proxies: Dict[ProxyTypes, ProxySettings] = Field(default_factory=dict)
     expire: Optional[int] = Field(None, nullable=True)
-    data_limit: Optional[int] = Field(
-        default=None, ge=0, description="data_limit can be 0 or greater" # ge=0 was from original
-    )
+    # MODIFICATION START: Remove ge=0 and rely on the validator below
+    data_limit: Optional[int] = Field(None, description="Data limit in bytes, None for unlimited")
+    # MODIFICATION END
     data_limit_reset_strategy: UserDataLimitResetStrategy = (
         UserDataLimitResetStrategy.no_reset
     )
-    # REMOVED: 'inbounds' field. Admins don't set this as a restriction.
-    # User.inbounds property on SQLAlchemy model provides all available ones.
-    # This will be populated in UserResponse from the ORM model.
     note: Optional[str] = Field(None, nullable=True)
     sub_updated_at: Optional[datetime] = Field(None, nullable=True)
     sub_last_user_agent: Optional[str] = Field(None, nullable=True)
@@ -83,16 +80,27 @@ class User(BaseModel): # This is the base Pydantic model for User data
     auto_delete_in_days: Optional[int] = Field(None, nullable=True)
     next_plan: Optional[NextPlanModel] = Field(None, nullable=True)
 
+    # REMOVE the old @field_validator('data_limit', mode='before') def cast_to_int
+    # REPLACE with the new comprehensive validator:
     @field_validator('data_limit', mode='before')
-    def cast_to_int(cls, v):
-        # ... (existing logic)
-        if v is None: return v
-        if isinstance(v, (float, int)): return int(v)
-        raise ValueError("data_limit must be an integer or a float")
+    def validate_data_limit(cls, v):
+        if v is None:
+            return None  # Allow None
+        try:
+            # Attempt to cast to int, this will handle floats like 10.0 correctly
+            val = int(v)
+        except (ValueError, TypeError):
+            # If casting fails (e.g., it's a string like "abc" or an incompatible type)
+            raise ValueError("data_limit must be a number (e.g., 100, 100.0, or null)")
 
+        if val < 0:
+            raise ValueError("data_limit must be non-negative")
+        return val
+
+    # Keep other existing validators as they are, for example:
     @field_validator("proxies", mode="before")
-    def validate_proxies(cls, v, values, **kwargs):
-        # ... (existing logic)
+    def validate_proxies(cls, v, values, **kwargs): # Ensure this signature matches your Pydantic version if it's older
+        # ... (existing logic from your file)
         if v is None: return {}
         return {
             ProxyTypes(proxy_type_key): ProxySettings.from_dict(
@@ -101,17 +109,17 @@ class User(BaseModel): # This is the base Pydantic model for User data
             for proxy_type_key in v
         }
 
-    @field_validator("note") # Removed check_fields=False, it's default in Pydantic v2 for single field
+    @field_validator("note")
     @classmethod
     def validate_note(cls, v):
-        # ... (existing logic)
+        # ... (existing logic from your file)
         if v and len(v) > 500:
             raise ValueError("User's note can be a maximum of 500 character")
         return v
 
     @field_validator("on_hold_expire_duration", "on_hold_timeout", mode="before")
     def validate_timeout(cls, v, info): # Pydantic v2 uses info (ValidationInfo)
-        # ... (existing logic)
+        # ... (existing logic from your file)
         if v in (0, None): return None
         return v
 
@@ -155,8 +163,7 @@ class UserModify(User):
     account_number: Optional[str] = Field(None, description="Account number (UUID), should not be changed here, used for path param.")
     status: Optional[UserStatusModify] = None
     data_limit_reset_strategy: Optional[UserDataLimitResetStrategy] = None
-    proxies: Optional[Dict[ProxyTypes, ProxySettings]] = Field(default_factory=dict)
-    # REMOVED: inbounds: Optional[Dict[ProxyTypes, List[str]]] = Field(default_factory=dict)
+    proxies: Optional[Dict[ProxyTypes, ProxySettings]] = None
 
     model_config = ConfigDict(from_attributes=True, json_schema_extra={ # Added from_attributes=True
         "example": {
@@ -203,33 +210,32 @@ class UserResponse(User):
 
     # ADDED: inbounds field, will be populated from ORM User.inbounds property
     inbounds: Dict[ProxyTypes, List[str]] = Field(default_factory=dict)
-
-    # REMOVED: excluded_inbounds: Dict[ProxyTypes, List[str]] = Field(default_factory=dict)
+    active_node_id: Optional[int] = None
 
     admin: Optional[Admin] = None # Or AdminResponse model
     model_config = ConfigDict(from_attributes=True) # Enables ORM mode
 
     @model_validator(mode="after")
     def build_dynamic_fields(self) -> 'UserResponse':
-        # The 'inbounds' field should be automatically populated from the
-        # User ORM model's 'inbounds' property due to from_attributes=True.
-        # If it's not, and you have access to the ORM object (e.g. self.__pydantic_private__.get('_orm_model')),
-        # you could populate it here, but Pydantic v2 aims to make this more direct.
 
         if not self.links and self.proxies and self.inbounds:
-             # generate_v2ray_links now uses self.inbounds which reflects all available inbounds
+
             self.links = generate_v2ray_links(
                 proxies=self.proxies,
-                inbounds=self.inbounds, # Pass the populated inbounds
-                extra_data=self.model_dump(), # Pass current model state
+                inbounds=self.inbounds,
+                extra_data=self.model_dump(),
                 reverse=False,
+                active_node_id=self.active_node_id
             )
+
         if not self.subscription_url:
             salt = secrets.token_hex(8)
             url_prefix = (XRAY_SUBSCRIPTION_URL_PREFIX).replace('*', salt)
             token = create_subscription_token(self.account_number)
             self.subscription_url = f"{url_prefix}/{XRAY_SUBSCRIPTION_PATH}/{token}"
+
         return self
+
 
     @field_validator("proxies", mode="before")
     def validate_proxies_response(cls, v, info):
@@ -258,10 +264,24 @@ class UserResponse(User):
 
     @field_validator("used_traffic", "lifetime_used_traffic", mode='before')
     def cast_traffic_to_int(cls, v):
-        # ... (existing logic)
-        if v is None: return 0
-        if isinstance(v, (float, int)): return int(v)
-        raise ValueError("Traffic value must be an integer or a float")
+        print(f"[DEBUG] cast_traffic_to_int: Input value: {v}, type: {type(v)}")
+        if v is None:
+            print("[DEBUG] cast_traffic_to_int: Value is None, returning 0")
+            return 0
+        try:
+            if isinstance(v, (float, int)):
+                result = int(v)
+                print(f"[DEBUG] cast_traffic_to_int: Converted {v} to int: {result}")
+                return result
+            if isinstance(v, str):
+                result = int(float(v))
+                print(f"[DEBUG] cast_traffic_to_int: Converted string {v} to int: {result}")
+                return result
+            print(f"[DEBUG] cast_traffic_to_int: Unhandled type {type(v)}, returning 0")
+            return 0
+        except (ValueError, TypeError) as e:
+            print(f"[DEBUG] cast_traffic_to_int: Error converting value: {e}")
+            return 0
 
 
 class SubscriptionUserResponse(UserResponse):

@@ -90,6 +90,8 @@ class User(Base):
     auto_delete_in_days = Column(Integer, nullable=True, default=None)
     edit_at = Column(DateTime, nullable=True, default=None)
     last_status_change = Column(DateTime, default=datetime.utcnow, nullable=True)
+    active_node_id = Column(Integer, ForeignKey("nodes.id", name="fk_user_active_node"), nullable=True, index=True)
+    active_node = relationship("Node", foreign_keys=[active_node_id], backref="active_users")
 
     next_plan = relationship(
         "NextPlan",
@@ -97,9 +99,6 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan"
     )
-
-    # REMOVED: selected_nodes relationship
-    # selected_nodes = relationship("UserNodeSelection", back_populates="user", cascade="all, delete-orphan")
 
     @hybrid_property
     def reseted_usage(self) -> int:
@@ -234,9 +233,6 @@ class ProxyInbound(Base):
 
 class ProxyHost(Base):
     __tablename__ = "hosts"
-    # __table_args__ = (
-    #     UniqueConstraint('inbound_tag', 'remark'),
-    # )
 
     id = Column(Integer, primary_key=True)
     remark = Column(String(256), unique=False, nullable=False)
@@ -275,6 +271,9 @@ class ProxyHost(Base):
     noise_setting = Column(String(2000), nullable=True)
     random_user_agent = Column(Boolean, nullable=False, default=False, server_default='0')
     use_sni_as_host = Column(Boolean, nullable=False, default=False, server_default="0")
+    node_id = Column(Integer, ForeignKey("nodes.id", name="fk_proxy_host_node"), nullable=True, index=True)
+    # Assuming 'Node' model will have a backref like 'proxy_hosts'
+    node = relationship("Node", back_populates="proxy_hosts")
 
 
 class System(Base):
@@ -320,6 +319,8 @@ class Node(Base):
     user_usages = relationship("NodeUserUsage", back_populates="node", cascade="all, delete-orphan")
     usages = relationship("NodeUsage", back_populates="node", cascade="all, delete-orphan")
     usage_coefficient = Column(Float, nullable=False, server_default=text("1.0"), default=1)
+    proxy_hosts = relationship("ProxyHost", back_populates="node", cascade="all, delete-orphan")
+
 
 
 class NodeUserUsage(Base):

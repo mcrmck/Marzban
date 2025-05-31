@@ -1,12 +1,13 @@
 from functools import lru_cache
-from typing import TYPE_CHECKING, Optional, Dict
-
+from typing import TYPE_CHECKING, Optional, Dict, List
+from datetime import datetime
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import logger, xray # xray.api, xray.nodes, xray.config, xray.exc
 from app.db import GetDB, crud # crud is used for node status updates
 from app.models.node import NodeStatus
-from app.models.user import UserResponse # Expecting Pydantic UserResponse
+from app.models.user import UserResponse, UserStatus # Added UserStatus
 from app.models.proxy import ProxyTypes # To iterate user.proxies if needed
 from app.utils.concurrency import threaded_function
 from app.xray.node import XRayNode # For type hinting if node objects are passed directly
@@ -104,160 +105,49 @@ def _alter_inbound_user(api: "XRayAPI", inbound_tag: str, account: Account):
         pass
 
 
-def add_user(user_payload: UserResponse):
-    """
-    Adds a user to all relevant Xray inbounds on the main core and connected nodes.
-    Expects a Pydantic UserResponse model, which should have relationships (proxies, inbounds) resolved.
-    """
-    logger.info(f"Xray Ops: Adding user {user_payload.account_number}")
-    email = user_payload.account_number # User's unique identifier for Xray
+@threaded_function
+def remove_user(account_number: str): # Called when user is fully deleted
+    logger.info(f"Xray Ops: Handling XRay cleanup for deleted user {account_number}.")
+    with GetDB() as db: # Need DB to find their last active node
+        # We fetch the user before they are deleted by the calling crud.remove_user
+        # This assumes this XRay operation is scheduled *before* the DB row is gone.
+        # If UserResponse is passed, use that. If only account_number, need to query.
+        # Let's assume we can get their last active_node_id if needed.
+        # For simplicity, let's assume the caller (API router) provides the active_node_id if known.
+        # OR: this op is primarily for XRay, DB state is handled by router.
+        # This function now only cares about XRay cleanup if an active node was known.
+        # The router should pass the active_node_id at time of deletion.
+        # So, this function might become:
+        pass # This will be replaced by deactivate_user_from_active_node called by the router.
+             # Or, if it must be generic:
+        # with GetDB() as db:
+        #    # This is problematic if user is already deleted from DB when this task runs.
+        #    # The router *must* pass the active_node_id if it wants this to work.
+        #    pass
 
-    # user_payload.inbounds is Dict[ProxyTypes, List[str (tag)]]
-    # user_payload.proxies is Dict[ProxyTypes, ProxySettings (Pydantic)]
-    for proxy_type_enum, inbound_tags_for_type in user_payload.inbounds.items():
-        proxy_settings_pydantic = user_payload.proxies.get(proxy_type_enum)
-        if not proxy_settings_pydantic:
-            logger.warning(f"No proxy settings found for proxy type {proxy_type_enum.value} for user {email}, though inbounds are listed. Skipping Xray add for this type.")
-            continue
+@threaded_function
+def update_user(user_payload: UserResponse): # user_payload is the *new* state
+    logger.info(f"Xray Ops: Updating user {user_payload.account_number} based on new payload.")
+    with GetDB() as db:
+        db_user_orm = crud.get_user(db, user_payload.account_number)
+        if not db_user_orm:
+            logger.error(f"Update failed: User {user_payload.account_number} not found in DB.")
+            return
 
-        # Convert Pydantic ProxySettings to dict for the account model
-        # Assuming .model_dump() is the Pydantic v2 way, or .dict() for v1
-        try:
-            proxy_settings_dict = proxy_settings_pydantic.model_dump(exclude_none=True)
-        except AttributeError: # Fallback for Pydantic v1
-            proxy_settings_dict = proxy_settings_pydantic.dict(exclude_none=True)
+        current_active_node_id = db_user_orm.active_node_id
 
-
-        # Create the Xray Account object
-        # The account_model should be a method or attribute on ProxyTypes enum members
-        try:
-            if not hasattr(proxy_type_enum, 'account_model') or not callable(proxy_type_enum.account_model):
-                logger.error(f"ProxyType {proxy_type_enum.value} does not have a callable 'account_model'. Cannot create Xray account.")
-                continue
-            account = proxy_type_enum.account_model(email=email, **proxy_settings_dict)
-        except Exception as e:
-            logger.error(f"Error creating Xray account model for user {email}, type {proxy_type_enum.value}: {e}")
-            continue
-
-        for inbound_tag in inbound_tags_for_type:
-            inbound_config_details = xray.config.inbounds_by_tag.get(inbound_tag, {})
-            if not inbound_config_details:
-                logger.warning(f"Inbound tag {inbound_tag} not found in xray.config. Skipping for user {email}.")
-                continue
-
-            # Apply XTLS flow logic
-            if hasattr(account, 'flow') and getattr(account, 'flow', None) is not None: # Check if flow attribute exists and is set
-                if (inbound_config_details.get('network', 'tcp') not in ('tcp', 'kcp', 'raw') or # Added 'raw'
-                    (inbound_config_details.get('network', 'tcp') in ('tcp', 'kcp', 'raw') and
-                     inbound_config_details.get('tls') not in ('tls', 'reality')) or
-                    inbound_config_details.get('header_type') == 'http'):
-                    account.flow = XTLSFlows.NONE # Assuming XTLSFlows.NONE is defined
-
-            if xray.api:
-                _add_user_to_inbound(xray.api, inbound_tag, account)
-            else:
-                logger.warning("Main Xray API (xray.api) is not initialized. Cannot add user to core.")
-
-            for node_instance in list(xray.nodes.values()): # Iterate over XRayNode instances
-                if node_instance.connected and node_instance.started and node_instance.api:
-                    _add_user_to_inbound(node_instance.api, inbound_tag, account)
-                # else:
-                    # logger.debug(f"Node {node_instance.address} not connected/started or API not available. Skipping add user {email} to inbound {inbound_tag}.")
-
-
-def remove_user(account_number: str):
-    """
-    Removes a user from all Xray inbounds on the main core and connected nodes.
-    Expects the user's account_number (used as email in Xray).
-    """
-    logger.info(f"Xray Ops: Removing user {account_number}")
-    email = account_number
-
-    # Iterate through all known inbound tags in the system configuration
-    for inbound_tag in xray.config.inbounds_by_tag.keys():
-        if xray.api:
-            _remove_user_from_inbound(xray.api, inbound_tag, email)
-        # else: # Log if main API not available, but still try nodes
-            # logger.warning("Main Xray API (xray.api) is not initialized. Cannot remove user from core.")
-
-        for node_instance in list(xray.nodes.values()):
-            if node_instance.connected and node_instance.started and node_instance.api:
-                _remove_user_from_inbound(node_instance.api, inbound_tag, email)
-            # else:
-                # logger.debug(f"Node {node_instance.address} not connected/started or API not available. Skipping remove user {email} from inbound {inbound_tag}.")
-
-
-def update_user(user_payload: UserResponse):
-    """
-    Updates a user on all relevant Xray inbounds (adds to new, removes from old, alters existing).
-    Expects a Pydantic UserResponse model.
-    """
-    logger.info(f"Xray Ops: Updating user {user_payload.account_number}")
-    email = user_payload.account_number
-
-    current_active_inbound_tags_for_user = set()
-    for proxy_type_enum, inbound_tags_for_type in user_payload.inbounds.items():
-        proxy_settings_pydantic = user_payload.proxies.get(proxy_type_enum)
-        if not proxy_settings_pydantic:
-            logger.warning(f"Update: No proxy settings for type {proxy_type_enum.value} for user {email}. Skipping Xray update for this type.")
-            continue
-
-        try:
-            proxy_settings_dict = proxy_settings_pydantic.model_dump(exclude_none=True)
-        except AttributeError:
-            proxy_settings_dict = proxy_settings_pydantic.dict(exclude_none=True)
-
-        try:
-            if not hasattr(proxy_type_enum, 'account_model') or not callable(proxy_type_enum.account_model):
-                logger.error(f"Update: ProxyType {proxy_type_enum.value} no 'account_model'. Cannot create Xray account.")
-                continue
-            account = proxy_type_enum.account_model(email=email, **proxy_settings_dict)
-        except Exception as e:
-            logger.error(f"Update: Error creating Xray account model for user {email}, type {proxy_type_enum.value}: {e}")
-            continue
-
-        for inbound_tag in inbound_tags_for_type:
-            current_active_inbound_tags_for_user.add(inbound_tag)
-            inbound_config_details = xray.config.inbounds_by_tag.get(inbound_tag, {})
-            if not inbound_config_details:
-                logger.warning(f"Update: Inbound tag {inbound_tag} not in xray.config. Skipping for user {email}.")
-                continue
-
-            if hasattr(account, 'flow') and getattr(account, 'flow', None) is not None:
-                if (inbound_config_details.get('network', 'tcp') not in ('tcp', 'kcp', 'raw') or
-                    (inbound_config_details.get('network', 'tcp') in ('tcp', 'kcp', 'raw') and
-                     inbound_config_details.get('tls') not in ('tls', 'reality')) or
-                    inbound_config_details.get('header_type') == 'http'):
-                    account.flow = XTLSFlows.NONE
-
-            if xray.api:
-                _alter_inbound_user(xray.api, inbound_tag, account)
-            # else:
-                # logger.warning("Update: Main Xray API not initialized. Cannot alter user on core.")
-
-            for node_instance in list(xray.nodes.values()):
-                if node_instance.connected and node_instance.started and node_instance.api:
-                    _alter_inbound_user(node_instance.api, inbound_tag, account)
-                # else:
-                    # logger.debug(f"Update: Node {node_instance.address} not ready. Skipping alter user {email} on inbound {inbound_tag}.")
-
-    # Remove user from any inbounds they are no longer supposed to be on
-    all_system_inbound_tags = set(xray.config.inbounds_by_tag.keys())
-    inbounds_to_remove_user_from = all_system_inbound_tags - current_active_inbound_tags_for_user
-
-    for inbound_tag_to_remove in inbounds_to_remove_user_from:
-        logger.debug(f"Update: User {email} no longer active on inbound {inbound_tag_to_remove}. Removing.")
-        if xray.api:
-            _remove_user_from_inbound(xray.api, inbound_tag_to_remove, email)
-        # else:
-            # logger.warning(f"Update: Main Xray API not initialized. Cannot remove user from {inbound_tag_to_remove} on core.")
-
-        for node_instance in list(xray.nodes.values()):
-            if node_instance.connected and node_instance.started and node_instance.api:
-                _remove_user_from_inbound(node_instance.api, inbound_tag_to_remove, email)
-            # else:
-                # logger.debug(f"Update: Node {node_instance.address} not ready. Skipping remove user {email} from {inbound_tag_to_remove}.")
-
+        if user_payload.status not in [UserStatus.active, UserStatus.on_hold]: # e.g. disabled, expired
+            if current_active_node_id is not None:
+                logger.info(f"User {user_payload.account_number} status is {user_payload.status}. Deactivating from node {current_active_node_id}.")
+                # Call the version that also clears DB active_node_id
+                deactivate_user_from_active_node(user_payload.account_number) # This is threaded, will open its own DB session
+        else: # User is active or on_hold
+            if current_active_node_id is not None:
+                logger.info(f"User {user_payload.account_number} is {user_payload.status} and active on node {current_active_node_id}. Re-applying config.")
+                # Re-activate to apply potentially changed proxy settings or ensure presence
+                # activate_user_on_node will handle XRay and also re-set active_node_id in DB (which is fine)
+                activate_user_on_node(user_payload.account_number, current_active_node_id) # This is threaded
+            # If they became active but weren't on a node, they need to explicitly activate one via API.
 
 # --- Node Management ---
 # These functions seem mostly fine regarding their interaction with Xray nodes.
@@ -458,6 +348,126 @@ def restart_node(node_id: int, config=None):
                 node_instance.disconnect()
         except Exception as disc_e:
             logger.error(f"Error trying to disconnect node {node_id} after restart failure: {disc_e}")
+
+
+@threaded_function # Keep operations non-blocking
+def activate_user_on_node(account_number: str, node_id: int): # Simplified: get user from DB inside
+    with GetDB() as db:
+        db_user = crud.get_user_by_account_number(db, account_number)
+        if not db_user:
+            logger.error(f"Activate: User {account_number} not found.")
+            return
+
+        user_payload = UserResponse.model_validate(db_user) # For proxy settings
+
+        # 1. Deactivate from old node (if any and different)
+        if db_user.active_node_id and db_user.active_node_id != node_id:
+            logger.info(f"User {account_number} switching from node {db_user.active_node_id} to {node_id}. Deactivating from old node.")
+            # Call an internal helper that doesn't commit DB changes for active_node_id yet
+            _deactivate_user_from_xray_node_only(db_user.account_number, db_user.active_node_id)
+
+        # 2. Add to new node's XRay
+        logger.info(f"Activating user {account_number} on XRay node {node_id}.")
+        target_xray_node_instance = xray.nodes.get(node_id)
+        if not target_xray_node_instance or not target_xray_node_instance.connected:
+            # Attempt to connect the node if not available; this might be complex
+            # For now, assume node is managed (connected/restarted) independently
+            # If still not connected, we might need to fetch DBNode and attempt connection
+            db_node = crud.get_node_by_id(db, node_id)
+            if db_node and (not target_xray_node_instance or not target_xray_node_instance.connected):
+                logger.warning(f"Target node {node_id} for user {account_number} not connected. Attempting to connect.")
+                # connect_node itself is threaded, ensure it completes or XRayNode object is available
+                # This part needs careful thought on synchronization if connect_node is slow.
+                # For simplicity, we might require nodes to be pre-connected by an admin or a startup job.
+                # Let's assume for now that if xray.nodes.get(node_id) is valid and connected, we proceed.
+                # If not, we log an error and potentially skip XRay add, but still set active_node_id in DB.
+                # Fallback: If connect_node is called, it should eventually add users if this node is their active_node_id.
+                pass # Placeholder for more robust node connection handling if needed here
+
+        if target_xray_node_instance and target_xray_node_instance.api:
+            for proxy_type_enum, user_proxy_settings in user_payload.proxies.items():
+                if not user_proxy_settings: continue
+                account = proxy_type_enum.account_model(
+                    email=user_payload.account_number,
+                    **user_proxy_settings.model_dump(exclude_none=True)
+                )
+                # Determine relevant inbounds for this proxy_type on THIS node
+                # This is the tricky part: how do we know which of user_payload.inbounds
+                # are actually running on target_xray_node_instance?
+                # Option: iterate all inbounds the user has for that proxy type,
+                # and _add_user_to_inbound will try. If the inbound isn't on the node, it fails gracefully.
+                node_specific_inbound_tags_for_type = get_node_specific_inbounds_for_user_proxy_type(node_id, proxy_type_enum, db)
+
+                for inbound_tag in node_specific_inbound_tags_for_type:
+                    # Apply XTLS flow logic from original add_user if necessary
+                    inbound_config_details = xray.config.inbounds_by_tag.get(inbound_tag, {}) # Global config
+                    if hasattr(account, 'flow') and getattr(account, 'flow', None) is not None:
+                         if (inbound_config_details.get('network', 'tcp') not in ('tcp', 'kcp', 'raw') or
+                            (inbound_config_details.get('network', 'tcp') in ('tcp', 'kcp', 'raw') and
+                             inbound_config_details.get('tls') not in ('tls', 'reality')) or
+                            inbound_config_details.get('header_type') == 'http'):
+                            account.flow = getattr(XTLSFlows, 'NONE', None) # Ensure XTLSFlows.NONE is accessible
+
+                    _add_user_to_inbound(target_xray_node_instance.api, inbound_tag, account)
+        else:
+            logger.error(f"XRay Node {node_id} not found or API not available for user {account_number}. XRay add skipped.")
+
+        # 3. Update DB
+        if db_user.active_node_id != node_id: # Avoid unnecessary DB write if already active on this node
+            db_user.active_node_id = node_id
+            db_user.last_status_change = datetime.utcnow() # Or a more specific "last_activation_change"
+        crud.update_user_instance(db, db_user) # Generic update to commit changes
+        logger.info(f"User {account_number} DB record updated, active_node_id set to {node_id}.")
+
+
+def get_node_specific_inbounds_for_user_proxy_type(node_id: int, proxy_type: ProxyTypes, db: Session) -> List[str]:
+    # This function needs to identify which global inbound_tags (of the given proxy_type)
+    # are actually hosted on the specific node_id.
+    # This could be achieved if ProxyHost is linked to Node and InboundTag.
+    # Or if Node model stores info about which inbound_tags it serves.
+
+    # Simplistic approach for now: get all ProxyHosts for the given node_id
+    # Then, from those ProxyHosts, get their unique inbound_tags that match the proxy_type.
+    node_proxy_hosts = crud.get_proxy_hosts_by_node_id(db, node_id) # New CRUD needed
+
+    relevant_tags = set()
+    for ph in node_proxy_hosts:
+        inbound_detail = xray.config.inbounds_by_tag.get(ph.inbound_tag) # Global config
+        if inbound_detail and inbound_detail.get("protocol") == proxy_type.value:
+            relevant_tags.add(ph.inbound_tag)
+    return list(relevant_tags)
+
+@threaded_function
+def _deactivate_user_from_xray_node_only(account_number: str, node_id: int):
+    logger.info(f"Deactivating user {account_number} from XRay node {node_id} (XRay ops only).")
+    xray_node_instance = xray.nodes.get(node_id)
+    if xray_node_instance and xray_node_instance.api and xray_node_instance.connected:
+        # Which inbounds to remove from? Ideally, only those the user was on.
+        # Simplest: try removing from all known system inbounds on that node.
+        # A better way: query the node's XRay API for this user's presence if possible, or rely on stored state.
+        # For now, iterate global tags (as in original remove_user) but target specific node.
+        all_system_inbound_tags = list(xray.config.inbounds_by_tag.keys()) # Or node-specific if known
+        for inbound_tag in all_system_inbound_tags:
+             _remove_user_from_inbound(xray_node_instance.api, inbound_tag, account_number)
+    else:
+        logger.warning(f"XRay Node {node_id} not found or API not available during deactivation for user {account_number}. XRay remove skipped.")
+
+
+@threaded_function
+def deactivate_user_from_active_node(account_number: str): # Gets user and active_node_id from DB
+    with GetDB() as db:
+        db_user = crud.get_user_by_account_number(db, account_number)
+        if not db_user or not db_user.active_node_id:
+            logger.info(f"User {account_number} not found or no active node to deactivate.")
+            return
+
+        node_id_to_deactivate = db_user.active_node_id
+        _deactivate_user_from_xray_node_only(account_number, node_id_to_deactivate)
+
+        db_user.active_node_id = None
+        db_user.last_status_change = datetime.utcnow()
+        crud.update_user_instance(db, db_user)
+        logger.info(f"User {account_number} deactivated from node {node_id_to_deactivate} and DB updated.")
 
 
 __all__ = [
