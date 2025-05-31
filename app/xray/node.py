@@ -18,6 +18,8 @@ from websocket import WebSocketConnectionClosedException, WebSocketTimeoutExcept
 from app.xray.config import XRayConfig
 from xray_api import XRay as XRayAPI
 
+PANEL_TRUSTED_CA_PATH = "/etc/marzban/MyMarzbanCA.pem"
+
 
 def string_to_temp_file(content: str):
     file = tempfile.NamedTemporaryFile(mode='w+t')
@@ -150,7 +152,7 @@ class ReSTXRayNode:
     def connect(self):
         self._node_cert = ssl.get_server_certificate((self.address, self.port))
         self._node_certfile = string_to_temp_file(self._node_cert)
-        self.session.verify = self._node_certfile.name
+        self.session.verify = PANEL_TRUSTED_CA_PATH
 
         res = self.make_request("/connect", timeout=3)
         self._session_id = res['session_id']
