@@ -127,38 +127,61 @@ async def register_user(
     request: Request,
     db: Session = Depends(get_db)
 ):
+    print("[DEBUG] Starting user registration process")
     generated_account_number = str(uuid.uuid4())
-
-    user_payload = UserCreate(
-        account_number=generated_account_number,
-        proxies={},
-        inbounds=None,
-        status=UserStatusCreate.disabled
-    )
+    print(f"[DEBUG] Generated account number: {generated_account_number}")
 
     try:
+        print("[DEBUG] Creating UserCreate payload")
+        user_payload = UserCreate(
+            account_number=generated_account_number,
+            proxies={},
+            status=UserStatusCreate.disabled,
+            data_limit=None,
+            expire=None,
+            data_limit_reset_strategy="no_reset",
+            note=None,
+            on_hold_expire_duration=None,
+            on_hold_timeout=None,
+            auto_delete_in_days=None,
+            next_plan=None
+        )
+        print("[DEBUG] UserCreate payload created successfully")
+
+        print("[DEBUG] Attempting to create user in database")
         new_db_user = crud.create_user(db=db, account_number=generated_account_number, user=user_payload)
+        print(f"[DEBUG] User created successfully with ID: {new_db_user.id}")
+
+        print("[DEBUG] Creating access token")
+        access_token = create_access_token(data={"sub": new_db_user.account_number})
+        print("[DEBUG] Access token created successfully")
+
+        redirect_url = request.url_for("account_page")
+        print(f"[DEBUG] Generated redirect URL: {redirect_url}")
+
+        response = RedirectResponse(url=redirect_url, status_code=303)
+        response.set_cookie(
+            key="access_token",
+            value=f"Bearer {access_token}",
+            httponly=True,
+            path='/client-portal',
+            samesite='lax',
+            secure=request.url.scheme == "https",
+            max_age=1800
+        )
+        print("[DEBUG] Cookie set successfully")
+        return response
+
     except Exception as e:
+        print(f"[DEBUG] Error during registration: {str(e)}")
+        print(f"[DEBUG] Error type: {type(e)}")
+        import traceback
+        print(f"[DEBUG] Full traceback:\n{traceback.format_exc()}")
         return templates.TemplateResponse(
             "register.html",
-            {"request": request, "error": "Could not create account due to an internal error. Please try again."},
+            {"request": request, "error": f"Could not create account due to an internal error: {str(e)}"},
             status_code=500
         )
-
-    access_token = create_access_token(data={"sub": new_db_user.account_number})
-
-    redirect_url = request.url_for("account_page")
-    response = RedirectResponse(url=redirect_url, status_code=303)
-    response.set_cookie(
-        key="access_token",
-        value=f"Bearer {access_token}",
-        httponly=True,
-        path='/client-portal',
-        samesite='lax',
-        secure=request.url.scheme == "https",
-        max_age=1800
-    )
-    return response
 
 
 @router.get("/logout", name="logout_route")

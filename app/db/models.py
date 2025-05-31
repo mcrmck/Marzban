@@ -62,10 +62,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    # username = Column(String(34, collation='NOCASE'), unique=True, index=True)
-    # email = Column(String(128), unique=True, index=True, nullable=True)  # Add email column
-    # hashed_password = Column(String(128), nullable=True)  # Add hashed_password column
-    account_number = Column(String(36), unique=True, index=True, nullable=False) # For UUID
+    account_number = Column(String(36), unique=True, index=True, nullable=False)
 
     proxies = relationship("Proxy", back_populates="user", cascade="all, delete-orphan")
     status = Column(Enum(UserStatus), nullable=False, default=UserStatus.active)
@@ -78,7 +75,7 @@ class User(Base):
         nullable=False,
         default=UserDataLimitResetStrategy.no_reset,
     )
-    usage_logs = relationship("UserUsageResetLogs", back_populates="user")  # maybe rename it to reset_usage_logs?
+    usage_logs = relationship("UserUsageResetLogs", back_populates="user")
     expire = Column(Integer, nullable=True)
     admin_id = Column(Integer, ForeignKey("admins.id"))
     admin = relationship("Admin", back_populates="users")
@@ -90,12 +87,7 @@ class User(Base):
     online_at = Column(DateTime, nullable=True, default=None)
     on_hold_expire_duration = Column(BigInteger, nullable=True, default=None)
     on_hold_timeout = Column(DateTime, nullable=True, default=None)
-
-    # * Positive values: User will be deleted after the value of this field in days automatically.
-    # * Negative values: User won't be deleted automatically at all.
-    # * NULL: Uses global settings.
     auto_delete_in_days = Column(Integer, nullable=True, default=None)
-
     edit_at = Column(DateTime, nullable=True, default=None)
     last_status_change = Column(DateTime, default=datetime.utcnow, nullable=True)
 
@@ -106,7 +98,8 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
-    selected_nodes = relationship("UserNodeSelection", back_populates="user", cascade="all, delete-orphan")
+    # REMOVED: selected_nodes relationship
+    # selected_nodes = relationship("UserNodeSelection", back_populates="user", cascade="all, delete-orphan")
 
     @hybrid_property
     def reseted_usage(self) -> int:
@@ -131,32 +124,47 @@ class User(Base):
     def last_traffic_reset_time(self):
         return self.usage_logs[-1].reset_at if self.usage_logs else self.created_at
 
-    @property
-    def excluded_inbounds(self):
-        _ = {}
-        for proxy in self.proxies:
-            _[proxy.type] = [i.tag for i in proxy.excluded_inbounds]
-        return _
+    # REMOVED: excluded_inbounds property (as it relied on proxy.excluded_inbounds)
+    # @property
+    # def excluded_inbounds(self):
+    #     _ = {}
+    #     for proxy in self.proxies:
+    #         # This line used proxy.excluded_inbounds which is now removed
+    #         # _[proxy.type] = [i.tag for i in proxy.excluded_inbounds]
+    #         _[proxy.type] = [] # Placeholder, this property should be removed entirely
+    #     return _
 
     @property
     def inbounds(self):
+        """
+        Returns all available inbounds for the user's configured proxy types.
+        This means if a user has a 'vmess' proxy configured in their User.proxies,
+        they get all system-defined 'vmess' inbounds.
+        """
         _ = {}
-        for proxy in self.proxies:
-            _[proxy.type] = []
-            excluded_tags = [i.tag for i in proxy.excluded_inbounds]
-            for inbound in xray.config.inbounds_by_protocol.get(proxy.type, []):
-                if inbound["tag"] not in excluded_tags:
-                    _[proxy.type].append(inbound["tag"])
+        # Ensure xray.config and xray.config.inbounds_by_protocol are loaded and accessible
+        if not hasattr(xray, 'config') or not hasattr(xray.config, 'inbounds_by_protocol'):
+            # Log a warning or handle appropriately if xray config isn't ready
+            return _
 
+        active_proxy_types = {p.type for p in self.proxies if p.type} # Get unique proxy types from user's proxies
+
+        for proxy_type_enum in active_proxy_types:
+            proxy_type_str = proxy_type_enum.value # e.g., "vmess"
+
+            # Ensure xray.config.inbounds_by_protocol is a dictionary
+            if not isinstance(xray.config.inbounds_by_protocol, dict):
+                continue # Or log error
+
+            inbounds_for_protocol = xray.config.inbounds_by_protocol.get(proxy_type_str, [])
+
+            # Ensure each inbound is a dictionary and has a 'tag'
+            _[proxy_type_enum] = [
+                inbound.get("tag")
+                for inbound in inbounds_for_protocol
+                if isinstance(inbound, dict) and inbound.get("tag")
+            ]
         return _
-
-
-excluded_inbounds_association = Table(
-    "exclude_inbounds_association",
-    Base.metadata,
-    Column("proxy_id", ForeignKey("proxies.id")),
-    Column("inbound_tag", ForeignKey("inbounds.tag")),
-)
 
 template_inbounds_association = Table(
     "template_inbounds_association",
@@ -210,11 +218,8 @@ class Proxy(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     user = relationship("User", back_populates="proxies")
-    type = Column(Enum(ProxyTypes), nullable=False)
+    type = Column(Enum(ProxyTypes), nullable=False) # Ensure ProxyTypes is correctly defined
     settings = Column(JSON, nullable=False)
-    excluded_inbounds = relationship(
-        "ProxyInbound", secondary=excluded_inbounds_association
-    )
 
 
 class ProxyInbound(Base):
@@ -357,16 +362,3 @@ class NotificationReminder(Base):
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-
-class UserNodeSelection(Base):
-    __tablename__ = "user_node_selections"
-    __table_args__ = (
-        UniqueConstraint('user_id', 'node_id'),
-    )
-
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    user = relationship("User", back_populates="selected_nodes")
-    node_id = Column(Integer, ForeignKey("nodes.id"))
-    node = relationship("Node")
-    created_at = Column(DateTime, default=datetime.utcnow)
