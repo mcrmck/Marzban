@@ -1,12 +1,56 @@
 services:
-  marzban:
+  marzban-panel: # Your existing Marzban panel service
     build:
       context: .
       dockerfile: Dockerfile
     restart: always
-    env_file: .env
+    env_file: .env # Contains panel-specific configs like database URL, etc.
     ports:
-      - "8000:8000"
+      - "8000:8000" # Panel's web interface and API
     volumes:
-      - /var/lib/marzban:/var/lib/marzban
-      - ./certs:/var/lib/marzban/certs:ro
+      - marzban_data:/var/lib/marzban # Persistent storage for panel's database (db.sqlite3)
+      - ./panel-certs:/var/lib/marzban/certs:ro # Panel's own optional HTTPS certs
+    networks:
+      - marzban_network
+
+  marzban-node-1:
+    image: ghcr.io/gozargah/marzban-node:latest # Use the official pre-built image
+    restart: always
+    env_file: .env.node1 # Separate .env file for this node's config
+    # Or use environment block:
+    environment:
+      - XRAY_API_PORT=6002
+      - XRAY_AGENT_PORT=6001
+      - SSL_CERT_FILE=/etc/marzban-node/certs/server.crt # Agent's server certificate
+      - SSL_KEY_FILE=/etc/marzban-node/certs/server.key   # Agent's server key
+      # Optional: For client certificate authentication (panel authenticates to node agent)
+      - SSL_CLIENT_AUTH=True
+      - SSL_CA_CERTS_FILE=/etc/marzban-node/certs/client.crt # Panel's client cert, trusted by node agent
+    ports:
+      # Expose the RPyC agent port IF you need to connect from outside Docker's marzban_network
+      # If panel is on same network, it can use marzban-node-1:6001 directly.
+      # For initial setup, exposing it can be helpful for troubleshooting.
+      # - "6001:6001" # RPyC Agent Port
+
+      # Expose Xray's actual proxy ports (e.g., VLESS/VMess/Trojan inbounds)
+      # These depend on your Xray config template managed by the panel.
+      # Example: if your template has an inbound on 443 and 80
+      - "443:443"
+      - "80:80"
+      # Add other ports your Xray inbounds will use
+    volumes:
+      # Mount certificates for the node's RPyC agent
+      # You'll need to create these certificates.
+      - ./node1-certs:/etc/marzban-node/certs
+    networks:
+      - marzban_network
+    # Add depends_on if you want panel to be up, but not strictly necessary for this model
+    # depends_on:
+    #   - marzban-panel
+
+networks:
+  marzban_network:
+    driver: bridge
+
+volumes:
+  marzban_data: # Define the named volume for panel data

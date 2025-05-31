@@ -1,225 +1,195 @@
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+# from concurrent.futures import ThreadPoolExecutor # Keep for future performance enhancements if needed
 from datetime import datetime
-from operator import attrgetter
-from typing import Union
+# from operator import attrgetter # Not used in the refined version below directly
+from typing import Union # Optional might be needed if not already imported via other means
+import logging
 
-from pymysql.err import OperationalError
-from sqlalchemy import and_, bindparam, insert, select, update
-from sqlalchemy.orm import Session
-from sqlalchemy.sql.dml import Insert
+# Assuming sqlalchemy parts are needed if we were to keep old helpers, but not for new version
+# from pymysql.err import OperationalError
+# from sqlalchemy import and_, bindparam, insert, select, update
+# from sqlalchemy.orm import Session
+# from sqlalchemy.sql.dml import Insert
 
-from app import scheduler, xray
-from app.db import GetDB
-from app.db.models import Admin, NodeUsage, NodeUserUsage, System, User
+from app import scheduler, xray # xray.nodes will be used
+from app.db import GetDB, crud # Ensure crud is imported
+# Models used for type hinting or direct use if any (mostly in CRUD now)
+# from app.db.models import Admin, NodeUsage, NodeUserUsage, System, User
 from config import (
-    DISABLE_RECORDING_NODE_USAGE,
+    # DISABLE_RECORDING_NODE_USAGE, # This might be checked before scheduling the job itself
     JOB_RECORD_NODE_USAGES_INTERVAL,
     JOB_RECORD_USER_USAGES_INTERVAL,
 )
-from xray_api import XRay as XRayAPI
-from xray_api import exc as xray_exc
+# from xray_api import XRay as XRayAPI # XRayAPI type hint for node.api is good
+from xray_api import exc as xray_exc # Corrected alias usage
+# from app.utils.concurrency import threaded_function # Removed as per your provided file, but good for jobs
+
+logger = logging.getLogger(__name__)
+
+# --- Old Helper Functions (To be REMOVED as their logic is now in CRUD) ---
+# def safe_execute(db: Session, stmt, params=None): ...
+# def record_user_stats(params: list, node_id: Union[int, None], consumption_factor: int = 1): ...
+# def record_node_stats(params: dict, node_id: Union[int, None]): ...
+# def get_users_stats(api: XRayAPI): ...
+# def get_outbounds_stats(api: XRayAPI): ...
+# --- End of Old Helper Functions ---
 
 
-def safe_execute(db: Session, stmt, params=None):
-    if db.bind.name == 'mysql':
-        if isinstance(stmt, Insert):
-            stmt = stmt.prefix_with('IGNORE')
+# @threaded_function # Consider re-adding if jobs are long and you have it defined
+def record_user_usages(ignore_write_to_db: bool = False):
+    logger.debug("Job 'record_user_usages' started.")
+    if not xray.nodes:
+        logger.info("No Xray nodes configured. Skipping user usage recording.")
+        return
 
-        tries = 0
-        done = False
-        while not done:
-            try:
-                db.connection().execute(stmt, params)
-                db.commit()
-                done = True
-            except OperationalError as err:
-                if err.args[0] == 1213 and tries < 3:  # Deadlock
-                    db.rollback()
-                    tries += 1
+    current_hour_utc = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    all_user_stats_updates = defaultdict(lambda: {'uplink': 0, 'downlink': 0, 'node_ids_reported': set()})
+    email_to_user_id_map = {}
+
+    try:
+        with GetDB() as db_initial_users:
+            # Assumes crud.get_users_for_usage_mapping is defined and returns [(user_id, account_number), ...]
+            users_for_map = crud.get_users_for_usage_mapping(db_initial_users)
+            for user_id, account_number_val in users_for_map:
+                email_to_user_id_map[f"{user_id}.{account_number_val}"] = user_id
+                # Original Marzban also mapped by just account_number for some Xray versions/setups
+                email_to_user_id_map[f"{account_number_val}"] = user_id
+    except Exception as e:
+        logger.error(f"Error fetching users for usage mapping: {e}", exc_info=True)
+        return # Cannot proceed without user map
+
+    for node_id, node_instance in list(xray.nodes.items()):
+        if not (node_instance and node_instance.connected and hasattr(node_instance, 'api') and node_instance.api):
+            logger.warning(f"Node ID {node_id} is not connected or has no API. Skipping for user usage.")
+            continue
+
+        try:
+            logger.debug(f"Fetching user stats from node ID: {node_id} ({node_instance.address})")
+            # get_all_users_traffic is preferred for panels
+            stats = node_instance.api.get_all_users_traffic(reset=True, timeout=30)
+
+            for stat_item in stats: # Renamed from 'stat' to avoid conflict if 'stat' module is ever imported
+                user_identifier = stat_item.name
+                user_id = email_to_user_id_map.get(user_identifier)
+
+                if user_id is None:
+                    logger.warning(f"Stat received for unknown user identifier '{user_identifier}' from node {node_id}. Skipping.")
                     continue
-                raise err
 
-    else:
-        db.connection().execute(stmt, params)
-        db.commit()
+                all_user_stats_updates[user_id]['uplink'] += stat_item.uplink
+                all_user_stats_updates[user_id]['downlink'] += stat_item.downlink
+                all_user_stats_updates[user_id]['node_ids_reported'].add(node_id)
 
+        except xray_exc.XrayError as e: # Corrected usage of xray_exc
+            logger.error(f"Xray API error while fetching user stats from node {node_id}: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error fetching user stats from node {node_id}: {e}", exc_info=True)
 
-def record_user_stats(params: list, node_id: Union[int, None],
-                      consumption_factor: int = 1):
-    if not params:
-        return
+    if not ignore_write_to_db and all_user_stats_updates:
+        updated_count = 0
+        try:
+            with GetDB() as db:
+                for user_id, usage_data in all_user_stats_updates.items():
+                    db_user = crud.get_user_by_id(db, user_id)
+                    if not db_user:
+                        logger.warning(f"User with ID {user_id} not found in DB for usage update.")
+                        continue
 
-    created_at = datetime.fromisoformat(datetime.utcnow().strftime('%Y-%m-%dT%H:00:00'))
+                    node_coefficient = 1.0
+                    if db_user.active_node_id and db_user.active_node_id in xray.nodes:
+                        # Ensure xray.nodes[db_user.active_node_id] is not None if key exists
+                        active_node_instance = xray.nodes.get(db_user.active_node_id)
+                        if active_node_instance:
+                             node_coefficient = active_node_instance.usage_coefficient
 
-    with GetDB() as db:
-        # make user usage row if doesn't exist
-        select_stmt = select(NodeUserUsage.user_id) \
-            .where(and_(NodeUserUsage.node_id == node_id, NodeUserUsage.created_at == created_at))
-        existings = [r[0] for r in db.execute(select_stmt).fetchall()]
-        uids_to_insert = set()
+                    uplink_to_add = int(usage_data['uplink'] * node_coefficient)
+                    downlink_to_add = int(usage_data['downlink'] * node_coefficient)
+                    total_usage_to_add = uplink_to_add + downlink_to_add
 
-        for p in params:
-            uid = int(p['uid'])
-            if uid in existings:
-                continue
-            uids_to_insert.add(uid)
+                    if total_usage_to_add > 0:
+                        db_user.used_traffic += total_usage_to_add
+                        db_user.online_at = datetime.utcnow()
 
-        if uids_to_insert:
-            stmt = insert(NodeUserUsage).values(
-                user_id=bindparam('uid'),
-                created_at=created_at,
-                node_id=node_id,
-                used_traffic=0
-            )
-            safe_execute(db, stmt, [{'uid': uid} for uid in uids_to_insert])
+                        if db_user.active_node_id is not None: # Ensure active_node_id is not None
+                            # Assumes crud.create_or_update_node_user_usage is defined
+                            crud.create_or_update_node_user_usage(
+                                db=db,
+                                user_id=db_user.id,
+                                node_id=db_user.active_node_id,
+                                used_traffic_increment=total_usage_to_add,
+                                event_hour_utc=current_hour_utc # Pass consistent hourly timestamp
+                            )
+                        else:
+                            logger.warning(f"User ID {user_id} reported traffic but has no active_node_id. Cannot record NodeUserUsage.")
+                        updated_count +=1
+                db.commit()
+                logger.info(f"User usages updated in DB for {updated_count} users based on stats from {len(all_user_stats_updates)} user entries.")
+        except Exception as e:
+            # db.rollback() # GetDB context manager might handle rollback on exception
+            logger.error(f"DB error committing user usages: {e}", exc_info=True)
 
-        # record
-        stmt = update(NodeUserUsage) \
-            .values(used_traffic=NodeUserUsage.used_traffic + bindparam('value') * consumption_factor) \
-            .where(and_(NodeUserUsage.user_id == bindparam('uid'),
-                        NodeUserUsage.node_id == node_id,
-                        NodeUserUsage.created_at == created_at))
-        safe_execute(db, stmt, params)
-
-
-def record_node_stats(params: dict, node_id: Union[int, None]):
-    if not params:
-        return
-
-    created_at = datetime.fromisoformat(datetime.utcnow().strftime('%Y-%m-%dT%H:00:00'))
-
-    with GetDB() as db:
-
-        # make node usage row if doesn't exist
-        select_stmt = select(NodeUsage.node_id). \
-            where(and_(NodeUsage.node_id == node_id, NodeUsage.created_at == created_at))
-        notfound = db.execute(select_stmt).first() is None
-        if notfound:
-            stmt = insert(NodeUsage).values(created_at=created_at, node_id=node_id, uplink=0, downlink=0)
-            safe_execute(db, stmt)
-
-        # record
-        stmt = update(NodeUsage). \
-            values(uplink=NodeUsage.uplink + bindparam('up'), downlink=NodeUsage.downlink + bindparam('down')). \
-            where(and_(NodeUsage.node_id == node_id, NodeUsage.created_at == created_at))
-
-        safe_execute(db, stmt, params)
+    elif not all_user_stats_updates:
+        logger.info("No user stats updates to process in this cycle.")
+    logger.debug("Job 'record_user_usages' finished.")
 
 
-def get_users_stats(api: XRayAPI):
-    try:
-        params = defaultdict(int)
-        for stat in filter(attrgetter('value'), api.get_users_stats(reset=True, timeout=30)):
-            params[stat.name.split('.', 1)[0]] += stat.value
-        params = list({"uid": uid, "value": value} for uid, value in params.items())
-        return params
-    except xray_exc.XrayError:
-        return []
+# @threaded_function # Consider re-adding
+def record_node_usages(ignore_write_to_db: bool = False):
+    logger.debug("Job 'record_node_usages' started.")
+    if not xray.nodes:
+        logger.info("No Xray nodes configured. Skipping node responsiveness check.")
+        # If not checking responsiveness, and aggregation is main goal, can proceed if NodeUserUsage has data
+        # return
+
+    # Check node responsiveness (optional, but good for health monitoring)
+    for node_id, node_instance in list(xray.nodes.items()):
+        if not (node_instance and node_instance.connected and hasattr(node_instance, 'api') and node_instance.api):
+            logger.warning(f"Node ID {node_id} is not connected or has no API. Skipping for sys stats check.")
+            continue
+        try:
+            logger.debug(f"Fetching system stats from node ID: {node_id} ({node_instance.address})")
+            stats = node_instance.api.get_sys_stats(timeout=10) # Short timeout for responsiveness check
+            if stats and hasattr(stats, 'app_uptime'):
+                logger.info(f"Node {node_id} SysStats: Uptime {stats.app_uptime}s, Goroutines {stats.num_goroutine}")
+            else:
+                logger.warning(f"Could not retrieve valid sys stats from node {node_id}")
+        except xray_exc.XrayError as e: # Corrected usage of xray_exc
+            logger.error(f"Xray API error while fetching system stats from node {node_id}: {e}")
+            # Consider updating node status to 'error' in DB after multiple failures
+        except Exception as e:
+            logger.error(f"Unexpected error fetching system stats from node {node_id}: {e}", exc_info=True)
+
+    # Aggregate NodeUserUsage data into NodeUsage table
+    if not ignore_write_to_db:
+        current_aggregation_hour = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        try:
+            with GetDB() as db:
+                # Assumes crud.aggregate_node_user_usages_to_node_usage is defined
+                crud.aggregate_node_user_usages_to_node_usage(db, current_aggregation_hour)
+                db.commit()
+                logger.info(f"Node usage aggregation for hour {current_aggregation_hour.strftime('%Y-%m-%d %H:00')} completed.")
+        except Exception as e:
+            # db.rollback() # GetDB context manager might handle rollback
+            logger.error(f"DB error during NodeUsage aggregation: {e}", exc_info=True)
+    logger.debug("Job 'record_node_usages' finished.")
 
 
-def get_outbounds_stats(api: XRayAPI):
-    try:
-        params = [{"up": stat.value, "down": 0} if stat.link == "uplink" else {"up": 0, "down": stat.value}
-                  for stat in filter(attrgetter('value'), api.get_outbounds_stats(reset=True, timeout=10))]
-        return params
-    except xray_exc.XrayError:
-        return []
-
-
-def record_user_usages():
-    api_instances = {None: xray.api}
-    usage_coefficient = {None: 1}  # default usage coefficient for the main api instance
-
-    for node_id, node in list(xray.nodes.items()):
-        if node.connected and node.started:
-            api_instances[node_id] = node.api
-            usage_coefficient[node_id] = node.usage_coefficient  # fetch the usage coefficient
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {node_id: executor.submit(get_users_stats, api) for node_id, api in api_instances.items()}
-    api_params = {node_id: future.result() for node_id, future in futures.items()}
-
-    users_usage = defaultdict(int)
-    for node_id, params in api_params.items():
-        coefficient = usage_coefficient.get(node_id, 1)  # get the usage coefficient for the node
-        for param in params:
-            users_usage[param['uid']] += int(param['value'] * coefficient)  # apply the usage coefficient
-    users_usage = list({"uid": uid, "value": value} for uid, value in users_usage.items())
-    if not users_usage:
-        return
-
-    with GetDB() as db:
-        user_admin_map = dict(db.query(User.id, User.admin_id).all())
-
-    admin_usage = defaultdict(int)
-    for user_usage in users_usage:
-        admin_id = user_admin_map.get(int(user_usage["uid"]))
-        if admin_id:
-            admin_usage[admin_id] += user_usage["value"]
-
-    # record users usage
-    with GetDB() as db:
-        stmt = update(User). \
-            where(User.id == bindparam('uid')). \
-            values(
-                used_traffic=User.used_traffic + bindparam('value'),
-                online_at=datetime.utcnow()
-        )
-
-        safe_execute(db, stmt, users_usage)
-
-        admin_data = [{"admin_id": admin_id, "value": value} for admin_id, value in admin_usage.items()]
-        if admin_data:
-            admin_update_stmt = update(Admin). \
-                where(Admin.id == bindparam('admin_id')). \
-                values(users_usage=Admin.users_usage + bindparam('value'))
-            safe_execute(db, admin_update_stmt, admin_data)
-
-    if DISABLE_RECORDING_NODE_USAGE:
-        return
-
-    for node_id, params in api_params.items():
-        record_user_stats(params, node_id, usage_coefficient[node_id])
-
-
-def record_node_usages():
-    api_instances = {None: xray.api}
-    for node_id, node in list(xray.nodes.items()):
-        if node.connected and node.started:
-            api_instances[node_id] = node.api
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {node_id: executor.submit(get_outbounds_stats, api) for node_id, api in api_instances.items()}
-    api_params = {node_id: future.result() for node_id, future in futures.items()}
-
-    total_up = 0
-    total_down = 0
-    for node_id, params in api_params.items():
-        for param in params:
-            total_up += param['up']
-            total_down += param['down']
-    if not (total_up or total_down):
-        return
-
-    # record nodes usage
-    with GetDB() as db:
-        stmt = update(System).values(
-            uplink=System.uplink + total_up,
-            downlink=System.downlink + total_down
-        )
-        safe_execute(db, stmt)
-
-    if DISABLE_RECORDING_NODE_USAGE:
-        return
-
-    for node_id, params in api_params.items():
-        record_node_stats(params, node_id)
-
+# Ensure DISABLE_RECORDING_NODE_USAGE is checked appropriately if you want to disable this job
+# For example, in app/jobs/__init__.py when scheduling, or here directly.
+# if not DISABLE_RECORDING_NODE_USAGE: # This constant is from config
+#     scheduler.add_job(record_node_usages, ...)
+# else:
+#     logger.info("Recording of node usages is disabled via DISABLE_RECORDING_NODE_USAGE.")
 
 scheduler.add_job(record_user_usages, 'interval',
+                  id='record_user_usages_job', # Added job ID
                   seconds=JOB_RECORD_USER_USAGES_INTERVAL,
-                  coalesce=True, max_instances=1)
-scheduler.add_job(record_node_usages, 'interval',
-                  seconds=JOB_RECORD_NODE_USAGES_INTERVAL,
-                  coalesce=True, max_instances=1)
+                  coalesce=True, max_instances=1, replace_existing=True)
+
+if not getattr(xray, 'config', {}).get("DISABLE_RECORDING_NODE_USAGE", False): # Check a config flag
+    scheduler.add_job(record_node_usages, 'interval',
+                      id='record_node_usages_job', # Added job ID
+                      seconds=JOB_RECORD_NODE_USAGES_INTERVAL,
+                      coalesce=True, max_instances=1, replace_existing=True)
+else:
+    logger.info("Recording of node usages is disabled (DISABLE_RECORDING_NODE_USAGE in XrayConfig or main config).")

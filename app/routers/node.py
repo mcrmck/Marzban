@@ -19,7 +19,7 @@ from app.models.node import (
     NodesUsageResponse,
 )
 from app.models.proxy import ProxyHostModify
-from app.models.node import DBNode
+from app.models.node import Node as DBNode
 
 from app.utils import responses
 
@@ -28,32 +28,85 @@ router = APIRouter(
 )
 
 
-def add_host_if_needed(dbnode: "DBNode", create_hosts_flag: bool, db: Session):
-    """Add a host for every inbound if specified in the new node settings, linked to the node."""
-    if create_hosts_flag:
-        logger.info(f"Node '{dbnode.name}': add_as_new_host is true. Creating ProxyHost entries linked to node ID {dbnode.id}.")
+def add_host_if_needed(dbnode_id: int, create_hosts_flag: bool): # Takes node_id
+    """Add a host for every inbound if specified flag is true, linked to the node."""
+    if not create_hosts_flag:
+        logger.info(f"Node ID {dbnode_id}: add_as_new_host is false. Skipping ProxyHost creation.")
+        return
+
+    with GetDB() as db: # Background task creates its own DB session
+        dbnode = crud.get_node_by_id(db, dbnode_id)
+        if not dbnode:
+            logger.error(f"add_host_if_needed: Node ID {dbnode_id} not found. Cannot create hosts.")
+            return
+
+        logger.info(f"Node '{dbnode.name}' (ID: {dbnode.id}): add_as_new_host is true. Creating ProxyHost entries.")
+
+        # Ensure xray.config is accessible; it holds the template inbounds
+        if not hasattr(xray, 'config') or not hasattr(xray.config, 'inbounds_by_tag'):
+            logger.error("xray.config or xray.config.inbounds_by_tag not available in add_host_if_needed. Cannot create hosts.")
+            return
+
+        created_hosts_count = 0
         for inbound_tag, inbound_details in xray.config.inbounds_by_tag.items():
             protocol = inbound_details.get("protocol", "PROTOCOL").upper()
-            transport = inbound_details.get("streamSettings", {}).get("network", "TRANSPORT").upper()
+            # transport = inbound_details.get("streamSettings", {}).get("network", "TRANSPORT").upper() # Original, but might be confusing
+            transport = inbound_details.get("network", "TRANSPORT").upper() # Get network directly from resolved inbound
 
-            # Create a Pydantic model instance for the new ProxyHost
-            host_data = ProxyHostModify( # app.models.proxy.ProxyHost
-                remark=f"{dbnode.name} ({{USERNAME}}) [{protocol} - {transport}]",
-                address=dbnode.address, # Use the node's address
-                node_id=dbnode.id,      # Crucially, link this host to the new node
-                port=inbound_details.get("port"), # Attempt to use port from inbound config
-                # For a truly robust generic host, SNI, path, security etc.
-                # might need more intelligent defaults or be left for manual configuration.
-                # Using node's address as a placeholder for SNI/Host if applicable.
-                sni=dbnode.address,
-                host=dbnode.address,
-                security=inbound_details.get("streamSettings", {}).get("security"),
-                # ... set other ProxyHostModify fields to sensible defaults or None ...
-                path=inbound_details.get("streamSettings", {}).get(transport + "Settings", {}).get("path"), # Example for ws/grpc
-                is_disabled=False
+            host_remark = f"{dbnode.name} ({inbound_tag}) [{protocol} - {transport}]"
+            host_address = dbnode.address # Use the node's address
+            host_port = inbound_details.get("port") # Port from the resolved inbound details
+
+            # For SNI/Host, using node's address is a sensible default.
+            # Security and path can also be derived from resolved inbound_details.
+            default_sni = dbnode.address
+            default_host_header = dbnode.address
+            default_path = inbound_details.get("path", "")
+
+            # Determine security. If inbound_details has 'tls' (e.g., 'tls', 'reality'), map to ProxyHostSecurity enum.
+            inbound_tls_setting = inbound_details.get("tls") # This is 'tls', 'reality', or 'none' from resolved config
+            host_security_enum = ProxyHostSecurity.inbound_default # Default
+            if inbound_tls_setting == "tls":
+                host_security_enum = ProxyHostSecurity.tls
+            elif inbound_tls_setting == "reality":
+                host_security_enum = ProxyHostSecurity.reality
+            elif inbound_tls_setting == "none": # explicit none
+                host_security_enum = ProxyHostSecurity.none
+
+
+            host_data = ProxyHostModify(
+                remark=host_remark,
+                address=host_address,
+                node_id=dbnode.id, # Crucially, link this host to the new node
+                port=host_port,
+                sni=default_sni, # Default based on node address
+                host=default_host_header, # Default based on node address
+                security=host_security_enum,
+                path=default_path, # Default based on resolved inbound path
+                is_disabled=False,
+                # Set other ProxyHostModify fields to sensible defaults if needed
+                # alpn, fingerprint, allowinsecure, mux_enable etc. will take their defaults from Pydantic model
             )
-            crud.add_host(db, inbound_tag, host_data) # crud.add_host will use host_data.node_id
-        xray.hosts.update() # Presumed to reload host configurations
+            try:
+                # crud.add_host in your provided crud.py takes (db, inbound_tag, host_data, node_id)
+                # but ProxyHostModify now includes node_id.
+                # Let's assume crud.add_host is adapted or we call a more direct creation.
+                # For now, assuming it can take host_data which includes node_id.
+                # If crud.add_host expects node_id separately, adjust this call.
+                # Based on your crud.py, add_host takes:
+                # add_host(db: Session, inbound_tag: str, host_data: ProxyHostModify, node_id: Optional[int] = None)
+                # The node_id in host_data should be sufficient. The extra node_id param in add_host might be redundant.
+                # Let's pass it anyway if the function expects it.
+                crud.add_host(db, inbound_tag, host_data, node_id=dbnode.id)
+                created_hosts_count += 1
+            except Exception as e:
+                logger.error(f"Failed to add host for inbound_tag '{inbound_tag}' on node '{dbnode.name}': {e}", exc_info=True)
+
+        if created_hosts_count > 0 and hasattr(xray, 'hosts') and callable(getattr(xray.hosts, 'update', None)):
+            logger.info(f"Created {created_hosts_count} new proxy hosts for node {dbnode.name}. Updating xray.hosts.")
+            xray.hosts.update() # Presumed to reload host configurations
+        elif created_hosts_count == 0:
+            logger.info(f"No new proxy hosts created for node {dbnode.name} based on current xray.config inbounds.")
 
 
 @router.get("/node/settings", response_model=NodeSettings)
@@ -82,7 +135,7 @@ def add_node(
         )
 
     bg.add_task(xray.operations.connect_node, node_id=dbnode.id)
-    bg.add_task(add_host_if_needed, new_node, db)
+    bg.add_task(add_host_if_needed, dbnode_id=dbnode.id, create_hosts_flag=new_node.add_as_new_host)
 
     logger.info(f'New node "{dbnode.name}" added')
     return dbnode
@@ -102,29 +155,43 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
     token = websocket.query_params.get("token") or websocket.headers.get(
         "Authorization", ""
     ).removeprefix("Bearer ")
+
+    logger.info(f"Node logs WS: Attempting connection for node_id {node_id} with token prefix: {token[:20]}...") # Log token prefix
+
     admin = Admin.get_admin(token, db)
     if not admin:
+        logger.warning(f"Node logs WS: Unauthorized for node_id {node_id}. Admin not found for token.")
         return await websocket.close(reason="Unauthorized", code=4401)
 
+    # Log the admin details fetched
+    logger.info(f"Node logs WS: Admin '{admin.username}' attempting access to logs for node_id {node_id}. Is Sudo: {admin.is_sudo}")
+
     if not admin.is_sudo:
+        logger.warning(f"Node logs WS: Access denied for admin '{admin.username}' to node_id {node_id} logs. Reason: Not a sudo admin.")
         return await websocket.close(reason="You're not allowed", code=4403)
 
     if not xray.nodes.get(node_id):
+        logger.warning(f"Node logs WS: Node ID {node_id} not found in tracked xray.nodes.")
         return await websocket.close(reason="Node not found", code=4404)
 
-    if not xray.nodes[node_id].connected:
-        return await websocket.close(reason="Node is not connected", code=4400)
-
-    interval = websocket.query_params.get("interval")
-    if interval:
+    node_instance = xray.nodes[node_id] # Get the node instance more safely
+    if not node_instance.connected:
+        logger.warning(f"Node logs WS: Node ID {node_id} ('{node_instance.address}') is not connected. Attempting to connect...")
         try:
-            interval = float(interval)
-        except ValueError:
-            return await websocket.close(reason="Invalid interval value", code=4400)
-        if interval > 10:
-            return await websocket.close(
-                reason="Interval must be more than 0 and at most 10 seconds", code=4400
-            )
+            # Try to connect the node
+            xray.operations.connect_node(node_id)
+            # Wait for connection with timeout
+            for _ in range(10):  # Try for 5 seconds (10 * 0.5)
+                if node_instance.connected:
+                    break
+                await asyncio.sleep(0.5)
+
+            if not node_instance.connected:
+                logger.warning(f"Node logs WS: Node ID {node_id} failed to connect within timeout.")
+                return await websocket.close(reason="Node connection timeout", code=4400)
+        except Exception as e:
+            logger.error(f"Node logs WS: Error connecting to node {node_id}: {e}")
+            return await websocket.close(reason="Node connection error", code=4400)
 
     await websocket.accept()
 

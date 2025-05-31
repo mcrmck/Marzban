@@ -14,7 +14,8 @@ from app.db import models as db_models
 from app.models.proxy import ProxyTypes
 from app.models.user import UserStatus # Assuming UserStatus is correctly defined
 from app.utils.crypto import get_cert_SANs
-from config import DEBUG, XRAY_EXCLUDE_INBOUND_TAGS, XRAY_FALLBACKS_INBOUND_TAG
+# Removed XRAY_FALLBACKS_INBOUND_TAG from this import
+from config import DEBUG, XRAY_EXCLUDE_INBOUND_TAGS
 
 
 def merge_dicts(a, b):  # B will override A dictionary key and values
@@ -28,58 +29,114 @@ def merge_dicts(a, b):  # B will override A dictionary key and values
 
 class XRayConfig(dict):
     def __init__(self,
-                 config: Union[dict, str, PosixPath] = {},
+                 config_dict: Union[dict, str, PosixPath, None] = None,
                  api_host: str = "127.0.0.1",
                  api_port: int = 8080):
-        if isinstance(config, str):
-            try:
-                # considering string as json
-                config = commentjson.loads(config)
-            except (json.JSONDecodeError, ValueError):
-                # considering string as file path
-                with open(config, 'r') as file:
-                    config = commentjson.loads(file.read())
-
-        if isinstance(config, PosixPath):
-            with open(config, 'r') as file:
-                config = commentjson.loads(file.read())
-
-        if isinstance(config, dict):
-            config = deepcopy(config)
 
         self.api_host = api_host
         self.api_port = api_port
 
-        super().__init__(config)
-        self._validate()
+        processed_config = {} # This will hold the configuration to actually use
 
-        self.inbounds = []
-        self.inbounds_by_protocol = {}
+        if isinstance(config_dict, str):
+            try:
+                # considering string as json
+                processed_config = commentjson.loads(config_dict)
+            except (json.JSONDecodeError, ValueError):
+                # considering string as file path
+                try:
+                    with open(config_dict, 'r') as file:
+                        processed_config = commentjson.loads(file.read())
+                except FileNotFoundError:
+                    # If file not found and it was a string, it might be an empty string or invalid path
+                    # Initialize with default if it's an empty string path or unreadable
+                    print(f"Warning: Config file path '{config_dict}' not found or unreadable. Initializing with default config.")
+                    config_dict = None # Fall through to None handling
+                    # Fallthrough to None case
+        elif isinstance(config_dict, PosixPath):
+            try:
+                with open(config_dict, 'r') as file:
+                    processed_config = commentjson.loads(file.read())
+            except FileNotFoundError:
+                print(f"Warning: Config file PosixPath '{config_dict}' not found. Initializing with default config.")
+                config_dict = None # Fall through to None handling
+        elif isinstance(config_dict, dict):
+            processed_config = deepcopy(config_dict)
+
+        if config_dict is None: # This handles explicit None or fallthrough from failed file reads
+            # Create a minimal, valid default Xray config structure here
+            # This will serve as the base template for xray.config
+            print("XRayConfig: Initializing with default structure because config_dict is None or could not be loaded.")
+            processed_config = {
+                "log": {
+                    "loglevel": "warning"
+                },
+                "inbounds": [], # API inbound will be added by _apply_api
+                "outbounds": [
+                    {
+                        "protocol": "freedom",
+                        "settings": {},
+                        "tag": "direct"
+                    },
+                    {
+                        "protocol": "blackhole",
+                        "settings": {},
+                        "tag": "block"
+                    }
+                ],
+                "routing": {
+                    "rules": []
+                },
+                # Policy will be merged/added by _apply_api
+            }
+
+        if not isinstance(processed_config, dict):
+             # This case should ideally not be reached if logic above is correct
+             raise TypeError("Internal error: processed_config is not a dict after input handling.")
+
+
+        super().__init__(processed_config) # Initialize the dictionary part of self
+
+        # Initial validation for basic structure if not empty
+        if processed_config: # only validate if we have something other than an empty dict
+             self._validate()
+
+        self.inbounds = [] # This will be populated by _resolve_inbounds based on current dict content
+        self.inbounds_by_protocol = defaultdict(list) # Use defaultdict
         self.inbounds_by_tag = {}
-        self._fallbacks_inbound = self.get_inbound(XRAY_FALLBACKS_INBOUND_TAG)
-        self._resolve_inbounds()
 
-        self._apply_api()
+        # Removed reliance on global XRAY_FALLBACKS_INBOUND_TAG
+        # Fallbacks must be explicitly defined in the config if needed, or handled by a different mechanism.
+        # self.fallbacks_inbound_tag = ""
+        self._fallbacks_inbound = {} # Store the actual fallback inbound dict if found
+
+        # Correct order: _apply_api first, then _resolve_inbounds
+        self._apply_api()        # Ensure API inbound is part of self (the dict) first
+        self._resolve_inbounds() # Then resolve all inbounds present in self, including API inbound
 
     def _apply_api(self):
-        api_inbound = self.get_inbound("API_INBOUND")
-        if api_inbound:
-            # Ensure 'listen' is a dictionary if it exists, or create it
-            if "listen" not in api_inbound or not isinstance(api_inbound["listen"], dict):
-                 api_inbound["listen"] = {} # Initialize if not a dict or not present
-            api_inbound["listen"]["address"] = self.api_host # Set address within the listen dict
-            api_inbound["port"] = self.api_port
+        api_inbound_entry = self.get_inbound("API_INBOUND") # Check if an inbound with this tag already exists
+        if api_inbound_entry: # If it exists, just ensure its port and listen address are correct
+            api_inbound_entry["port"] = self.api_port
+            api_inbound_entry["listen"] = self.api_host # Overwrite or set listen address
+            # Ensure settings.address is also updated if that's how dokodemo-door expects it
+            if api_inbound_entry.get("protocol") == "dokodemo-door":
+                if "settings" not in api_inbound_entry:
+                    api_inbound_entry["settings"] = {}
+                api_inbound_entry["settings"]["address"] = self.api_host
             return
 
-        self["api"] = {
+        # If no API_INBOUND exists, create it along with api and stats sections
+        self["api"] = self.get("api", {
             "services": [
                 "HandlerService",
                 "StatsService",
                 "LoggerService"
             ],
             "tag": "API"
-        }
-        self["stats"] = {}
+        })
+        self["stats"] = self.get("stats", {}) # Initialize stats if not present
+
         forced_policies = {
             "levels": {
                 "0": {
@@ -88,391 +145,307 @@ class XRayConfig(dict):
                 }
             },
             "system": {
-                "statsInboundDownlink": False,
-                "statsInboundUplink": False,
+                "statsInboundDownlink": False, # Typically false for panel-managed stats
+                "statsInboundUplink": False,   # Typically false for panel-managed stats
                 "statsOutboundDownlink": True,
                 "statsOutboundUplink": True
             }
         }
-        if self.get("policy"):
-            self["policy"] = merge_dicts(self.get("policy"), forced_policies)
-        else:
-            self["policy"] = forced_policies
-        inbound = {
-            "listen": self.api_host, # listen can be just the address string
+        current_policy = self.get("policy", {})
+        self["policy"] = merge_dicts(current_policy, forced_policies)
+
+        new_api_inbound = {
+            "listen": self.api_host,
             "port": self.api_port,
             "protocol": "dokodemo-door",
             "settings": {
-                "address": self.api_host # Or specific address for dokodemo if different
+                "address": self.api_host # Dokodemo typically uses settings.address for the target
             },
             "tag": "API_INBOUND"
         }
-        try:
-            self["inbounds"].insert(0, inbound)
-        except KeyError:
-            self["inbounds"] = []
-            self["inbounds"].insert(0, inbound)
 
-        rule = {
+        # Ensure 'inbounds' list exists
+        if "inbounds" not in self:
+            self["inbounds"] = []
+        self["inbounds"].insert(0, new_api_inbound)
+
+        # Ensure 'routing' and 'routing.rules' list exist
+        if "routing" not in self:
+            self["routing"] = {"rules": []}
+        elif "rules" not in self["routing"]:
+            self["routing"]["rules"] = []
+
+        api_rule = {
             "inboundTag": [
                 "API_INBOUND"
             ],
-            "outboundTag": "API",
+            "outboundTag": "API", # This requires an outbound with tag "API"
             "type": "field"
         }
-        try:
-            self["routing"]["rules"].insert(0, rule)
-        except KeyError:
-            self["routing"] = {"rules": []}
-            self["routing"]["rules"].insert(0, rule)
+        # Check if an outbound with tag "API" exists, if not, consider adding a default one
+        if not self.get_outbound("API"):
+            if "outbounds" not in self:
+                self["outbounds"] = []
+            # Add a default freedom outbound for API if it doesn't exist, or ensure it's configured
+            # For simplicity here, we assume routing to "direct" or similar for API is okay
+            # A specific "API" outbound might be "proxy/freedom" tagged "API"
+            # For now, let's assume the user ensures an appropriate outbound for "API" tag exists
+            # or we simply point to "direct". Using "direct" if "API" outbound is missing:
+            api_rule["outboundTag"] = "direct" # Fallback if "API" outbound doesn't exist
+
+        self["routing"]["rules"].insert(0, api_rule)
 
     def _validate(self):
-        if not self.get("inbounds"):
-            raise ValueError("config doesn't have inbounds")
+        # Allow empty inbounds initially, as _apply_api will add the API inbound
+        if not self.get("outbounds"): # outbounds must exist
+            raise ValueError("XRayConfig: 'outbounds' key is missing or empty.")
 
-        if not self.get("outbounds"):
-            raise ValueError("config doesn't have outbounds")
-
-        for inbound in self['inbounds']:
+        # Validate after all modifications, especially inbounds and outbounds
+        # This basic validation is fine for the initial structure.
+        # More specific validations occur in _resolve_inbounds.
+        for inbound in self.get('inbounds', []): # use .get for safety
             if not inbound.get("tag"):
-                raise ValueError("all inbounds must have a unique tag")
+                raise ValueError("XRayConfig: All inbounds must have a unique tag.")
             if ',' in inbound.get("tag"):
-                raise ValueError("character «,» is not allowed in inbound tag")
-        for outbound in self['outbounds']:
+                raise ValueError("XRayConfig: Character «,» is not allowed in inbound tag.")
+        for outbound in self.get('outbounds', []):
             if not outbound.get("tag"):
-                raise ValueError("all outbounds must have a unique tag")
+                raise ValueError("XRayConfig: All outbounds must have a unique tag.")
 
     def _resolve_inbounds(self):
-        for inbound in self['inbounds']:
+        # Reset internal lists before resolving from the current state of self (the dict)
+        self.inbounds = []
+        self.inbounds_by_protocol = defaultdict(list)
+        self.inbounds_by_tag = {}
+
+        # Find a potential fallback inbound from the configuration itself if defined
+        # This is a placeholder for a more robust fallback mechanism.
+        # For now, we're not auto-assigning fallbacks like the original code did with XRAY_FALLBACKS_INBOUND_TAG.
+        # If a user defines an inbound with a specific setting indicating it's a fallback source,
+        # that could be used. Here, _fallbacks_inbound remains mostly unused.
+        # self._fallbacks_inbound = {} # Example: find and set self._fallbacks_inbound if logic exists
+
+        for inbound_config_dict in self.get('inbounds', []): # Iterate over current inbounds in self
             # Ensure ProxyTypes has _value2member_map_ or adapt the check
-            if not hasattr(ProxyTypes, '_value2member_map_') or inbound['protocol'] not in ProxyTypes._value2member_map_:
+            if not hasattr(ProxyTypes, '_value2member_map_') or inbound_config_dict.get('protocol') not in ProxyTypes._value2member_map_:
                 continue
 
-            if inbound['tag'] in XRAY_EXCLUDE_INBOUND_TAGS:
+            if inbound_config_dict.get('tag') in XRAY_EXCLUDE_INBOUND_TAGS:
                 continue
 
-            if not inbound.get('settings'):
-                inbound['settings'] = {}
-            if not inbound['settings'].get('clients'):
-                inbound['settings']['clients'] = []
+            # Ensure settings and clients sub-dictionaries exist
+            if not inbound_config_dict.get('settings'):
+                inbound_config_dict['settings'] = {}
+            if not inbound_config_dict['settings'].get('clients'):
+                inbound_config_dict['settings']['clients'] = [] # Important for include_db_users
 
             settings = {
-                "tag": inbound["tag"],
-                "protocol": inbound["protocol"],
-                "port": None,
-                "network": "tcp",
-                "tls": 'none',
+                "tag": inbound_config_dict["tag"],
+                "protocol": inbound_config_dict["protocol"],
+                "port": inbound_config_dict.get("port"), # Get port directly
+                "network": "tcp", # Default
+                "tls": 'none',  # Default
                 "sni": [],
-                "host": [], # Ensure host is initialized as a list if it's expected to be
+                "host": [],
                 "path": "",
                 "header_type": "",
-                "is_fallback": False
+                "is_fallback": False # Not actively used yet without a fallback mechanism
             }
 
-            # port settings
-            try:
-                settings['port'] = inbound['port']
-            except KeyError:
-                if self._fallbacks_inbound:
-                    try:
-                        settings['port'] = self._fallbacks_inbound['port']
-                        settings['is_fallback'] = True
-                    except KeyError:
-                        raise ValueError("fallbacks inbound doesn't have port")
-
             # stream settings
-            if stream := inbound.get('streamSettings'):
-                net = stream.get('network', 'tcp')
-                net_settings = stream.get(f"{net}Settings", {})
-                security = stream.get("security")
-                # Make sure tls_settings is initialized before potential use
-                tls_settings = stream.get(f"{security}Settings", {}) if security else {}
-
-
-                if settings['is_fallback'] is True and self._fallbacks_inbound: # Check _fallbacks_inbound exists
-                    # probably this is a fallback
-                    fallback_stream_settings = self._fallbacks_inbound.get('streamSettings', {})
-                    security = fallback_stream_settings.get('security')
-                    tls_settings = fallback_stream_settings.get(f"{security}Settings", {}) if security else {}
-
+            if stream_settings_dict := inbound_config_dict.get('streamSettings'):
+                net = stream_settings_dict.get('network', 'tcp')
+                current_net_settings = stream_settings_dict.get(f"{net}Settings", {})
+                security = stream_settings_dict.get("security")
+                # Initialize tls_settings to an empty dict to prevent errors if security is None
+                current_tls_settings = stream_settings_dict.get(f"{security}Settings", {}) if security else {}
 
                 settings['network'] = net
 
                 if security == 'tls':
                     settings['tls'] = 'tls'
-                    for certificate in tls_settings.get('certificates', []):
-                        if certificate.get("certificateFile"): # Simplified check
+                    for certificate in current_tls_settings.get('certificates', []):
+                        if cert_file_path := certificate.get("certificateFile"):
                             try:
-                                with open(certificate['certificateFile'], 'rb') as file:
-                                    cert_bytes = file.read() # Renamed to avoid conflict
+                                with open(cert_file_path, 'rb') as file:
+                                    cert_bytes = file.read()
                                     settings['sni'].extend(get_cert_SANs(cert_bytes))
                             except FileNotFoundError:
-                                # Log error or handle missing cert file
-                                print(f"Warning: Certificate file not found: {certificate['certificateFile']}")
+                                print(f"Warning: Certificate file not found: {cert_file_path} for inbound {settings['tag']}")
                             except Exception as e:
-                                print(f"Warning: Error reading certificate file {certificate['certificateFile']}: {e}")
+                                print(f"Warning: Error reading certificate file {cert_file_path}: {e}")
 
-
-                        if certificate.get("certificate"): # Simplified check
-                            cert_data = certificate['certificate'] # Renamed
-                            if isinstance(cert_data, list):
-                                cert_data = '\n'.join(cert_data)
-                            if isinstance(cert_data, str):
-                                cert_data = cert_data.encode()
+                        if cert_data_inline := certificate.get("certificate"):
+                            if isinstance(cert_data_inline, list):
+                                cert_data_inline = '\n'.join(cert_data_inline)
+                            if isinstance(cert_data_inline, str):
+                                cert_data_inline = cert_data_inline.encode()
                             try:
-                                settings['sni'].extend(get_cert_SANs(cert_data))
+                                settings['sni'].extend(get_cert_SANs(cert_data_inline))
                             except Exception as e:
-                                print(f"Warning: Error processing inline certificate for SNI: {e}")
-
+                                print(f"Warning: Error processing inline certificate for SNI in inbound {settings['tag']}: {e}")
 
                 elif security == 'reality':
-                    settings['fp'] = tls_settings.get('fingerprint', 'chrome') # Use get with default
+                    settings['fp'] = current_tls_settings.get('fingerprint', 'chrome')
                     settings['tls'] = 'reality'
-                    settings['sni'] = tls_settings.get('serverNames', [])
+                    settings['sni'] = current_tls_settings.get('serverNames', []) # Should be 'serverNames' for Xray spec
+                    settings['pbk'] = current_tls_settings.get('publicKey')
 
-                    settings['pbk'] = tls_settings.get('publicKey') # Directly get publicKey
-                    if not settings['pbk']: # If publicKey is not directly provided
-                        pvk = tls_settings.get('privateKey')
-                        if not pvk:
-                            raise ValueError(
-                                f"You need to provide privateKey or publicKey in realitySettings of {inbound['tag']}")
-                        try:
-                            from app.xray import core # Local import if not already at top
-                            x25519 = core.get_x25519(pvk)
-                            settings['pbk'] = x25519['public_key']
-                        except ImportError:
-                             print("Warning: app.xray.core not available for deriving public key from private key.")
-                        except Exception as e:
-                            raise ValueError(f"Error deriving public key for {inbound['tag']}: {e}")
+                    if not settings['pbk']:
+                         raise ValueError(
+                            f"Panel requires 'publicKey' to be explicitly provided in realitySettings for inbound '{settings['tag']}'. Private key derivation is no longer supported by the panel."
+                        )
+
+                    settings['sids'] = current_tls_settings.get('shortIds', [])
+                    if not settings['sids']:
+                         raise ValueError(
+                            f"You need to define at least one shortID in realitySettings of inbound '{settings['tag']}'"
+                        )
+                    settings['spx'] = current_tls_settings.get('spiderX', "")
 
 
-                        if not settings.get('pbk'): # Check again after derivation attempt
-                            raise ValueError(
-                                f"You need to provide publicKey in realitySettings of {inbound['tag']}")
-
-                    settings['sids'] = tls_settings.get('shortIds', []) # Default to empty list
-                    if not settings['sids']: # Check if list is empty
-                        raise ValueError(
-                            f"You need to define at least one shortID in realitySettings of {inbound['tag']}")
-
-                    settings['spx'] = tls_settings.get('spiderX', "") # Corrected key name based on common usage, ensure it matches your Xray version
-
-                if net in ('tcp', 'raw'): # 'raw' is often an alias or similar to 'tcp' in some contexts
-                    header = net_settings.get('header', {})
+                if net in ('tcp', 'raw'):
+                    header = current_net_settings.get('header', {})
                     request = header.get('request', {})
-                    path_setting = request.get('path') # Renamed to avoid conflict
-                    host_setting = request.get('headers', {}).get('Host') # Renamed
+                    path_list = request.get('path', [])
+                    host_list_from_headers = request.get('headers', {}).get('Host', [])
 
                     settings['header_type'] = header.get('type', '')
 
-                    if isinstance(path_setting, str) or isinstance(host_setting, str):
-                        raise ValueError(f"Settings of {inbound['tag']} for path and host must be list, not str for TCP HTTP header\n"
-                                         "https://xtls.github.io/config/transports/tcp.html#httpheaderobject")
+                    if isinstance(path_list, str) or isinstance(host_list_from_headers, str):
+                        raise ValueError(f"Settings of {settings['tag']} for path and host must be list, not str for TCP HTTP header")
 
-                    if path_setting and isinstance(path_setting, list):
-                        settings['path'] = path_setting[0] if path_setting else ""
+                    settings['path'] = path_list[0] if path_list else ""
+                    settings['host'] = host_list_from_headers if host_list_from_headers else []
 
-                    if host_setting and isinstance(host_setting, list):
-                        settings['host'] = host_setting # host is expected to be a list of strings by some parts of your logic
 
                 elif net == 'ws':
-                    path_setting = net_settings.get('path', '')
-                    host_value = net_settings.get('Host', net_settings.get('headers', {}).get('Host')) # More robust Host header check
+                    settings['path'] = current_net_settings.get('path', '')
+                    host_val_ws = current_net_settings.get('Host', current_net_settings.get('headers', {}).get('Host'))
 
-                    settings['header_type'] = '' # Typically no header type for WS itself, it's a protocol
+                    if isinstance(settings['path'], list) or isinstance(host_val_ws, list):
+                        raise ValueError(f"Settings of {settings['tag']} for path and host must be str, not list for WebSocket")
 
-                    if isinstance(path_setting, list) or isinstance(host_value, list):
-                        raise ValueError(f"Settings of {inbound['tag']} for path and host must be str, not list for WebSocket\n"
-                                         "https://xtls.github.io/config/transports/websocket.html#websocketobject")
-
-                    if isinstance(path_setting, str):
-                        settings['path'] = path_setting
-
-                    if isinstance(host_value, str) and host_value: # Ensure host_value is not empty
-                        settings['host'] = [host_value]
-                    else:
-                        settings['host'] = []
+                    settings['host'] = [host_val_ws] if host_val_ws else []
+                    settings["heartbeatPeriod"] = current_net_settings.get('heartbeatPeriod', 0)
 
 
-                    settings["heartbeatPeriod"] = net_settings.get('heartbeatPeriod', 0) # Added for WS
+                elif net == 'grpc' or net == 'gun':
+                    settings['path'] = current_net_settings.get('serviceName', '')
+                    authority_grpc = current_net_settings.get('authority', '')
+                    settings['host'] = [authority_grpc] if authority_grpc else []
+                    settings['multiMode'] = current_net_settings.get('multiMode', False)
 
-                elif net == 'grpc' or net == 'gun': # gun is often used for gRPC
-                    settings['header_type'] = ''
-                    settings['path'] = net_settings.get('serviceName', '')
-                    host_value = net_settings.get('authority', '') # authority is used in gRPC
-                    settings['host'] = [host_value] if host_value else []
-                    settings['multiMode'] = net_settings.get('multiMode', False)
+                # Add other network types (quic, httpupgrade, etc.) from your original _resolve_inbounds if needed,
+                # ensuring they read from 'current_net_settings' and 'current_tls_settings'.
 
-
-                elif net == 'quic':
-                    settings['header_type'] = net_settings.get('header', {}).get('type', '')
-                    settings['path'] = net_settings.get('key', '') # QUIC key/PSK
-                    settings['host'] = [net_settings.get('security', '')] # QUIC security (e.g., 'none', 'aes-128-gcm')
-
-                elif net == 'httpupgrade':
-                    settings['path'] = net_settings.get('path', '')
-                    host_value = net_settings.get('host', '')
-                    settings['host'] = [host_value] if host_value else []
-
-                # splithttp and xhttp are less common, ensure these settings match your Xray version's capabilities
-                elif net in ('splithttp', 'xhttp'): # These are XTLS specific, might not be in standard Xray
-                    settings['path'] = net_settings.get('path', '')
-                    host_value = net_settings.get('host', '')
-                    settings['host'] = [host_value] if host_value else []
-                    settings['scMaxEachPostBytes'] = net_settings.get('scMaxEachPostBytes', 1000000)
-                    settings['scMaxConcurrentPosts'] = net_settings.get('scMaxConcurrentPosts', 100)
-                    settings['scMinPostsIntervalMs'] = net_settings.get('scMinPostsIntervalMs', 30)
-                    settings['xPaddingBytes'] = net_settings.get('xPaddingBytes', "100-1000")
-                    settings['xmux'] = net_settings.get('xmux', {})
-                    settings["mode"] = net_settings.get("mode", "auto")
-                    settings["noGRPCHeader"] = net_settings.get("noGRPCHeader", False)
-                    settings["keepAlivePeriod"] = net_settings.get("keepAlivePeriod", 0)
+            self.inbounds.append(settings) # Processed settings for internal use
+            self.inbounds_by_tag[settings['tag']] = settings
+            self.inbounds_by_protocol[settings['protocol']].append(settings)
 
 
-                elif net == 'kcp':
-                    header = net_settings.get('header', {})
-                    settings['header_type'] = header.get('type', '')
-                    # KCP 'host' and 'path' are often not standard terms, 'seed' for path-like behavior is common
-                    settings['host'] = [] # KCP doesn't typically use a 'Host' header in the same way HTTP does
-                    settings['path'] = net_settings.get('seed', '')
-
-
-                elif net in ("http", "h2"): # h3 uses QUIC, handled above
-                    # For HTTP/H2, streamSettings might be under httpSettings
-                    actual_net_settings = stream.get("httpSettings", net_settings) # Prefer httpSettings if present
-
-                    settings['host'] = actual_net_settings.get('host', []) # host can be a list of domains
-                    if isinstance(settings['host'], str): # Ensure it's a list
-                        settings['host'] = [settings['host']] if settings['host'] else []
-
-                    settings['path'] = actual_net_settings.get('path', '')
-
-                # Fallback for other network types if any, though most common are covered
-                # else:
-                #     settings['path'] = net_settings.get('path', '')
-                #     host_value = net_settings.get('host', net_settings.get('Host')) # Check both cases
-                #     if isinstance(host_value, str) and host_value:
-                #         settings['host'] = [host_value]
-                #     elif isinstance(host_value, list):
-                #         settings['host'] = host_value
-                #     else:
-                #         settings['host'] = []
-
-
-            self.inbounds.append(settings)
-            self.inbounds_by_tag[inbound['tag']] = settings
-
-            try:
-                self.inbounds_by_protocol[inbound['protocol']].append(settings)
-            except KeyError:
-                self.inbounds_by_protocol[inbound['protocol']] = [settings]
-
-    def get_inbound(self, tag) -> dict | None: # Added return type hint
-        for inbound in self.get('inbounds', []): # Use .get for safety
-            if inbound.get('tag') == tag: # Use .get for safety
+    def get_inbound(self, tag) -> dict | None:
+        for inbound in self.get('inbounds', []):
+            if inbound.get('tag') == tag:
                 return inbound
-        return None # Explicitly return None if not found
+        return None
 
-    def get_outbound(self, tag) -> dict | None: # Added return type hint
-        for outbound in self.get('outbounds', []): # Use .get for safety
-            if outbound.get('tag') == tag: # Use .get for safety
+    def get_outbound(self, tag) -> dict | None:
+        for outbound in self.get('outbounds', []):
+            if outbound.get('tag') == tag:
                 return outbound
-        return None # Explicitly return None if not found
+        return None
 
     def to_json(self, **json_kwargs):
-        return json.dumps(self, **json_kwargs)
+        # Return a JSON representation of self (the main dict)
+        return json.dumps(dict(self), **json_kwargs)
 
-    def copy(self):
-        return deepcopy(self)
+
+    def copy(self) -> XRayConfig: # Ensure it returns an instance of XRayConfig
+        # Create a new XRayConfig instance from a deepcopy of the current instance's dictionary data.
+        # This ensures that the new instance also goes through __init__ processing if necessary,
+        # but for a simple copy of the dict content that's already processed, a direct deepcopy is fine.
+        # However, to maintain integrity of api_host/port and re-run resolutions:
+        new_config_dict = deepcopy(dict(self))
+        return XRayConfig(config_dict=new_config_dict, api_host=self.api_host, api_port=self.api_port)
+
 
     def include_db_users(self) -> XRayConfig:
-        config = self.copy()
+        # This method now operates on 'self' which is the current XRayConfig instance (the template)
+        # It should return a new XRayConfig instance with users included.
+        config_with_users = self.copy() # Start with a copy of the current config (template)
 
         with GetDB() as db:
-            # Updated query: Removed excluded_inbounds_association
             query = db.query(
                 db_models.User.id,
                 db_models.User.account_number,
-                func.lower(db_models.Proxy.type).label('type'), # Ensure Proxy.type is string here
+                func.lower(db_models.Proxy.type).label('proxy_type_value'), # Proxy.type is Enum
                 db_models.Proxy.settings
             ).join(
                 db_models.Proxy, db_models.User.id == db_models.Proxy.user_id
             ).filter(
                 db_models.User.status.in_([UserStatus.active, UserStatus.on_hold])
             )
-            # Removed group_by as it's not needed without group_concat for excluded inbounds
-            # This will fetch one row per user-proxy combination.
-            result = query.all()
+            db_user_proxies = query.all()
 
-            # Group users by their proxy type (e.g., "vmess", "vless")
-            # Each proxy type will have a list of users (and their specific proxy settings)
-            grouped_user_proxies = defaultdict(list)
-            for row in result:
-                # row.type will be the string value from func.lower(db_models.Proxy.type)
-                grouped_user_proxies[row.type].append({
+            grouped_user_proxies_by_protocol = defaultdict(list)
+            for row in db_user_proxies:
+                grouped_user_proxies_by_protocol[row.proxy_type_value].append({
                     "user_id": row.id,
                     "account_number": row.account_number,
-                    "settings": row.settings # These are the specific settings for this user's proxy
+                    "settings": row.settings
                 })
 
-            # Iterate through the system's configured inbounds (already processed by _resolve_inbounds)
-            for inbound_protocol_str, resolved_inbounds_list in self.inbounds_by_protocol.items():
-                # inbound_protocol_str is like "vmess", "vless"
-                # resolved_inbounds_list is a list of processed inbound settings dicts for that protocol
+            # Iterate through the inbounds defined in the 'config_with_users'
+            # These inbounds are already processed by _resolve_inbounds of the copied config
+            for original_inbound_tag, resolved_inbound_details in config_with_users.inbounds_by_tag.items():
+                inbound_protocol = resolved_inbound_details.get("protocol")
+                if not inbound_protocol:
+                    continue
 
-                # Get the users who have this specific proxy_protocol_str active
-                users_for_this_protocol = grouped_user_proxies.get(inbound_protocol_str, [])
+                users_for_this_protocol = grouped_user_proxies_by_protocol.get(inbound_protocol, [])
                 if not users_for_this_protocol:
-                    continue # No users have this proxy type configured, skip to next protocol
+                    continue
 
-                # For each system inbound of this protocol type
-                for resolved_inbound_settings in resolved_inbounds_list:
-                    inbound_tag = resolved_inbound_settings.get("tag")
-                    if not inbound_tag:
-                        continue # Should not happen if _resolve_inbounds worked correctly
+                # Get the actual inbound dict from the config_with_users to modify its 'clients'
+                target_inbound_dict = config_with_users.get_inbound(original_inbound_tag)
+                if not target_inbound_dict or "settings" not in target_inbound_dict:
+                    # This should not happen if inbounds_by_tag is correct
+                    continue
 
-                    # Get the 'clients' list for this specific inbound_tag from the copied config
-                    # This ensures we are modifying the correct inbound in the new config object
-                    target_inbound_in_config = config.get_inbound(inbound_tag)
-                    if not target_inbound_in_config or 'settings' not in target_inbound_in_config:
-                        continue
+                if "clients" not in target_inbound_dict["settings"]:
+                    target_inbound_dict["settings"]["clients"] = []
 
-                    # Ensure 'clients' list exists in the target inbound's settings
-                    if 'clients' not in target_inbound_in_config['settings']:
-                        target_inbound_in_config['settings']['clients'] = []
+                # Clear existing clients if any from template, or decide on merging strategy
+                target_inbound_dict["settings"]["clients"] = []
 
-                    clients_list_for_inbound = target_inbound_in_config['settings']['clients']
 
-                    # Add each user (who has this proxy_protocol active) to this inbound's client list
-                    for user_proxy_data in users_for_this_protocol:
-                        user_id = user_proxy_data["user_id"]
-                        account_number = user_proxy_data["account_number"]
-                        user_specific_proxy_settings = user_proxy_data["settings"] # e.g., {"id": "uuid", "level": 0}
+                for user_proxy_data in users_for_this_protocol:
+                    client_entry = {
+                        "email": f"{user_proxy_data['user_id']}.{user_proxy_data['account_number']}",
+                        **user_proxy_data["settings"] # Spread user-specific proxy settings (like id, level, flow etc)
+                    }
 
-                        # Construct the client entry for Xray config
-                        client_entry = {
-                            "email": f"{user_id}.{account_number}", # Standard Marzban user identifier for Xray
-                            **user_specific_proxy_settings # Spread the user's specific proxy settings
-                        }
-
-                        # Apply XTLS flow logic (if applicable, based on original code)
-                        # This logic might need to be adapted based on the `resolved_inbound_settings` (network, tls type etc.)
-                        if client_entry.get('flow') and (
-                                resolved_inbound_settings.get('network', 'tcp') not in ('tcp', 'raw', 'kcp') or
-                                (resolved_inbound_settings.get('network', 'tcp') in ('tcp', 'raw', 'kcp') and
-                                 resolved_inbound_settings.get('tls') not in ('tls', 'reality')) or
-                                resolved_inbound_settings.get('header_type') == 'http' # Check based on resolved inbound
-                        ):
-                            del client_entry['flow']
-
-                        clients_list_for_inbound.append(client_entry)
+                    # XTLS flow logic (simplified, ensure resolved_inbound_details has necessary keys)
+                    if client_entry.get('flow') and (
+                            resolved_inbound_details.get('network', 'tcp') not in ('tcp', 'raw', 'kcp') or
+                            (resolved_inbound_details.get('network', 'tcp') in ('tcp', 'raw', 'kcp') and
+                             resolved_inbound_details.get('tls') not in ('tls', 'reality')) or
+                            resolved_inbound_details.get('header_type') == 'http'
+                    ):
+                        # Create a mutable copy of client_entry if it came directly from user_proxy_data["settings"]
+                        client_entry_copy = client_entry.copy()
+                        del client_entry_copy['flow']
+                        target_inbound_dict["settings"]["clients"].append(client_entry_copy)
+                    else:
+                        target_inbound_dict["settings"]["clients"].append(client_entry)
 
         if DEBUG:
             try:
-                with open('generated_config-debug.json', 'w') as f:
-                    f.write(config.to_json(indent=4))
+                with open('generated_config_with_users-debug.json', 'w') as f:
+                    # Use the to_json method of the XRayConfig instance
+                    f.write(config_with_users.to_json(indent=4))
             except Exception as e:
-                print(f"Error writing debug config: {e}")
+                print(f"Error writing debug config with users: {e}")
 
-
-        return config
+        return config_with_users

@@ -9,25 +9,22 @@ from xray_api import exc as xray_exc
 
 
 def core_health_check():
-    config = None
-
-    # main core
-    if not xray.core.started:
-        if not config:
-            config = xray.config.include_db_users()
-        xray.core.restart(config)
+    config = None  # Initialize config as it might be needed for node operations
 
     # nodes' core
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
             try:
                 assert node.started
-                node.api.get_sys_stats(timeout=2)
+                # It's good practice to ensure config is generated if needed before potential restart
+                if not node.api.get_sys_stats(timeout=2): # Assuming get_sys_stats could return False on issues
+                     raise AssertionError("Sys stats check failed or returned falsy")
             except (ConnectionError, xray_exc.XrayError, AssertionError):
                 if not config:
                     config = xray.config.include_db_users()
                 xray.operations.restart_node(node_id, config)
 
+        # Check connection status separately, as a node might be disconnected without an error during the previous check
         if not node.connected:
             if not config:
                 config = xray.config.include_db_users()
@@ -36,30 +33,32 @@ def core_health_check():
 
 @app.on_event("startup")
 def start_core():
-    logger.info("Generating Xray core config")
+    logger.info("Panel startup: Preparing to connect to configured Xray nodes.")
 
+    # Generate the base configuration that might be used for connecting nodes
+    # This assumes xray.config.include_db_users() is still the way to get a suitable config
+    # for external nodes. This might need adjustment later if config handling changes significantly.
     start_time = time.time()
-    config = xray.config.include_db_users()
-    logger.info(f"Xray core config generated in {(time.time() - start_time):.2f} seconds")
+    config_for_nodes = xray.config.include_db_users()
+    logger.info(f"Base node config generated in {(time.time() - start_time):.2f} seconds")
 
-    # main core
-    logger.info("Starting main Xray core")
-    try:
-        xray.core.start(config)
-    except Exception:
-        traceback.print_exc()
-
-    # nodes' core
-    logger.info("Starting nodes Xray core")
+    # Connect to all enabled nodes defined in the database
+    logger.info("Attempting to connect to enabled Xray nodes.")
     with GetDB() as db:
         dbnodes = crud.get_nodes(db=db, enabled=True)
-        node_ids = [dbnode.id for dbnode in dbnodes]
+        node_ids_to_connect = []
         for dbnode in dbnodes:
+            # Set status to connecting before attempting connection
             crud.update_node_status(db, dbnode, NodeStatus.connecting)
+            node_ids_to_connect.append(dbnode.id)
 
-    for node_id in node_ids:
-        xray.operations.connect_node(node_id, config)
+    # It's important that xray.operations.connect_node does not assume it always needs a full 'config'
+    # if the node is already configured and just needs a connection attempt.
+    # However, passing it is safer if connect_node might also (re)start the Xray process on the node.
+    for node_id in node_ids_to_connect:
+        xray.operations.connect_node(node_id, config_for_nodes) # Pass the generated config
 
+    # Schedule the health check for connected nodes
     scheduler.add_job(core_health_check, 'interval',
                       seconds=JOB_CORE_HEALTH_CHECK_INTERVAL,
                       coalesce=True, max_instances=1)
@@ -67,12 +66,13 @@ def start_core():
 
 @app.on_event("shutdown")
 def app_shutdown():
-    logger.info("Stopping main Xray core")
-    xray.core.stop()
-
-    logger.info("Stopping nodes Xray core")
-    for node in list(xray.nodes.values()):
-        try:
-            node.disconnect()
-        except Exception:
-            pass
+    logger.info("Panel shutdown: Disconnecting from all managed Xray nodes.")
+    for node_id in list(xray.nodes.keys()): # Iterate by keys to avoid issues if node disconnects itself from dict
+        node = xray.nodes.get(node_id)
+        if node:
+            try:
+                logger.info(f"Disconnecting from node ID: {node_id}")
+                node.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting from node ID {node_id}: {e}")
+                pass

@@ -214,3 +214,26 @@ class ProxyInbound(BaseModel):
     network: str
     tls: str
     port: Union[int, str]
+
+class ProxyHostModify(BaseModel):
+    remark: str
+    address: str  # Address of the node or specific host
+    port: Optional[int] = None # Port from the inbound details
+    path: Optional[str] = None
+    sni: Optional[str] = None  # Can be node's address, or specific SNI for the host
+    host: Optional[str] = None # Can be node's address, or specific Host header for the host
+    security: Optional[ProxyHostSecurity] = ProxyHostSecurity.inbound_default # Default from enum
+    alpn: Optional[ProxyHostALPN] = ProxyHostALPN.none # Default from enum
+    fingerprint: Optional[ProxyHostFingerprint] = ProxyHostFingerprint.none # Default from enum
+    allowinsecure: Optional[bool] = False # Default to False for new hosts
+    is_disabled: Optional[bool] = False
+    mux_enable: Optional[bool] = False
+    random_user_agent: Optional[bool] = False
+    use_sni_as_host: Optional[bool] = False
+    node_id: int  # Required: links this host to a specific node
+
+    class Config:
+        use_enum_values = True # For serialization behavior with enums
+        # Pydantic v2 uses model_config, Pydantic v1 uses class Config
+        # If using Pydantic v2, it would be:
+        # model_config = {"use_enum_values": True}

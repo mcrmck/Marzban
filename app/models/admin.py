@@ -147,8 +147,25 @@ class AdminModify(BaseModel):
         return value
 
 
-class AdminPartialModify(AdminModify):
-    __annotations__ = {k: Optional[v] for k, v in AdminModify.__annotations__.items()}
+class AdminPartialModify(BaseModel): # Inherit from BaseModel directly for clarity in partial updates
+    password: Optional[str] = None
+    is_sudo: Optional[bool] = None
+    telegram_id: Optional[int] = None
+    discord_webhook: Optional[str] = None
+    # Ensure all fields that can be partially updated are listed here with Optional and default to None
+
+    @property
+    def hashed_password(self):
+        if self.password:
+            return pwd_context.hash(self.password)
+        return None
+
+    @field_validator("discord_webhook")
+    @classmethod
+    def validate_discord_webhook_partial_modify(cls, value): # Renamed
+        if value and not value.startswith("https://discord.com"): # Allow None/empty
+            raise ValueError("Discord webhook must start with 'https://discord.com'")
+        return value
 
 
 class AdminInDB(Admin):

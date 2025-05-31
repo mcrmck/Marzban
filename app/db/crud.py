@@ -5,8 +5,10 @@ Functions for managing proxy hosts, users, user templates, nodes, and administra
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
+# Remove the built-in select import
+# import select
 
-from sqlalchemy import and_, delete, func, or_
+from sqlalchemy import and_, delete, func, or_, select  # Add select here
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
 
@@ -1052,3 +1054,115 @@ def update_user_instance(db: Session, db_user: DBUser) -> DBUser:
     db.commit()
     db.refresh(db_user)
     return db_user
+
+def get_users_for_usage_mapping(db: Session) -> List[Tuple[int, str]]:
+    """
+    Retrieves a list of (user_id, account_number) for all users.
+    Used for mapping Xray user stats (which use email format like id.username) back to user IDs.
+    """
+    return db.query(DBUser.id, DBUser.account_number).all()
+
+
+def create_or_update_node_user_usage(
+    db: Session,
+    user_id: int,
+    node_id: Optional[int], # Can be None if somehow traffic is not node-specific (unlikely for this table)
+    used_traffic_increment: int,
+    event_hour_utc: datetime # This should be the specific hour (e.g., UTC, minute=0, second=0)
+):
+    """
+    Creates or updates a NodeUserUsage record for a given user, node, and hour.
+    If a record exists for that hour, it increments the used_traffic.
+    Otherwise, it creates a new record.
+    """
+    if used_traffic_increment == 0:
+        return # No change to record
+
+    # Ensure event_hour_utc is truncated to the hour
+    usage_hour = event_hour_utc.replace(minute=0, second=0, microsecond=0)
+
+    existing_usage = db.query(NodeUserUsage).filter(
+        NodeUserUsage.user_id == user_id,
+        NodeUserUsage.node_id == node_id,
+        NodeUserUsage.created_at == usage_hour
+    ).first()
+
+    if existing_usage:
+        existing_usage.used_traffic += used_traffic_increment
+    else:
+        new_usage = NodeUserUsage(
+            user_id=user_id,
+            node_id=node_id,
+            used_traffic=used_traffic_increment,
+            created_at=usage_hour
+        )
+        db.add(new_usage)
+
+    # Commit will be handled by the calling job after all updates for that run are processed.
+    # If you want this to be atomic per call (less efficient for batching):
+    # try:
+    #     db.commit()
+    # except Exception:
+    #     db.rollback()
+    #     raise
+
+
+def aggregate_node_user_usages_to_node_usage(db: Session, event_datetime_utc: datetime):
+    """
+    Aggregates traffic from NodeUserUsage for each node for a specific hour
+    and updates the NodeUsage table.
+    The 'uplink' and 'downlink' in NodeUsage will store the total aggregated traffic.
+    Xray user stats don't typically distinguish uplink/downlink per user, so we'll
+    put the total into 'downlink' for NodeUsage as a convention, or you can split it.
+    """
+    aggregation_hour = event_datetime_utc.replace(minute=0, second=0, microsecond=0)
+
+    # Get all distinct node_ids that had usage in NodeUserUsage for that hour
+    # or iterate through all known nodes from the Node table.
+    # Let's iterate through nodes that had NodeUserUsage entries.
+
+    stmt_sum_traffic = (
+        select(
+            NodeUserUsage.node_id,
+            func.sum(NodeUserUsage.used_traffic).label("total_traffic_for_hour")
+        )
+        .filter(NodeUserUsage.created_at == aggregation_hour)
+        .group_by(NodeUserUsage.node_id)
+    )
+
+    aggregated_traffics = db.execute(stmt_sum_traffic).all()
+
+    for node_id, total_traffic in aggregated_traffics:
+        if total_traffic == 0:
+            continue
+
+        # For NodeUsage, we need to decide how to represent total_traffic as uplink/downlink
+        # Option: Put all in downlink, or split 50/50 if no other info.
+        # Let's put it all in downlink for simplicity, matching typical "download" accounting.
+        current_uplink_increment = 0
+        current_downlink_increment = total_traffic
+
+        existing_node_usage = db.query(NodeUsage).filter(
+            NodeUsage.node_id == node_id,
+            NodeUsage.created_at == aggregation_hour
+        ).first()
+
+        if existing_node_usage:
+            existing_node_usage.uplink += current_uplink_increment # Or however you attribute
+            existing_node_usage.downlink += current_downlink_increment
+        else:
+            new_node_usage = NodeUsage(
+                node_id=node_id,
+                created_at=aggregation_hour,
+                uplink=current_uplink_increment,
+                downlink=current_downlink_increment
+            )
+            db.add(new_node_usage)
+
+    # Commit is typically handled by the calling job.
+    # try:
+    #     db.commit()
+    # except Exception:
+    #     db.rollback()
+    #     raise
+

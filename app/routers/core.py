@@ -12,121 +12,111 @@ from app.models.admin import Admin
 from app.models.core import CoreStats
 from app.utils import responses
 from app.xray import XRayConfig
-from config import XRAY_JSON
 
 router = APIRouter(tags=["Core"], prefix="/api", responses={401: responses._401})
 
 
-@router.websocket("/core/logs")
-async def core_logs(websocket: WebSocket, db: Session = Depends(get_db)):
-    token = websocket.query_params.get("token") or websocket.headers.get(
-        "Authorization", ""
-    ).removeprefix("Bearer ")
-    admin = Admin.get_admin(token, db)
-    if not admin:
-        return await websocket.close(reason="Unauthorized", code=4401)
 
-    if not admin.is_sudo:
-        return await websocket.close(reason="You're not allowed", code=4403)
-
-    interval = websocket.query_params.get("interval")
-    if interval:
-        try:
-            interval = float(interval)
-        except ValueError:
-            return await websocket.close(reason="Invalid interval value", code=4400)
-        if interval > 10:
-            return await websocket.close(
-                reason="Interval must be more than 0 and at most 10 seconds", code=4400
-            )
-
-    await websocket.accept()
-
-    cache = ""
-    last_sent_ts = 0
-    with xray.core.get_logs() as logs:
-        while True:
-            if interval and time.time() - last_sent_ts >= interval and cache:
-                try:
-                    await websocket.send_text(cache)
-                except (WebSocketDisconnect, RuntimeError):
-                    break
-                cache = ""
-                last_sent_ts = time.time()
-
-            if not logs:
-                try:
-                    await asyncio.wait_for(websocket.receive(), timeout=0.2)
-                    continue
-                except asyncio.TimeoutError:
-                    continue
-                except (WebSocketDisconnect, RuntimeError):
-                    break
-
-            log = logs.popleft()
-
-            if interval:
-                cache += f"{log}\n"
-                continue
-
-            try:
-                await websocket.send_text(log)
-            except (WebSocketDisconnect, RuntimeError):
-                break
-
-
-@router.get("/core", response_model=CoreStats)
+@router.get("/core", response_model=CoreStats)  # Keep CoreStats or create a new PanelStats model
 def get_core_stats(admin: Admin = Depends(Admin.get_current)):
-    """Retrieve core statistics such as version and uptime."""
+    """Retrieve panel status."""
+    # xray.core no longer exists.
+    # The concept of a single "core version" and "core started" for the panel is different now.
+    # The panel itself is "started" if this endpoint is reachable.
+    # We can return a static version for the panel or a general status.
+    # The 'logs_websocket' for a central core is no longer applicable.
     return CoreStats(
-        version=xray.core.version,
-        started=xray.core.started,
-        logs_websocket=router.url_path_for("core_logs"),
+        version="Panel v1.0 (Decoupled)", # Placeholder version, can be dynamic later
+        started=True, # If the API is up, the panel is "started"
+        # logs_websocket=None # Or remove this field from CoreStats model if it's always None
+        # Alternatively, if CoreStats requires logs_websocket:
+        logs_websocket="" # Empty string if the field must exist but is not applicable
     )
 
 
 @router.post("/core/restart", responses={403: responses._403})
-def restart_core(admin: Admin = Depends(Admin.check_sudo_admin)):
-    """Restart the core and all connected nodes."""
-    startup_config = xray.config.include_db_users()
-    xray.core.restart(startup_config)
+def restart_all_nodes(admin: Admin = Depends(Admin.check_sudo_admin)): # Renamed for clarity
+    """Restart all connected Xray nodes."""
+    # The global xray.config (our template) is used by include_db_users
+    # to generate a full config with current users.
+    config_for_nodes = xray.config.include_db_users()
+
+    restarted_nodes = []
+    failed_nodes = []
 
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
-            xray.operations.restart_node(node_id, startup_config)
+            try:
+                print(f"Attempting to restart node ID: {node_id}")
+                xray.operations.restart_node(node_id, config_for_nodes)
+                restarted_nodes.append(node_id)
+            except Exception as e:
+                print(f"Failed to restart node ID {node_id}: {e}")
+                failed_nodes.append({"node_id": node_id, "error": str(e)})
+        else:
+            print(f"Skipping restart for disconnected node ID: {node_id}")
 
-    return {}
 
+    return {"detail": "Restart command issued to all connected nodes.", "restarted": restarted_nodes, "failed": failed_nodes}
 
 @router.get("/core/config", responses={403: responses._403})
-def get_core_config(admin: Admin = Depends(Admin.check_sudo_admin)) -> dict:
-    """Get the current core configuration."""
-    with open(XRAY_JSON, "r") as f:
-        config = commentjson.loads(f.read())
-
-    return config
+def get_default_template_config(admin: Admin = Depends(Admin.check_sudo_admin)) -> dict: # Renamed for clarity
+    """Get the current default/template Xray configuration for nodes."""
+    # xray.config is our XRayConfig object holding the template.
+    # XRayConfig is a subclass of dict, so it can be returned directly.
+    return dict(xray.config) # Return a copy as a plain dict
 
 
 @router.put("/core/config", responses={403: responses._403})
-def modify_core_config(
+def modify_default_template_config( # Renamed for clarity
     payload: dict, admin: Admin = Depends(Admin.check_sudo_admin)
 ) -> dict:
-    """Modify the core configuration and restart the core."""
+    """Modify the in-memory default/template Xray configuration and restart all connected nodes."""
     try:
-        config = XRayConfig(payload, api_port=xray.config.api_port)
+        # Create a new XRayConfig instance from the payload to validate it.
+        # Use the api_port from the current xray.config template, as this isn't changed here.
+        new_template_config = XRayConfig(config_dict=payload, api_port=xray.config.api_port)
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err))
 
-    xray.config = config
-    with open(XRAY_JSON, "w") as f:
-        f.write(json.dumps(payload, indent=4))
+    # Update the global in-memory xray.config object to this new template.
+    xray.config = new_template_config
 
-    startup_config = xray.config.include_db_users()
-    xray.core.restart(startup_config)
+    # Note: Persisting this template to a file is not done here.
+    # If persistence is needed, it would be an additional step.
+    # For example:
+    # with open("default_xray_template.json", "w") as f:
+    #     f.write(xray.config.to_json(indent=4))
+
+    # Generate a full config with users based on the NEW template
+    config_for_nodes = xray.config.include_db_users()
+
+    # Restart all connected nodes to apply the new template-based config
+    restarted_nodes = []
+    failed_nodes = []
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
-            xray.operations.restart_node(node_id, startup_config)
+            try:
+                print(f"Attempting to restart node ID {node_id} with new template-based config.")
+                xray.operations.restart_node(node_id, config_for_nodes)
+                restarted_nodes.append(node_id)
+            except Exception as e:
+                print(f"Failed to restart node ID {node_id} with new template: {e}")
+                failed_nodes.append({"node_id": node_id, "error": str(e)})
+        else:
+            print(f"Skipping restart for disconnected node ID: {node_id}")
 
-    xray.hosts.update()
 
-    return payload
+    # Update hosts based on the new xray.config template's inbounds
+    # This assumes xray.hosts.update() reads from xray.config
+    if hasattr(xray, 'hosts') and callable(getattr(xray.hosts, 'update', None)):
+        xray.hosts.update()
+    else:
+        print("Warning: xray.hosts.update() not found or not callable. Host list may be stale.")
+
+
+    return {"detail": "Default template config updated. Restart command issued to all connected nodes.",
+            "new_template_preview": dict(xray.config),
+            "restarted_nodes": restarted_nodes,
+            "failed_nodes": failed_nodes
+            }

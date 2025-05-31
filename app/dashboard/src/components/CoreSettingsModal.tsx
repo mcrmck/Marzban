@@ -82,7 +82,9 @@ const getStatus = (status: string) => {
   }[status];
 };
 
-const getWebsocketUrl = (nodeID: string) => {
+const getWebsocketUrl = (nodeID: string | null) => {
+  if (!nodeID) return null;
+
   try {
     let baseURL = new URL(
       import.meta.env.VITE_BASE_API.startsWith("/")
@@ -94,7 +96,7 @@ const getWebsocketUrl = (nodeID: string) => {
       (baseURL.protocol === "https:" ? "wss://" : "ws://") +
       joinPaths([
         baseURL.host + baseURL.pathname,
-        !nodeID ? "/core/logs" : `/node/${nodeID}/logs`,
+        `/node/${nodeID}/logs`,
       ]) +
       "?interval=1&token=" +
       getAuthToken()
@@ -108,22 +110,16 @@ const getWebsocketUrl = (nodeID: string) => {
 
 let logsTmp: string[] = [];
 const CoreSettingModalContent: FC = () => {
-
   const { colorMode } = useColorMode();
-
   const { data: nodes } = useNodesQuery();
   const disabled = false;
-  const [selectedNode, setNode] = useState<string>("");
+  const [selectedNode, setNode] = useState<string | null>(null);
 
   const handleLog = (id: string, title: string) => {
     if (id === selectedNode) return;
-    else if (id === "host") {
-      setNode("");
-      setLogs([]);
-    } else {
-      setNode(id);
-      setLogs([]);
-    }
+    setNode(id);
+    setLogs([]);
+    logsTmp = [];
   };
 
   const { isEditingCore } = useDashboard();
@@ -246,7 +242,7 @@ const CoreSettingModalContent: FC = () => {
               {isLoading && <CircularProgress isIndeterminate size="15px" />}
             </FormLabel>
             <HStack gap={0}>
-              <Tooltip label="Xray Version" placement="top">
+              <Tooltip label="Panel Version" placement="top">
                 <Badge height="100%" textTransform="lowercase">
                   {version && `v${version}`}
                 </Badge>
@@ -300,10 +296,8 @@ const CoreSettingModalContent: FC = () => {
                       v.currentTarget.selectedOptions[0].text
                     )
                   }
+                  placeholder="Select a node to view logs"
                 >
-                  <option key={"host"} value={"host"} defaultChecked>
-                    Master
-                  </option>
                   {nodes &&
                     nodes.map((s) => {
                       return (
