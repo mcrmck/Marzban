@@ -220,7 +220,7 @@ class UserResponse(User):
              # generate_v2ray_links now uses self.inbounds which reflects all available inbounds
             self.links = generate_v2ray_links(
                 proxies=self.proxies,
-                inbounds_config=self.inbounds, # Pass the populated inbounds
+                inbounds=self.inbounds, # Pass the populated inbounds
                 extra_data=self.model_dump(), # Pass current model state
                 reverse=False,
             )

@@ -105,60 +105,93 @@ async def activate_user_plan(
         logger.error(f"activate_user_plan: User {user_account_number} not found.")
         return False
 
-    plan = get_plan_by_id(plan_id)
+    plan = get_plan_by_id(plan_id) # This needs to be your actual function to get plan details
     if not plan:
         logger.error(f"activate_user_plan: Plan {plan_id} not found for user {user_account_number}.")
         return False
 
-    update_data = {
-        "status": UserStatusModify.active,
-        "data_limit": plan.data_limit if plan.data_limit is not None else db_user_orm.data_limit,
-        "expire": int((datetime.utcnow() + timedelta(days=plan.duration_days)).timestamp()) if plan.duration_days and plan.duration_days > 0 else None,
-        "used_traffic": 0,
-        "on_hold_expire_duration": None,
+    # Prepare data for UserModify payload
+    # If plan.data_limit is 0, it means unlimited, so user's data_limit should be None
+    # If plan.data_limit is None, it means plan doesn't change data_limit, keep user's existing
+    new_data_limit = db_user_orm.data_limit # Default to existing
+    if plan.data_limit is not None: # If plan specifies a data_limit
+        new_data_limit = plan.data_limit if plan.data_limit > 0 else None # None for unlimited (0 from plan)
+
+    new_expire = db_user_orm.expire # Default to existing
+    if plan.duration_days and plan.duration_days > 0:
+        # If user has an existing expiry, decide if new duration adds to it or sets from now
+        # For simplicity, let's assume it sets from now. Adjust if needed.
+        new_expire = int((datetime.utcnow() + timedelta(days=plan.duration_days)).timestamp())
+    elif plan.duration_days == 0: # Plan specifies unlimited duration
+        new_expire = None
+
+
+    update_data_for_modify = {
+        "status": UserStatusModify.active, # Explicitly set to active
+        "data_limit": new_data_limit,
+        "expire": new_expire,
+        "used_traffic": 0,  # Reset traffic on new plan activation
+        "on_hold_expire_duration": None, # Clear on_hold fields
         "on_hold_timeout": None,
-        # Proxies and inbounds will be taken from the existing user,
-        # unless the plan dictates specific changes (not implemented here)
+        # Other fields like 'proxies', 'note', 'data_limit_reset_strategy' will be taken from existing db_user_orm
+        # if not explicitly overridden by the plan or if UserModify includes them.
     }
 
-    current_user_pydantic = UserResponse.model_validate(db_user_orm)
-    payload_for_update = current_user_pydantic.model_dump(exclude_unset=True)
-    payload_for_update.update(update_data)
+    # Create UserModify payload.
+    # Start with existing modifiable fields from user, then update with plan changes.
+    # UserResponse.model_validate is good for getting a complete picture, but UserModify has specific fields.
+    # It's safer to build UserModify by taking only fields present in UserModify model.
 
-    valid_modify_fields = UserModify.model_fields.keys()
-    final_payload_dict = {}
-    for field_name in valid_modify_fields:
-        if field_name in payload_for_update:
-            model_field = UserModify.model_fields[field_name]
-            is_optional = hasattr(model_field.annotation, '__origin__') and model_field.annotation.__origin__ is Optional \
-                          or (hasattr(model_field.annotation, '__args__') and type(None) in model_field.annotation.__args__)
+    # Get current user state relevant for UserModify
+    # Exclude fields not in UserModify or that we are explicitly setting
+    current_modifiable_data = {}
+    if db_user_orm.note is not None:
+        current_modifiable_data["note"] = db_user_orm.note
+    if db_user_orm.data_limit_reset_strategy is not None:
+        current_modifiable_data["data_limit_reset_strategy"] = db_user_orm.data_limit_reset_strategy
+    if db_user_orm.proxies: # Assuming UserModify can take proxies
+         # Convert ORM proxies to dict format expected by UserModify Pydantic model
+        current_modifiable_data["proxies"] = {
+            p.type: p.settings for p in db_user_orm.proxies
+        }
+    # Add other fields from db_user_orm that are part of UserModify and should be preserved if not changed by plan
 
-            if payload_for_update[field_name] is not None or is_optional:
-                 final_payload_dict[field_name] = payload_for_update[field_name]
-            elif not is_optional and payload_for_update[field_name] is None:
-                logger.warning(f"activate_user_plan: Required field '{field_name}' became None for UserModify. This might cause issues if UserModify doesn't allow it to be None.")
-                # If UserModify requires this field, Pydantic will raise an error.
-                # For now, we pass it as is, assuming UserModify handles it or it's truly optional.
-                final_payload_dict[field_name] = payload_for_update[field_name]
+    # Merge plan updates
+    current_modifiable_data.update(update_data_for_modify)
 
+    # Filter for UserModify fields to avoid passing unexpected arguments
+    user_modify_payload_dict = {
+        key: value for key, value in current_modifiable_data.items() if key in UserModify.model_fields
+    }
 
     try:
-        user_modify_payload = UserModify(**final_payload_dict)
-    except Exception as e:
-        logger.error(f"activate_user_plan: Pydantic validation error for UserModify for user {user_account_number}: {e}. Payload: {final_payload_dict}")
+        # Create the UserModify Pydantic model
+        user_modify_payload = UserModify(**user_modify_payload_dict)
+    except Exception as e: # Catch Pydantic validation error specifically if possible
+        logger.error(f"activate_user_plan: Pydantic validation error for UserModify for user {user_account_number}: {e}. Payload: {user_modify_payload_dict}")
         return False
 
     try:
-        # ***** THE FIX IS HERE *****
+        # crud.update_user applies the UserModify payload to the db_user_orm
+        # It should return the updated ORM user with relationships eagerly loaded (due to get_user_queryset)
         updated_user_orm = crud.update_user(db=db, dbuser=db_user_orm, modify=user_modify_payload)
-        # ***************************
 
-        background_tasks.add_task(xray.operations.add_user, dbuser=updated_user_orm)
+        # ***** THE FIX IS APPLIED HERE *****
+        # Convert the updated ORM user to UserResponse Pydantic model
+        # This ensures all fields, including calculated ones and eagerly loaded relationships, are resolved.
+        user_response_for_xray = UserResponse.model_validate(updated_user_orm)
+
+        # Pass the UserResponse Pydantic model as 'user_payload' to the background task
+        background_tasks.add_task(xray.operations.add_user, user_payload=user_response_for_xray)
+        # ***********************************
+
         logger.info(f"activate_user_plan: User {user_account_number} processed for plan {plan_id}. Xray task scheduled.")
+        # Optionally, report plan activation
+        # report.plan_activated(user=user_response_for_xray, plan_id=plan_id, admin=get_system_admin_for_reporting())
         return True
     except Exception as e:
         db.rollback()
-        logger.error(f"activate_user_plan: Error updating user {user_account_number} in DB or scheduling Xray: {e}", exc_info=True) # Added exc_info for full traceback
+        logger.error(f"activate_user_plan: Error updating user {user_account_number} in DB or scheduling Xray: {e}", exc_info=True)
         return False
 
 

@@ -95,7 +95,7 @@ def user_subscription(
 
     crud.update_user_sub(db, dbuser, user_agent)
     response_headers = {
-        "content-disposition": f'attachment; filename="{user.username}"',
+        "content-disposition": f'attachment; filename="{user.account_number}"',
         "profile-web-page-url": str(request.url),
         "support-url": SUB_SUPPORT_URL,
         "profile-title": encode_title(SUB_PROFILE_TITLE),
@@ -202,7 +202,7 @@ def user_subscription_with_client_type(
     user: UserResponse = UserResponse.model_validate(dbuser)
 
     response_headers = {
-        "content-disposition": f'attachment; filename="{user.username}"',
+        "content-disposition": f'attachment; filename="{user.account_number}"',
         "profile-web-page-url": str(request.url),
         "support-url": SUB_SUPPORT_URL,
         "profile-title": encode_title(SUB_PROFILE_TITLE),
