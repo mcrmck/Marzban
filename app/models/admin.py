@@ -37,25 +37,47 @@ class Admin(BaseModel):
         raise ValueError("must be an integer or a float, not a string")  # Reject strings
 
     @classmethod
-    def get_admin(cls, token: str, db: Session):
+    def get_admin(cls, token: str, db: Session) -> Optional["Admin"]: # Return type is Pydantic Admin
         payload = get_admin_payload(token)
         if not payload:
-            return
+            return None
 
-        if payload['username'] in SUDOERS and payload['is_sudo'] is True:
-            return cls(username=payload['username'], is_sudo=True)
+        username_from_token = payload.get('username')
+        if not username_from_token:
+            return None
 
-        dbadmin = crud.get_admin(db, payload['username'])
-        if not dbadmin:
-            return
+        db_admin_orm = crud.get_admin(db, username_from_token)
 
-        if dbadmin.password_reset_at:
-            if not payload.get("created_at"):
-                return
-            if dbadmin.password_reset_at > payload.get("created_at"):
-                return
+        if not db_admin_orm:
+            # logger.warning(f"Pydantic Admin.get_admin: Admin ORM object not found in DB for username '{username_from_token}'. Authentication will fail.")
+            return None # Admin MUST exist in the database to be considered valid by this method.
 
-        return cls.model_validate(dbadmin)
+        # Check if password was reset after token issuance
+        if db_admin_orm.password_reset_at:
+            token_created_at_payload = payload.get("created_at") # Assuming "created_at" is a Unix timestamp in the JWT payload
+            if token_created_at_payload is not None: # Ensure the claim exists
+                # Convert db_admin_orm.password_reset_at (datetime) to timestamp for comparison
+                if db_admin_orm.password_reset_at.timestamp() > token_created_at_payload:
+                    # logger.warning(f"Pydantic Admin.get_admin: Token for '{username_from_token}' is invalid due to password reset after token creation.")
+                    return None
+            else:
+                # logger.warning(f"Pydantic Admin.get_admin: Token for '{username_from_token}' is missing 'created_at' claim, cannot validate against password_reset_at.")
+                # Depending on security policy, you might deny access if created_at is missing and password_reset_at is set
+                return None
+
+        # Create Pydantic model from the ORM model fetched from the database
+        pydantic_admin_instance = cls.model_validate(db_admin_orm)
+
+        # Now, if the username is in SUDOERS, ensure their is_sudo status is True
+        # This means SUDOERS acts as an override or guarantee for sudo status for DB users.
+        if username_from_token in SUDOERS:
+            pydantic_admin_instance.is_sudo = True
+            # Optional: You might want to log if db_admin_orm.is_sudo was False but SUDOERS made it True,
+            # or even update the DB record to reflect this, though this function's primary role is auth.
+            # if not db_admin_orm.is_sudo:
+            #     logger.info(f"Admin '{username_from_token}' is in SUDOERS, ensuring is_sudo=True (DB was {db_admin_orm.is_sudo}).")
+
+        return pydantic_admin_instance
 
     @classmethod
     def get_current(cls,

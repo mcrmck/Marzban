@@ -79,10 +79,11 @@ export type UserCreate = Pick<
 
 // This type seems to be for the admin user's own details or system settings
 export type UserApi = {
-  discord_webhook: string; // Corrected typo from discord_webook
+  username: string;             // Admins have a username
   is_sudo: boolean;
-  telegram_id: number | string;
-  account_number: string; // Admin's own account_number
+  users_usage: number;          // From /api/admin response
+  telegram_id: number | null;   // Reflects Optional[int] from Python
+  discord_webhook: string | null; // Reflects Optional[str] from Python
 };
 
 export type UseGetUserReturn = {

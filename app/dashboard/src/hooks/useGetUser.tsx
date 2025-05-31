@@ -1,39 +1,33 @@
-import { getAuthToken } from "utils/authStorage";
 import { fetch } from "service/http";
-import { UserApi, UseGetUserReturn } from "types/User"; // Make sure UserApi and UseGetUserReturn are correctly defined in types/User.ts
-import { useQuery } from "react-query"; // Changed from @tanstack/react-query
-
-// This function seems unused in the hook's current implementation.
-// const fetchUser = async () => {
-//     return await fetch("/admin");
-// }
+import { UserApi, UseGetUserReturn } from "types/User"; // UserApi is the revised one
+import { useQuery } from "react-query";
 
 export const useGetUser = (): UseGetUserReturn => {
-    const { data: userData, isLoading: isPending, isSuccess, isError, error } = useQuery({
-        queryKey: ["user"], // Query key for the current user's data
-        queryFn: async () => {
-            // This endpoint should return data matching the UserApi structure or a compatible one.
-            const response = await fetch("/user");
-            const data = await response.json();
-            // Ensure the structure returned by API matches UserApi or cast appropriately.
-            // The example mapping below assumes `data` contains these fields.
-            // If `is_sudo` is not part of `/user` response, UserApi or this mapping needs adjustment.
-            return {
-                discord_webhook: data.discord_webhook, // Assuming UserApi uses discord_webhook (corrected typo)
-                is_sudo: data.is_sudo !== undefined ? data.is_sudo : false, // Prefer dynamic value if available
-                telegram_id: data.telegram_id,
-                account_number: data.account_number,
-            };
-        },
-        // Add other react-query options if needed, e.g., staleTime, cacheTime
+    const {
+        data: userData,
+        isLoading: getUserIsPending,
+        isSuccess: getUserIsSuccess,
+        isError: getUserIsError,
+        error: queryError, // queryError will be 'Error | null'
+    } = useQuery<UserApi, Error>(["user"], async () => { // TData is UserApi, TError is Error
+        const data = await fetch("/admin"); // fetch returns parsed JSON
+
+        // Map to the revised UserApi structure
+        return {
+            username: data.username,
+            is_sudo: data.is_sudo !== undefined ? data.is_sudo : false,
+            users_usage: data.users_usage,
+            telegram_id: data.telegram_id ?? null, // Handle undefined from fetch if API omits optional fields
+            discord_webhook: data.discord_webhook ?? null, // Handle undefined
+        };
     });
 
     return {
-        userData: userData as UserApi, // Cast to UserApi; ensure the fetched data structure is compatible.
-        getUserIsPending: isPending,
-        getUserIsSuccess: isSuccess,
-        getUserIsError: isError,
-        getUserError: error as Error | null, // Cast error to Error type
+        userData, // userData is now UserApi | undefined
+        getUserIsPending,
+        getUserIsSuccess,
+        getUserIsError,
+        getUserError: queryError || null, // Ensures Error | null
     };
 };
 

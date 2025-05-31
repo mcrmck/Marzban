@@ -69,7 +69,7 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
   const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
 
   const isSudo = () => {
-    if (!getUserIsPending && getUserIsSuccess && userData) { // Added check for userData
+    if (!getUserIsPending && getUserIsSuccess && userData) {
       return userData.is_sudo;
     }
     return false;

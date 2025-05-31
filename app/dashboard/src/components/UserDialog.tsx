@@ -390,16 +390,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
 
   const createRandomUsername = (): string => {
     setrandomUsernameLoading(true);
-    let result = "";
-    const characters =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const charactersLength = characters.length;
-    let counter = 0;
-    while (counter < 6) {
-      result += characters.charAt(Math.floor(Math.random() * charactersLength));
-      counter += 1;
-    }
-    return result;
+    return crypto.randomUUID();
   };
 
   return (

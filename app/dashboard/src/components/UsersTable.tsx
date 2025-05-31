@@ -640,13 +640,6 @@ type ActionButtonsProps = {
 const ActionButtons: FC<ActionButtonsProps> = ({ user }) => {
   const { setQRCode, setSubLink, onEditingUser } = useDashboard();
 
-  // --- ADD THIS LOG ---
-  console.log("ActionButtons received user:", JSON.stringify(user, null, 2));
-  if (user) {
-    console.log("ActionButtons user.account_number:", user.account_number, "Type:", typeof user.account_number);
-  }
-  // --- END LOG ---
-
   const proxyLinks = user.links?.join("\r\n") || "";
 
   const [copied, setCopied] = useState<[number, boolean]>([-1, false]);

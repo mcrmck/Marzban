@@ -21,6 +21,7 @@ from app.models.user import (
     UsersUsagesResponse,
 )
 from app.models.node import NodeResponse
+from app.models.proxy import ProxyTypes, ShadowsocksSettings
 from app.utils import report, responses
 
 router = APIRouter(tags=["User"], prefix="/api", responses={401: responses._401})
@@ -33,45 +34,98 @@ def add_user(
     db: Session = Depends(get_db),
     current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current),
 ):
-    """
-    Add a new user.
-    Users get access to all available inbounds for their configured proxy types.
-    """
+    # ... (generated_account_number logic remains the same) ...
     generated_account_number = new_user.account_number if new_user.account_number else str(uuid.uuid4())
-    generated_account_number = generated_account_number.lower() # Ensure lowercase for consistency
+    generated_account_number = generated_account_number.lower()
 
-    for proxy_type_enum in new_user.proxies: # Iterate over Enum keys
-        if not xray.config.inbounds_by_protocol.get(proxy_type_enum.value): # Use .value for dict key
+    # --- START: Modified Logic to add default proxy types ---
+    logger.info(f"POST /api/user: Initializing default proxy configurations for new user '{generated_account_number}'.")
+    default_proxy_configurations_to_ensure = {}
+
+    for pt_enum_member in ProxyTypes: # Iterate through all defined ProxyTypes
+        # IMPORTANT: Only consider adding a default if the protocol is actually enabled on the server
+        if xray.config.inbounds_by_protocol.get(pt_enum_member.value):
+            settings_model_class = pt_enum_member.settings_model
+            if settings_model_class:
+                logger.debug(f"Protocol '{pt_enum_member.value}' is enabled. Adding its default settings for user '{generated_account_number}'.")
+                default_proxy_configurations_to_ensure[pt_enum_member] = settings_model_class()
+            else:
+                logger.warning(f"Protocol '{pt_enum_member.value}' is enabled but has no associated settings_model in app/models/proxy.py.")
+        else:
+            logger.info(f"Protocol '{pt_enum_member.value}' is not configured or disabled on the server. Skipping for default user provision for '{generated_account_number}'.")
+
+    if new_user.proxies is None:
+        new_user.proxies = {}
+
+    # Apply defaults only if the proxy type wasn't in the original request from the client
+    for proxy_type_enum, default_settings_instance in default_proxy_configurations_to_ensure.items():
+        if proxy_type_enum not in new_user.proxies:
+            logger.debug(f"Adding default '{proxy_type_enum.value}' proxy settings to user '{generated_account_number}' as it was not in the request.")
+            new_user.proxies[proxy_type_enum] = default_settings_instance
+        else:
+            logger.debug(f"User '{generated_account_number}' request already included settings for '{proxy_type_enum.value}'. Using provided settings.")
+    # --- END: Modified Logic to add default proxy types ---
+
+    # --- Protocol Validation (can be kept as a safeguard) ---
+    logger.debug(f"POST /api/user: Validating final proxy set for user '{generated_account_number}': { {pt.value: ps.model_dump(exclude_none=True) for pt, ps in new_user.proxies.items()} }")
+    proxies_to_check = list(new_user.proxies.keys()) # Make a list of keys before iteration if modifying the dict
+    for proxy_type_enum_value in proxies_to_check:
+        proxy_type_enum = ProxyTypes(proxy_type_enum_value) # Ensure it's an enum member
+        if not xray.config.inbounds_by_protocol.get(proxy_type_enum.value):
+            # This should ideally not be hit if frontend only sends enabled ones and above logic is correct
+            logger.warning(f"POST /api/user: Validation failed for user '{generated_account_number}' - Protocol '{proxy_type_enum.value}' is present in final user proxy data but is disabled or has no inbounds. Raising 400.")
             raise HTTPException(
                 status_code=400,
-                detail=f"Protocol {proxy_type_enum.value} is disabled on your server",
+                detail=f"Protocol {proxy_type_enum.value} is disabled on your server or has no defined inbounds. Cannot assign to user.",
             )
 
-    db_admin_orm = crud.get_admin(db, current_admin.username)
+    # ... (rest of the function: fetching db_admin_orm, crud.create_user, etc.) ...
+    # Ensure db_admin_orm fetching and subsequent operations are correct as previously discussed
+    # Log 4: Before fetching admin from DB for ownership - Enhanced
+    logger.info(
+        f"POST /api/user: Preparing to fetch admin for ownership. "
+        f"Username from Pydantic model current_admin.username: '{current_admin.username}' (repr: {repr(current_admin.username)}). "
+        f"Session ID: {id(db)}, Session is active: {db.is_active}, Session dirty: {len(db.dirty)}, Session new: {len(db.new)}"
+    )
+    db_admin_orm = crud.get_admin(db, current_admin.username) # This is where it fails
+
     if not db_admin_orm:
+        # Log 5: If admin performing the action is not found in DB (critical for the explicit 403) - Enhanced
+        logger.error(
+            f"POST /api/user: CRITICAL - Admin '{current_admin.username}' (repr: {repr(current_admin.username)}) "
+            f"NOT FOUND in DB when called from add_user. "
+            f"Session ID: {id(db)}, Session active: {db.is_active}. Raising 403."
+        )
         raise HTTPException(status_code=403, detail="Performing admin not found in database.")
 
+    # Log 6: Admin successfully fetched (this part is currently not being reached)
+    logger.info(f"POST /api/user: Admin '{current_admin.username}' (ID: {db_admin_orm.id}) successfully fetched from DB for ownership.")
     try:
-        # crud.create_user should return an ORM object with relationships loaded as per get_user_queryset
+        logger.info(f"POST /api/user: Calling crud.create_user for account_number: '{generated_account_number}'.")
         db_user_orm = crud.create_user(
             db, account_number=generated_account_number, user=new_user, admin=db_admin_orm
         )
+        logger.info(f"POST /api/user: crud.create_user successful for user '{generated_account_number}', New User ID: {db_user_orm.id}.")
     except IntegrityError:
+        logger.error(f"POST /api/user: IntegrityError for user '{generated_account_number}'. User might already exist.", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=409, detail="User with this account number or details already exists")
+    except Exception as e:
+        logger.error(f"POST /api/user: Unexpected error during crud.create_user for user '{generated_account_number}': {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while creating the user.")
 
-    # Convert ORM model to Pydantic UserResponse in the main thread
     user_response_for_bg = UserResponse.model_validate(db_user_orm)
     bg.add_task(xray.operations.add_user, user_payload=user_response_for_bg)
 
     report.user_created(
-        user=user_response_for_bg, # Pass Pydantic model
+        user=user_response_for_bg,
         user_id=db_user_orm.id,
         by=current_admin,
         user_admin=db_user_orm.admin
     )
-    logger.info(f'New user with account number "{db_user_orm.account_number}" added')
-    return user_response_for_bg # Return Pydantic model directly
+    logger.info(f'New user with account number "{db_user_orm.account_number}" added.')
+    return user_response_for_bg
 
 
 @router.get("/user/{account_number}", response_model=UserResponse, responses={403: responses._403, 404: responses._404})

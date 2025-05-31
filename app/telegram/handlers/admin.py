@@ -5,6 +5,7 @@ import os
 import random
 import re
 import string
+import uuid
 from datetime import datetime
 
 import qrcode
@@ -949,8 +950,7 @@ def random_username(call: types.CallbackQuery):
     template_id = int(call.data.split(":")[1] or 0)
     mem_store.delete(f'{call.message.chat.id}:template_id')
 
-    username = ''.join([random.choice(string.ascii_letters)] +
-                       random.choices(string.ascii_letters + string.digits, k=7))
+    username = str(uuid.uuid4())
 
     schedule_delete_message(call.message.chat.id, call.message.id)
     cleanup_messages(call.message.chat.id)
@@ -1024,7 +1024,7 @@ def add_user_from_template_username_step(message: types.Message):
         return bot.send_message(message.chat.id, "An error occurred in the process! try again.")
 
     if not message.text:
-        wait_msg = bot.send_message(message.chat.id, '❌ Username can not be empty.')
+        wait_msg = bot.send_message(message.chat.id, '❌ Account number can not be empty.')
         schedule_delete_message(message.chat.id, wait_msg.message_id, message.message_id)
         return bot.register_next_step_handler(wait_msg, add_user_from_template_username_step)
 
@@ -1037,35 +1037,18 @@ def add_user_from_template_username_step(message: types.Message):
         if template.username_suffix:
             username += template.username_suffix
 
-        match = re.match(r"^(?=\w{3,32}\b)[a-zA-Z0-9-_@.]+(?:_[a-zA-Z0-9-_@.]+)*$", username)
-        if not match:
+        if not re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", username):
             wait_msg = bot.send_message(
                 message.chat.id,
-                '❌ Username only can be 3 to 32 characters and contain a-z, A-Z, 0-9, and underscores in between.')
-            schedule_delete_message(message.chat.id, wait_msg.message_id, message.message_id)
-            return bot.register_next_step_handler(wait_msg, add_user_from_template_username_step)
-
-        if len(username) < 3:
-            wait_msg = bot.send_message(
-                message.chat.id,
-                f"❌ Username can't be generated because is shorter than 32 characters! username: <code>{
-                    username}</code>",
-                parse_mode="HTML")
-            schedule_delete_message(message.chat.id, wait_msg.message_id, message.message_id)
-            return bot.register_next_step_handler(wait_msg, add_user_from_template_username_step)
-        elif len(username) > 32:
-            wait_msg = bot.send_message(
-                message.chat.id,
-                f"❌ Username can't be generated because is longer than 32 characters! username: <code>{
-                    username}</code>",
-                parse_mode="HTML")
+                '❌ Invalid account number format. Please use a valid UUID format.')
             schedule_delete_message(message.chat.id, wait_msg.message_id, message.message_id)
             return bot.register_next_step_handler(wait_msg, add_user_from_template_username_step)
 
         if crud.get_user(db, username):
-            wait_msg = bot.send_message(message.chat.id, '❌ Username already exists.')
+            wait_msg = bot.send_message(message.chat.id, '❌ Account number already exists.')
             schedule_delete_message(message.chat.id, wait_msg.message_id, message.message_id)
             return bot.register_next_step_handler(wait_msg, add_user_from_template_username_step)
+
         template = UserTemplateResponse.model_validate(template)
     mem_store.set(f"{message.chat.id}:username", username)
     mem_store.set(f"{message.chat.id}:data_limit", template.data_limit)
@@ -1107,65 +1090,6 @@ def add_user_from_template_username_step(message: types.Message):
                     username=username,
                     data_limit=template.data_limit,
                     expire_date=expire_date,))
-
-
-@bot.callback_query_handler(cb_query_equals('add_bulk_user'), is_admin=True)
-@bot.callback_query_handler(cb_query_equals('add_user'), is_admin=True)
-def add_user_command(call: types.CallbackQuery):
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except ApiTelegramException:  # noqa
-        pass
-
-    if call.data == "add_bulk_user":
-        mem_store.set(f"{call.message.chat.id}:is_bulk", True)
-    else:
-        mem_store.set(f"{call.message.chat.id}:is_bulk", False)
-
-    mem_store.set(f"{call.message.chat.id}:is_bulk_from_template", False)
-
-    username_msg = bot.send_message(
-        call.message.chat.id,
-        '👤 Enter username:\n⚠️Username only can be 3 to 32 characters and contain a-z, A-Z 0-9, and underscores in '
-        'between.',
-        reply_markup=BotKeyboard.random_username())
-    schedule_delete_message(call.message.chat.id, username_msg.id)
-    bot.register_next_step_handler(username_msg, add_user_username_step)
-
-
-def add_user_username_step(message: types.Message):
-    username = message.text
-    if not username:
-        wait_msg = bot.send_message(message.chat.id, '❌ Username can not be empty.')
-        schedule_delete_message(message.chat.id, wait_msg.id)
-        schedule_delete_message(message.chat.id, message.id)
-        return bot.register_next_step_handler(wait_msg, add_user_username_step)
-    if not re.match(r"^(?=\w{3,32}\b)[a-zA-Z0-9-_@.]+(?:_[a-zA-Z0-9-_@.]+)*$", username):
-        wait_msg = bot.send_message(
-            message.chat.id,
-            '❌ Username only can be 3 to 32 characters and contain a-z, A-Z, 0-9, and underscores in between.')
-        schedule_delete_message(message.chat.id, wait_msg.id)
-        schedule_delete_message(message.chat.id, message.id)
-        return bot.register_next_step_handler(wait_msg, add_user_username_step)
-    with GetDB() as db:
-        if crud.get_user(db, username):
-            wait_msg = bot.send_message(message.chat.id, '❌ Username already exists.')
-            schedule_delete_message(message.chat.id, wait_msg.id)
-            schedule_delete_message(message.chat.id, message.id)
-            return bot.register_next_step_handler(wait_msg, add_user_username_step)
-    schedule_delete_message(message.chat.id, message.id)
-    cleanup_messages(message.chat.id)
-    if mem_store.get(f"{message.chat.id}:is_bulk", False):
-        msg = bot.send_message(message.chat.id,
-                               'how many do you want?',
-                               reply_markup=BotKeyboard.inline_cancel_action())
-        schedule_delete_message(message.chat.id, msg.id)
-        return bot.register_next_step_handler(msg, add_user_bulk_number_step, username=username)
-    msg = bot.send_message(message.chat.id,
-                           '⬆️ Enter Data Limit (GB):\n⚠️ Send 0 for unlimited.',
-                           reply_markup=BotKeyboard.inline_cancel_action())
-    schedule_delete_message(message.chat.id, msg.id)
-    bot.register_next_step_handler(msg, add_user_data_limit_step, username=username)
 
 
 def add_user_bulk_number_step(message: types.Message, username: str):

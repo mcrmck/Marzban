@@ -6,6 +6,7 @@
 <div class="container mx-auto p-4">
     <h2 class="text-2xl font-bold mb-6 text-gray-900">Account Overview</h2>
 
+    {# Existing alert messages for payment status #}
     {% if request.query_params.get('payment_status') == 'mock_success' %}
     <div class="p-4 mb-4 text-sm text-green-700 bg-green-100 rounded-lg" role="alert">
         Mock payment successful! Your account should now be active.
@@ -24,10 +25,10 @@
     </div>
     {% endif %}
 
-
+    {# Existing account information display #}
     <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-6">
         <p class="mb-2 text-gray-700"><strong>Account Number:</strong> {{ current_user.account_number }}
-            <button onclick="copyToClipboard('{{ current_user.account_number }}')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy account number">Copy</button>
+            <button onclick="copyToClipboard('{{ current_user.account_number }}', event)" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy account number">Copy</button>
         </p>
         <p class="mb-4 text-gray-700"><strong>Status:</strong>
             <span class="font-semibold
@@ -61,6 +62,7 @@
         {% endif %}
     </div>
 
+    {# Existing plans display if user is not active #}
     {% if current_user.status != UserStatus.active %}
         <div class="mb-8">
             <h3 class="text-xl font-semibold mb-4 text-gray-900">
@@ -102,26 +104,52 @@
         </div>
     {% endif %}
 
+    {# Modified Subscription & Configs section for active users #}
     {% if current_user.status == UserStatus.active %}
         <div class="mb-8 bg-white shadow-md rounded px-8 pt-6 pb-8">
             <h3 class="text-xl font-semibold mb-4 text-gray-900">Your Subscription & Configs</h3>
-             <p class="mb-3 text-gray-700">Generic Subscription Link (auto-detects client):
-                <br class="sm:hidden"/>
-                <a href="{{ current_user.subscription_url }}" class="text-blue-600 hover:underline break-all" target="_blank" rel="noopener noreferrer">{{ current_user.subscription_url }}</a>
-                <button onclick="copyToClipboard('{{ current_user.subscription_url }}')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy generic subscription link">Copy</button>
-            </p>
-            <p class="mb-2 text-gray-700">Client-specific links:</p>
-            <ul class="list-disc pl-5 space-y-1 text-sm">
-                {% set sub_base = subscription_url_base %} {# Ensure subscription_url_base is passed from backend #}
-                <li><span class="font-medium text-gray-800">Clash:</span> <a href="{{ sub_base }}/clash" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/clash</a> <button onclick="copyToClipboard('{{ sub_base }}/clash')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Clash link">Copy</button></li>
-                <li><span class="font-medium text-gray-800">Clash Meta:</span> <a href="{{ sub_base }}/clash-meta" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/clash-meta</a> <button onclick="copyToClipboard('{{ sub_base }}/clash-meta')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Clash Meta link">Copy</button></li>
-                <li><span class="font-medium text-gray-800">Sing-box:</span> <a href="{{ sub_base }}/sing-box" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/sing-box</a> <button onclick="copyToClipboard('{{ sub_base }}/sing-box')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Sing-box link">Copy</button></li>
-                <li><span class="font-medium text-gray-800">V2Ray (links):</span> <a href="{{ sub_base }}/v2ray" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/v2ray</a> <button onclick="copyToClipboard('{{ sub_base }}/v2ray')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy V2Ray links">Copy</button></li>
-                <li><span class="font-medium text-gray-800">V2Ray (JSON):</span> <a href="{{ sub_base }}/v2ray-json" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/v2ray-json</a> <button onclick="copyToClipboard('{{ sub_base }}/v2ray-json')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy V2Ray JSON link">Copy</button></li>
-                <li><span class="font-medium text-gray-800">Outline:</span> <a href="{{ sub_base }}/outline" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/outline</a> <button onclick="copyToClipboard('{{ sub_base }}/outline')" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Outline link">Copy</button></li>
+
+            {# Client-specific profile download links #}
+            <p class="mb-2 text-gray-700">Client-specific profile download links:</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm mb-6">
+                {% set sub_base = subscription_url_base %}
+                <li><span class="font-medium text-gray-800">Clash:</span> <a href="{{ sub_base }}/clash" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/clash</a> <button onclick="copyToClipboard('{{ sub_base }}/clash', event)" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Clash link">Copy</button></li>
+                <li><span class="font-medium text-gray-800">Clash Meta:</span> <a href="{{ sub_base }}/clash-meta" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/clash-meta</a> <button onclick="copyToClipboard('{{ sub_base }}/clash-meta', event)" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Clash Meta link">Copy</button></li>
+                <li><span class="font-medium text-gray-800">Sing-box:</span> <a href="{{ sub_base }}/sing-box" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/sing-box</a> <button onclick="copyToClipboard('{{ sub_base }}/sing-box', event)" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Sing-box link">Copy</button></li>
+                <li><span class="font-medium text-gray-800">V2Ray (Share Links):</span> <a href="{{ sub_base }}/v2ray" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/v2ray</a> <button onclick="copyToClipboard('{{ sub_base }}/v2ray', event)" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy V2Ray share links">Copy</button></li>
+                <li><span class="font-medium text-gray-800">V2Ray (Full JSON):</span> <a href="{{ sub_base }}/v2ray-json" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/v2ray-json</a> <button onclick="copyToClipboard('{{ sub_base }}/v2ray-json', event)" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy V2Ray JSON link">Copy</button></li>
+                <li><span class="font-medium text-gray-800">Outline:</span> <a href="{{ sub_base }}/outline" class="text-blue-600 hover:underline break-all" target="_blank">{{ sub_base }}/outline</a> <button onclick="copyToClipboard('{{ sub_base }}/outline', event)" class="ml-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 rounded" aria-label="Copy Outline link">Copy</button></li>
             </ul>
+
+            {# NEW: Individual Server Configuration Links (Vmess, VLESS, etc.) #}
+            {% if current_user.links %}
+            <h4 class="text-md font-semibold text-gray-800 mb-3 mt-4">Individual Server Configuration Links:</h4>
+            <div class="space-y-3">
+                {% for link in current_user.links %}
+                <div class="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-3 p-3 bg-gray-50 rounded-lg">
+                    <input type="text" value="{{ link }}" readonly
+                           class="w-full sm:flex-1 bg-transparent border-gray-300 rounded-md shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 text-sm text-gray-700">
+                    <div class="flex space-x-2 flex-shrink-0">
+                        <button onclick="copyToClipboard('{{ link }}', event)"
+                                class="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors duration-200"
+                                aria-label="Copy configuration link">
+                            Copy
+                        </button>
+                        <button onclick="showQR('{{ link }}')"
+                                class="px-3 py-1.5 rounded-md text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200 transition-colors duration-200"
+                                aria-label="Show QR code for configuration link">
+                            QR Code
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-600 text-sm">No individual server configuration links available.</p>
+            {% endif %}
         </div>
 
+        {# Existing Available Servers display #}
         <div class="mb-8 bg-white shadow-md rounded px-8 pt-6 pb-8">
              <h3 class="text-xl font-semibold mb-4 text-gray-900">Available Servers</h3>
              {% if nodes %}
@@ -148,18 +176,34 @@
         </div>
     {% endif %}
 </div>
+
+{# NEW: QR Code Modal (structure adapted from modern.html) #}
+<div id="qrModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg p-6 max-w-xs w-full mx-4 shadow-xl">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Scan QR Code</h3>
+            <button onclick="hideQR()" class="text-gray-500 hover:text-gray-700">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div id="qrCodeContainer" class="flex justify-center"></div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
 {{ super() }}
+{# Add QRCode.js library #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
-    // Explicitly render Python boolean as JS boolean string, then parse
+    // Existing Stripe and MOCK_STRIPE_PAYMENT related JS
     const MOCK_STRIPE_PAYMENT_RENDERED_STR = "{{ 'true' if MOCK_STRIPE_PAYMENT else 'false' }}";
     const MOCK_STRIPE_PAYMENT = MOCK_STRIPE_PAYMENT_RENDERED_STR === 'true';
-
     const STRIPE_PUBLIC_KEY = "{{ STRIPE_PUBLIC_KEY or '' }}";
-    console.log("STRIPE_PUBLIC_KEY (JS): ", STRIPE_PUBLIC_KEY); // Debug
-    console.log("MOCK_STRIPE_PAYMENT (JS): ", MOCK_STRIPE_PAYMENT); // Debug
+    console.log("STRIPE_PUBLIC_KEY (JS): ", STRIPE_PUBLIC_KEY);
+    console.log("MOCK_STRIPE_PAYMENT (JS): ", MOCK_STRIPE_PAYMENT);
 
     let stripe;
     if (!MOCK_STRIPE_PAYMENT && STRIPE_PUBLIC_KEY && STRIPE_PUBLIC_KEY !== 'None' && STRIPE_PUBLIC_KEY !== '') {
@@ -172,26 +216,20 @@
         console.warn("Stripe public key is not available. Real payment functionality will be disabled.");
     }
 
-
     async function selectPlan(planId) {
         if (!MOCK_STRIPE_PAYMENT && (!stripe || !STRIPE_PUBLIC_KEY || STRIPE_PUBLIC_KEY === 'None' || STRIPE_PUBLIC_KEY === '')) {
              alert('Payment system configuration error or Stripe failed to load. Please try again later.');
              console.error('Aborting selectPlan: Mock payment is false, but Stripe key is missing or Stripe object not initialized.');
              return;
         }
-
         try {
             const response = await fetch("{{ url_for('create_checkout_session') }}", {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    // If you add CSRF protection later, include the token here
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ plan_id: planId }),
-                credentials: 'include' // Crucial for sending cookies
+                credentials: 'include'
             });
             const session = await response.json();
-
             if (response.ok && session.url) {
                 window.location.href = session.url;
             } else {
@@ -204,34 +242,70 @@
         }
     }
 
-    function copyToClipboard(text) {
+    // Modified copyToClipboard to accept event argument
+    function copyToClipboard(text, event) {
+        const buttonElement = event ? event.target : null;
+        const originalButtonText = buttonElement ? buttonElement.innerText : 'Copy';
+
         if (!navigator.clipboard) {
             try {
                 const textArea = document.createElement("textarea");
                 textArea.value = text;
-                textArea.style.position = "fixed";
+                textArea.style.position = "fixed"; // Prevent scrolling to bottom
                 document.body.appendChild(textArea);
                 textArea.focus();
                 textArea.select();
                 document.execCommand('copy');
                 document.body.removeChild(textArea);
-                // Simple feedback, consider a less intrusive notification
-                const originalButtonText = event.target.innerText;
-                event.target.innerText = 'Copied!';
-                setTimeout(() => { event.target.innerText = originalButtonText; }, 1500);
+                if (buttonElement) {
+                    buttonElement.innerText = 'Copied!';
+                    setTimeout(() => { buttonElement.innerText = originalButtonText; }, 1500);
+                }
             } catch (err) {
                 alert('Failed to copy (fallback). Please copy it manually.');
             }
             return;
         }
         navigator.clipboard.writeText(text).then(function() {
-            const originalButtonText = event.target.innerText;
-            event.target.innerText = 'Copied!';
-            setTimeout(() => { event.target.innerText = originalButtonText; }, 1500);
+            if (buttonElement) {
+                buttonElement.innerText = 'Copied!';
+                setTimeout(() => { buttonElement.innerText = originalButtonText; }, 1500);
+            }
         }, function(err) {
             alert('Failed to copy. Please copy it manually.');
             console.error('Could not copy text: ', err);
         });
+    }
+
+    // NEW: QR Code JavaScript functions (adapted from modern.html)
+    function showQR(link) {
+        const modal = document.getElementById('qrModal');
+        const qrContainer = document.getElementById('qrCodeContainer'); // Corrected ID
+        if (modal && qrContainer) {
+            modal.classList.remove('hidden');
+            // Clear previous QR code
+            qrContainer.innerHTML = '';
+            // Generate new QR code
+            new QRCode(qrContainer, {
+                text: link,
+                width: 200, // Adjusted size for the modal
+                height: 200,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.L
+            });
+        }
+    }
+
+    function hideQR() {
+        const modal = document.getElementById('qrModal');
+        if (modal) {
+            modal.classList.add('hidden');
+            const qrContainer = document.getElementById('qrCodeContainer'); // Corrected ID
+            if (qrContainer) {
+                qrContainer.innerHTML = ''; // Clear QR code when hiding
+            }
+        }
     }
 </script>
 {% endblock %}

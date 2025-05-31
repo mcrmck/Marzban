@@ -6,9 +6,6 @@ import { getUsersPerPageLimitSize } from "utils/userPreferenceStorage";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
-console.log("🚨 TEST CONSOLE LOG - DASHBOARD CONTEXT LOADED 🚨"); // Super obvious test log
-console.warn("DashboardContext.tsx loaded"); // This should show up when the file loads
-
 export type FilterType = {
   search?: string;
   limit?: number;
@@ -198,7 +195,6 @@ export const useDashboard = create(
     },
     deleteUser: (user: User) => {
       const accountNumber = user?.account_number; // Use optional chaining
-      console.log("deleteUser called with:", { user, accountNumber }); // Debug log
       if (!accountNumber || accountNumber === "undefined" || accountNumber.trim() === "") {
         console.error("DashboardContext: deleteUser - Invalid account_number:", accountNumber, "User:", user);
         return Promise.reject("Invalid account_number for deleteUser.");
@@ -234,10 +230,7 @@ export const useDashboard = create(
       );
     },
     fetchUserUsage: (user: User, query: FilterUsageType) => {
-      debugger; // Debug point 1: Function entry
-      console.log("fetchUserUsage STARTED"); // This should show up when the function is called
       const accountNumber = user?.account_number;
-      console.log("fetchUserUsage called with:", { user, accountNumber, query }); // Debug log
       if (!accountNumber || accountNumber === "undefined" || accountNumber.trim() === "") {
         debugger; // Debug point 2: Invalid account number
         console.error("DashboardContext: fetchUserUsage - Invalid account_number:", accountNumber, "User:", user);
@@ -247,7 +240,6 @@ export const useDashboard = create(
       (Object.keys(query) as Array<keyof FilterUsageType>).forEach(key => {
         if (query[key]) activeQuery[key] = query[key];
       });
-      debugger; // Debug point 3: Before fetch request
       return fetch(`/user/${accountNumber}/usage`, { method: "GET", query: activeQuery });
     },
 
