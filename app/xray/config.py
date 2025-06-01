@@ -16,7 +16,17 @@ from app.models.user import UserStatus # Assuming UserStatus is correctly define
 from app.utils.crypto import get_cert_SANs
 # Removed XRAY_FALLBACKS_INBOUND_TAG from this import
 from config import DEBUG, XRAY_EXCLUDE_INBOUND_TAGS
+import logging
 
+logger = logging.getLogger(__name__)
+# Set logger level to DEBUG if DEBUG is True
+if DEBUG:
+    logger.setLevel(logging.DEBUG)
+    # Add a handler if none exists
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(levelname)s:%(name)s: %(message)s'))
+        logger.addHandler(handler)
 
 def merge_dicts(a, b):  # B will override A dictionary key and values
     for key, value in b.items():
@@ -33,45 +43,61 @@ class XRayConfig(dict):
                  api_host: str = "127.0.0.1",
                  api_port: int = 8080):
 
+        logger.debug(f"XRayConfig.__init__: Starting initialization with config_dict type: {type(config_dict)}")
+        if config_dict is not None:
+            logger.debug(f"XRayConfig.__init__: config_dict value: {config_dict}")
+
         self.api_host = api_host
         self.api_port = api_port
+        logger.debug(f"XRayConfig.__init__: Using API host: {api_host}, port: {api_port}")
 
         processed_config = {} # This will hold the configuration to actually use
 
         if isinstance(config_dict, str):
+            logger.debug(f"XRayConfig.__init__: Attempting to parse string config_dict: {config_dict[:100]}...")
             try:
                 # considering string as json
+                logger.debug("XRayConfig.__init__: Attempting to parse as JSON")
                 processed_config = commentjson.loads(config_dict)
-            except (json.JSONDecodeError, ValueError):
-                # considering string as file path
+                logger.debug("XRayConfig.__init__: Successfully parsed JSON")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug(f"XRayConfig.__init__: JSON parsing failed ({str(e)}), trying as file path")
                 try:
+                    logger.debug(f"XRayConfig.__init__: Attempting to load from file: {config_dict}")
                     with open(config_dict, 'r') as file:
                         processed_config = commentjson.loads(file.read())
+                    logger.debug(f"XRayConfig.__init__: Successfully loaded from file: {config_dict}")
                 except FileNotFoundError:
-                    # If file not found and it was a string, it might be an empty string or invalid path
-                    # Initialize with default if it's an empty string path or unreadable
-                    print(f"Warning: Config file path '{config_dict}' not found or unreadable. Initializing with default config.")
-                    config_dict = None # Fall through to None handling
-                    # Fallthrough to None case
+                    logger.error(f"XRayConfig.__init__: Config file not found: {config_dict}")
+                    config_dict = None
+                except Exception as e:
+                    logger.error(f"XRayConfig.__init__: Error reading config file {config_dict}: {str(e)}")
+                    config_dict = None
         elif isinstance(config_dict, PosixPath):
             try:
+                logger.debug(f"XRayConfig.__init__: Attempting to load from PosixPath: {config_dict}")
                 with open(config_dict, 'r') as file:
                     processed_config = commentjson.loads(file.read())
+                logger.debug(f"XRayConfig.__init__: Successfully loaded from PosixPath: {config_dict}")
             except FileNotFoundError:
-                print(f"Warning: Config file PosixPath '{config_dict}' not found. Initializing with default config.")
-                config_dict = None # Fall through to None handling
+                logger.error(f"XRayConfig.__init__: Config file not found at PosixPath: {config_dict}")
+                config_dict = None
+            except Exception as e:
+                logger.error(f"XRayConfig.__init__: Error reading from PosixPath {config_dict}: {str(e)}")
+                config_dict = None
         elif isinstance(config_dict, dict):
+            logger.debug("XRayConfig.__init__: Using provided dictionary as config")
             processed_config = deepcopy(config_dict)
+        else:
+            logger.debug(f"XRayConfig.__init__: config_dict is of unsupported type: {type(config_dict)}")
 
-        if config_dict is None: # This handles explicit None or fallthrough from failed file reads
-            # Create a minimal, valid default Xray config structure here
-            # This will serve as the base template for xray.config
-            print("XRayConfig: Initializing with default structure because config_dict is None or could not be loaded.")
+        if config_dict is None:
+            logger.warning("XRayConfig.__init__: Initializing with default structure because config_dict is None or could not be loaded.")
             processed_config = {
                 "log": {
                     "loglevel": "warning"
                 },
-                "inbounds": [], # API inbound will be added by _apply_api
+                "inbounds": [],
                 "outbounds": [
                     {
                         "protocol": "freedom",
@@ -86,33 +112,33 @@ class XRayConfig(dict):
                 ],
                 "routing": {
                     "rules": []
-                },
-                # Policy will be merged/added by _apply_api
+                }
             }
+            logger.debug("XRayConfig.__init__: Default config structure initialized")
 
         if not isinstance(processed_config, dict):
-             # This case should ideally not be reached if logic above is correct
-             raise TypeError("Internal error: processed_config is not a dict after input handling.")
+            logger.error(f"XRayConfig.__init__: Internal error - processed_config is not a dict. Type: {type(processed_config)}")
+            raise TypeError("Internal error: processed_config is not a dict after input handling.")
 
-
-        super().__init__(processed_config) # Initialize the dictionary part of self
+        logger.debug(f"XRayConfig.__init__: Final processed_config keys: {list(processed_config.keys())}")
+        super().__init__(processed_config)
 
         # Initial validation for basic structure if not empty
-        if processed_config: # only validate if we have something other than an empty dict
-             self._validate()
+        if processed_config:
+            logger.debug("XRayConfig.__init__: Validating initial config structure")
+            self._validate()
+            logger.debug("XRayConfig.__init__: Initial validation complete")
 
-        self.inbounds = [] # This will be populated by _resolve_inbounds based on current dict content
-        self.inbounds_by_protocol = defaultdict(list) # Use defaultdict
+        self.inbounds = []
+        self.inbounds_by_protocol = defaultdict(list)
         self.inbounds_by_tag = {}
+        self._fallbacks_inbound = {}
 
-        # Removed reliance on global XRAY_FALLBACKS_INBOUND_TAG
-        # Fallbacks must be explicitly defined in the config if needed, or handled by a different mechanism.
-        # self.fallbacks_inbound_tag = ""
-        self._fallbacks_inbound = {} # Store the actual fallback inbound dict if found
-
-        # Correct order: _apply_api first, then _resolve_inbounds
-        self._apply_api()        # Ensure API inbound is part of self (the dict) first
-        self._resolve_inbounds() # Then resolve all inbounds present in self, including API inbound
+        logger.debug("XRayConfig.__init__: Applying API configuration")
+        self._apply_api()
+        logger.debug("XRayConfig.__init__: Resolving inbounds")
+        self._resolve_inbounds()
+        logger.debug("XRayConfig.__init__: Initialization complete")
 
     def _apply_api(self):
         api_inbound_entry = self.get_inbound("API_INBOUND") # Check if an inbound with this tag already exists
@@ -371,15 +397,16 @@ class XRayConfig(dict):
 
 
     def include_db_users(self) -> XRayConfig:
-        # This method now operates on 'self' which is the current XRayConfig instance (the template)
-        # It should return a new XRayConfig instance with users included.
-        config_with_users = self.copy() # Start with a copy of the current config (template)
+        logger.debug("XRayConfig.include_db_users: Starting to include DB users in config")
+        config_with_users = self.copy()
+        logger.debug("XRayConfig.include_db_users: Created copy of base config")
 
         with GetDB() as db:
+            logger.debug("XRayConfig.include_db_users: Querying active users from database")
             query = db.query(
                 db_models.User.id,
                 db_models.User.account_number,
-                func.lower(db_models.Proxy.type).label('proxy_type_value'), # Proxy.type is Enum
+                func.lower(db_models.Proxy.type).label('proxy_type_value'),
                 db_models.Proxy.settings
             ).join(
                 db_models.Proxy, db_models.User.id == db_models.Proxy.user_id
@@ -387,6 +414,7 @@ class XRayConfig(dict):
                 db_models.User.status.in_([UserStatus.active, UserStatus.on_hold])
             )
             db_user_proxies = query.all()
+            logger.debug(f"XRayConfig.include_db_users: Found {len(db_user_proxies)} active users with proxies")
 
             grouped_user_proxies_by_protocol = defaultdict(list)
             for row in db_user_proxies:
@@ -395,57 +423,60 @@ class XRayConfig(dict):
                     "account_number": row.account_number,
                     "settings": row.settings
                 })
+            logger.debug(f"XRayConfig.include_db_users: Grouped users by protocol: {list(grouped_user_proxies_by_protocol.keys())}")
 
-            # Iterate through the inbounds defined in the 'config_with_users'
-            # These inbounds are already processed by _resolve_inbounds of the copied config
             for original_inbound_tag, resolved_inbound_details in config_with_users.inbounds_by_tag.items():
                 inbound_protocol = resolved_inbound_details.get("protocol")
                 if not inbound_protocol:
+                    logger.debug(f"XRayConfig.include_db_users: Skipping inbound {original_inbound_tag} - no protocol defined")
                     continue
 
                 users_for_this_protocol = grouped_user_proxies_by_protocol.get(inbound_protocol, [])
                 if not users_for_this_protocol:
+                    logger.debug(f"XRayConfig.include_db_users: No users found for protocol {inbound_protocol} in inbound {original_inbound_tag}")
                     continue
 
-                # Get the actual inbound dict from the config_with_users to modify its 'clients'
+                logger.debug(f"XRayConfig.include_db_users: Processing {len(users_for_this_protocol)} users for protocol {inbound_protocol} in inbound {original_inbound_tag}")
                 target_inbound_dict = config_with_users.get_inbound(original_inbound_tag)
                 if not target_inbound_dict or "settings" not in target_inbound_dict:
-                    # This should not happen if inbounds_by_tag is correct
+                    logger.error(f"XRayConfig.include_db_users: Invalid inbound configuration for {original_inbound_tag}")
                     continue
 
                 if "clients" not in target_inbound_dict["settings"]:
                     target_inbound_dict["settings"]["clients"] = []
 
-                # Clear existing clients if any from template, or decide on merging strategy
                 target_inbound_dict["settings"]["clients"] = []
-
 
                 for user_proxy_data in users_for_this_protocol:
                     client_entry = {
                         "email": f"{user_proxy_data['user_id']}.{user_proxy_data['account_number']}",
-                        **user_proxy_data["settings"] # Spread user-specific proxy settings (like id, level, flow etc)
+                        **user_proxy_data["settings"]
                     }
 
-                    # XTLS flow logic (simplified, ensure resolved_inbound_details has necessary keys)
                     if client_entry.get('flow') and (
                             resolved_inbound_details.get('network', 'tcp') not in ('tcp', 'raw', 'kcp') or
                             (resolved_inbound_details.get('network', 'tcp') in ('tcp', 'raw', 'kcp') and
                              resolved_inbound_details.get('tls') not in ('tls', 'reality')) or
                             resolved_inbound_details.get('header_type') == 'http'
                     ):
-                        # Create a mutable copy of client_entry if it came directly from user_proxy_data["settings"]
+                        logger.debug(f"XRayConfig.include_db_users: Removing flow from client {client_entry['email']} due to incompatible settings")
                         client_entry_copy = client_entry.copy()
                         del client_entry_copy['flow']
                         target_inbound_dict["settings"]["clients"].append(client_entry_copy)
                     else:
                         target_inbound_dict["settings"]["clients"].append(client_entry)
 
+                logger.debug(f"XRayConfig.include_db_users: Added {len(target_inbound_dict['settings']['clients'])} clients to inbound {original_inbound_tag}")
+
         if DEBUG:
             try:
-                with open('generated_config_with_users-debug.json', 'w') as f:
-                    # Use the to_json method of the XRayConfig instance
+                debug_file = 'generated_config_with_users-debug.json'
+                logger.debug(f"XRayConfig.include_db_users: Writing debug config to {debug_file}")
+                with open(debug_file, 'w') as f:
                     f.write(config_with_users.to_json(indent=4))
+                logger.debug("XRayConfig.include_db_users: Successfully wrote debug config file")
             except Exception as e:
-                print(f"Error writing debug config with users: {e}")
+                logger.error(f"XRayConfig.include_db_users: Error writing debug config: {str(e)}")
 
+        logger.debug("XRayConfig.include_db_users: Finished including DB users in config")
         return config_with_users

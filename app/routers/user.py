@@ -25,6 +25,7 @@ from app.models.user import (
 from app.models.node import NodeResponse, NodeStatus # Added NodeStatus
 from app.models.proxy import ProxyTypes # Removed ShadowsocksSettings as not directly used
 from app.utils import report, responses
+from app.portal.auth import get_current_user # Added import for portal user authentication
 
 # Set logging level to DEBUG
 logger.setLevel(logging.DEBUG)
@@ -201,10 +202,12 @@ def activate_user_node(
     activation_request: NodeActivationRequest,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    db_user_orm: DBUser = Depends(get_validated_user),
-    current_admin: PydanticAdmin = Depends(PydanticAdmin.get_current), # Assuming admins can do this too
+    current_user_orm: DBUser = Depends(get_current_user), # Changed from admin to user auth
 ):
-    # Permission: depends on get_validated_user logic (e.g. admin owns user or is sudo)
+    # Ensure user can only activate their own account
+    if account_number != current_user_orm.account_number:
+        raise HTTPException(status_code=403, detail="You can only activate nodes for your own account")
+
     target_db_node = crud.get_node_by_id(db, activation_request.node_id)
     if not target_db_node:
         raise HTTPException(status_code=404, detail=f"Node with id {activation_request.node_id} not found.")
@@ -212,20 +215,20 @@ def activate_user_node(
     if target_db_node.status == NodeStatus.disabled:
         raise HTTPException(status_code=400, detail=f"Node {target_db_node.name} is disabled and cannot be activated by user.")
 
-    if db_user_orm.status not in [UserStatus.active, UserStatus.on_hold]:
-        raise HTTPException(status_code=400, detail=f"User status is '{db_user_orm.status.value}'. Cannot activate node.")
+    if current_user_orm.status not in [UserStatus.active, UserStatus.on_hold]:
+        raise HTTPException(status_code=400, detail=f"User status is '{current_user_orm.status.value}'. Cannot activate node.")
 
-    logger.info(f"'{current_admin.username}' initiating activation of node {activation_request.node_id} for user '{account_number}'.")
+    logger.info(f"User '{current_user_orm.account_number}' initiating activation of node {activation_request.node_id}.")
 
     # The activate_user_on_node is threaded and will handle DB sessions for its XRay ops
     # It will also update user.active_node_id in the DB.
     bg.add_task(xray.operations.activate_user_on_node,
-                account_number=db_user_orm.account_number,
+                account_number=current_user_orm.account_number,
                 node_id=activation_request.node_id)
 
     # Return current user state. Client should understand activation is async.
     # A GET /user/{account_number} afterwards would show the new active_node_id once task completes.
-    return UserResponse.model_validate(db_user_orm)
+    return UserResponse.model_validate(current_user_orm)
 
 
 @router.post("/user/{account_number}/reset", response_model=UserResponse, responses={403: responses._403, 404: responses._404})

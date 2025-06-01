@@ -363,7 +363,7 @@ def restart_node(node_id: int, config=None):
 @threaded_function # Keep operations non-blocking
 def activate_user_on_node(account_number: str, node_id: int): # Simplified: get user from DB inside
     with GetDB() as db:
-        db_user = crud.get_user_by_account_number(db, account_number)
+        db_user = crud.get_user(db, account_number)
         if not db_user:
             logger.error(f"Activate: User {account_number} not found.")
             return

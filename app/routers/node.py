@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from starlette.websockets import WebSocketDisconnect
 
 from app import logger, xray
-from app.db import Session, crud, get_db
+from app.db import Session, crud, get_db, GetDB
 from app.dependencies import get_dbnode, validate_dates
 from app.models.admin import Admin
 from app.models.node import (
@@ -18,10 +18,13 @@ from app.models.node import (
     NodeStatus,
     NodesUsageResponse,
 )
-from app.models.proxy import ProxyHostModify
+from app.models.proxy import ProxyHostModify, ProxyHostSecurity
 from app.models.node import Node as DBNode
 
 from app.utils import responses
+
+# Constants
+LOG_BATCH_INTERVAL = 0.5  # Seconds between log batch sends
 
 router = APIRouter(
     tags=["Node"], prefix="/api", responses={401: responses._401, 403: responses._403}
@@ -203,7 +206,7 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
             if not node == xray.nodes[node_id]:
                 break
 
-            if interval and time.time() - last_sent_ts >= interval and cache:
+            if LOG_BATCH_INTERVAL and time.time() - last_sent_ts >= LOG_BATCH_INTERVAL and cache:
                 try:
                     await websocket.send_text(cache)
                 except (WebSocketDisconnect, RuntimeError):
@@ -222,7 +225,7 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
 
             log = logs.popleft()
 
-            if interval:
+            if LOG_BATCH_INTERVAL:
                 cache += f"{log}\n"
                 continue
 

@@ -228,6 +228,8 @@ class ProxyHostModify(BaseModel):
     allowinsecure: Optional[bool] = False # Default to False for new hosts
     is_disabled: Optional[bool] = False
     mux_enable: Optional[bool] = False
+    fragment_setting: Optional[str] = None
+    noise_setting: Optional[str] = None
     random_user_agent: Optional[bool] = False
     use_sni_as_host: Optional[bool] = False
     node_id: int  # Required: links this host to a specific node

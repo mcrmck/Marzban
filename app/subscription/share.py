@@ -249,11 +249,6 @@ def process_inbounds_and_tags(
         active_node_id: Optional[int] # New parameter
 ) -> Union[List, str]:
 
-    print(f"[DEBUG] process_inbounds_and_tags: Starting with:")
-    print(f"[DEBUG] process_inbounds_and_tags: - user_inbounds: {user_inbounds}")
-    print(f"[DEBUG] process_inbounds_and_tags: - user_proxies: {user_proxies}")
-    print(f"[DEBUG] process_inbounds_and_tags: - format_variables: {format_variables}")
-    print(f"[DEBUG] process_inbounds_and_tags: - active_node_id: {active_node_id}")
 
     processed_conf_tags = [] # To keep track of added proxy remarks for some client types
 
@@ -262,44 +257,36 @@ def process_inbounds_and_tags(
         for tag_name in tags:
             all_user_tags_with_protocol.append({'protocol': protocol_enum, 'tag': tag_name})
 
-    print(f"[DEBUG] process_inbounds_and_tags: all_user_tags_with_protocol: {all_user_tags_with_protocol}")
 
     global_inbound_order_map = {tag: index for index, tag in enumerate(xray.config.inbounds_by_tag.keys())}
-    print(f"[DEBUG] process_inbounds_and_tags: global_inbound_order_map: {global_inbound_order_map}")
 
     sorted_user_tags_with_protocol = sorted(
         all_user_tags_with_protocol,
         key=lambda x: global_inbound_order_map.get(x['tag'], float('inf'))
     )
-    print(f"[DEBUG] process_inbounds_and_tags: sorted_user_tags_with_protocol: {sorted_user_tags_with_protocol}")
 
     # MODIFICATION START: Logic to handle active_node_id and nodeless hosts
     for item in sorted_user_tags_with_protocol:
         protocol_enum: ProxyTypes = item['protocol']
         tag_name: str = item['tag']
-        print(f"[DEBUG] process_inbounds_and_tags: Processing protocol {protocol_enum} with tag {tag_name}")
+
 
         proxy_specific_settings = user_proxies.get(protocol_enum)
         if not proxy_specific_settings:
-            print(f"[DEBUG] process_inbounds_and_tags: No proxy settings found for protocol {protocol_enum}")
             continue
 
         global_inbound_config = xray.config.inbounds_by_tag.get(tag_name)
         if not global_inbound_config:
-            print(f"[DEBUG] process_inbounds_and_tags: No global inbound config found for tag {tag_name}")
             continue
 
-        print(f"[DEBUG] process_inbounds_and_tags: Found global inbound config: {global_inbound_config}")
 
         current_format_variables = format_variables.copy()
         current_format_variables.update({
             "PROTOCOL": global_inbound_config.get("protocol","").upper(),
             "TRANSPORT": global_inbound_config.get("network","")
         })
-        print(f"[DEBUG] process_inbounds_and_tags: Updated format variables: {current_format_variables}")
 
         all_host_dicts_for_tag = xray.hosts.get(tag_name, [])
-        print(f"[DEBUG] process_inbounds_and_tags: Found {len(all_host_dicts_for_tag)} total hosts for tag {tag_name}")
 
         selected_host_dicts = [] # Initialize list for hosts that will be added to subscription
 
@@ -311,7 +298,6 @@ def process_inbounds_and_tags(
                    not host_dict_candidate.get('is_disabled', False):
                     selected_host_dicts.append(host_dict_candidate)
 
-            print(f"[DEBUG] process_inbounds_and_tags: Found {len(selected_host_dicts)} hosts matching active_node_id {active_node_id} for tag {tag_name}.")
             if not selected_host_dicts:
                 logger.warning(f"User {current_format_variables.get('ACCOUNT_NUMBER')} has active_node_id {active_node_id}, "
                                f"but no enabled ProxyHosts found for tag '{tag_name}' on this node. Skipping this tag for this node.")
@@ -325,18 +311,14 @@ def process_inbounds_and_tags(
                    not host_dict_candidate.get('is_disabled', False):
                     selected_host_dicts.append(host_dict_candidate)
 
-            print(f"[DEBUG] process_inbounds_and_tags: Found {len(selected_host_dicts)} hosts with node_id=None for tag {tag_name}.")
             if not selected_host_dicts:
                 logger.info(f"User {current_format_variables.get('ACCOUNT_NUMBER')} has no active_node_id, "
                             f"and no enabled ProxyHosts with node_id=None found for tag '{tag_name}'. Skipping this tag.")
                 continue # Skip to the next tag in sorted_user_tags_with_protocol
 
-        # If selected_host_dicts is still empty at this point, the continue statements above would have been hit.
-        # Proceed to iterate over the selected_host_dicts for the current tag.
-        # MODIFICATION END
+
 
         for host_config_dict in selected_host_dicts: # Iterate only selected hosts
-            print(f"[DEBUG] process_inbounds_and_tags: Processing host config: {host_config_dict}")
             combined_inbound_details = global_inbound_config.copy()
 
             host_addresses = host_config_dict.get("address", [])
@@ -346,7 +328,6 @@ def process_inbounds_and_tags(
             processed_address = random.choice(host_addresses)
             if '*' in processed_address:
                  processed_address = processed_address.replace("*", secrets.token_hex(8))
-            print(f"[DEBUG] process_inbounds_and_tags: Processed address: {processed_address}")
 
             sni_list_from_host = host_config_dict.get("sni")
             final_sni_list = sni_list_from_host if sni_list_from_host is not None else global_inbound_config.get("sni")
@@ -354,7 +335,6 @@ def process_inbounds_and_tags(
             if final_sni_list and isinstance(final_sni_list, list):
                 salt = secrets.token_hex(8)
                 processed_sni = random.choice(final_sni_list).replace("*", salt)
-            print(f"[DEBUG] process_inbounds_and_tags: Processed SNI: {processed_sni}")
 
             req_host_list_from_host = host_config_dict.get("host")
             final_req_host_list = req_host_list_from_host if req_host_list_from_host is not None else global_inbound_config.get("host")
@@ -362,16 +342,13 @@ def process_inbounds_and_tags(
             if final_req_host_list and isinstance(final_req_host_list, list):
                 salt = secrets.token_hex(8)
                 processed_req_host = random.choice(final_req_host_list).replace("*", salt)
-            print(f"[DEBUG] process_inbounds_and_tags: Processed host header: {processed_req_host}")
 
             path_from_host = host_config_dict.get("path")
             processed_path_template = path_from_host if path_from_host is not None else global_inbound_config.get("path", "")
             processed_path = processed_path_template.format_map(current_format_variables)
-            print(f"[DEBUG] process_inbounds_and_tags: Processed path: {processed_path}")
 
             if host_config_dict.get("use_sni_as_host", False) and processed_sni:
                 processed_req_host = processed_sni
-                print(f"[DEBUG] process_inbounds_and_tags: Using SNI as host: {processed_req_host}")
 
             combined_inbound_details.update({
                 "port": host_config_dict.get("port") or global_inbound_config.get("port"),
@@ -401,10 +378,8 @@ def process_inbounds_and_tags(
                 "mode": host_config_dict.get('mode', global_inbound_config.get('mode', "auto")),
                 "multiMode": host_config_dict.get('multiMode', global_inbound_config.get('multiMode', False)),
             })
-            print(f"[DEBUG] process_inbounds_and_tags: Combined inbound details: {combined_inbound_details}")
 
             user_protocol_settings_pydantic = proxy_specific_settings
-            print(f"[DEBUG] process_inbounds_and_tags: User protocol settings: {user_protocol_settings_pydantic}")
 
             try:
                 # Ensure settings are properly converted to dict with string values
@@ -423,15 +398,9 @@ def process_inbounds_and_tags(
                     inbound=combined_inbound_details,
                     settings=settings_dict
                 )
-                print(f"[DEBUG] process_inbounds_and_tags: Successfully added config for host {host_config_dict.get('remark', 'N/A')}")
             except Exception as e:
                 logger.error(f"Error adding config for remark {host_config_dict.get('remark', 'N/A')}: {e}", exc_info=True)
-                print(f"[DEBUG] process_inbounds_and_tags: Error adding config: {str(e)}")
-                print(f"[DEBUG] process_inbounds_and_tags: Error type: {type(e)}")
-                import traceback
-                print(f"[DEBUG] process_inbounds_and_tags: Error traceback: {traceback.format_exc()}")
 
-    print(f"[DEBUG] process_inbounds_and_tags: Rendering final configuration")
     return conf.render(reverse=reverse) # type: ignore
 
 

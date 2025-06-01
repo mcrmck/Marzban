@@ -13,14 +13,13 @@ services:
       # Ensure your panel code is configured to load its client.crt and client.key from an appropriate path.
       - ./MyMarzbanCA.pem:/etc/marzban/MyMarzbanCA.pem:ro
       - ./panel-certs:/etc/marzban/panel-client-certs:ro # Example mount for panel's client certs
-      - ./xray-config.json:/etc/marzban/xray.json:ro # Mount XRay configuration
+      - ./xray_config/config.json:/etc/marzban/xray_config/config.json:ro # Mount XRay configuration
     environment:
-      - XRAY_CONFIG_PATH=/etc/marzban/xray.json
       - UVICORN_SSL_CA_TYPE=private
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8000
       - DATABASE_URL=sqlite:////var/lib/marzban/db.sqlite3
-    command: ["sh", "-c", "cat /etc/marzban/xray.json && echo 'Starting Marzban...' && /entrypoint.sh"]
+    command: ["sh", "-c", "cat /etc/marzban/xray_config/config.json && echo 'Starting Marzban...' && /entrypoint.sh"]
     networks:
       - marzban_network
 

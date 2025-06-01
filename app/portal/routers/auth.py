@@ -18,16 +18,8 @@ templates = Jinja2Templates(directory="app/portal/templates")
 templates.env.globals['datetime'] = datetime # Make datetime available in templates
 templates.env.globals['UserStatus'] = UserStatus # Also ensure UserStatus enum is available if compared in templates
 
-# ... (rest of your auth.py code)
-# Make sure placeholder filters from previous response are also handled here if base.html is rendered from auth routes directly
-# For example, if login_page or register_page directly render base.html without extending.
-# However, they extend base.html, so filters defined in main.py's template instance should be available if main.py is the primary entry.
-# To be safe, if these routes render templates that extend base.html, the globals should be consistent.
-# The Jinja filters like readable_bytes were added to main.py's templates instance.
-# If auth.py renders a page that itself extends base.html, it will use its own 'templates' instance.
-# Thus, globals and filters should ideally be defined centrally or on each instance.
 
-# For simplicity, adding the same filters here too, assuming they might be needed.
+
 def readable_bytes_filter_auth(size_in_bytes):
     if size_in_bytes is None: return "Unlimited"
     if size_in_bytes == 0 and isinstance(size_in_bytes, int): return "0 B"
@@ -129,12 +121,8 @@ async def register_user(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    print("[DEBUG] Starting user registration process")
     generated_account_number = str(uuid.uuid4())
-    print(f"[DEBUG] Generated account number: {generated_account_number}")
 
-    # --- BEGIN MODIFICATION ---
-    # Populate default proxies for the new portal user
     default_proxies_for_new_user = {}
     try:
         if hasattr(xray, 'config') and hasattr(xray.config, 'inbounds_by_protocol'):
@@ -142,20 +130,12 @@ async def register_user(
                 if xray.config.inbounds_by_protocol.get(pt_enum_member.value):
                     settings_model_class = pt_enum_member.settings_model
                     if settings_model_class:
-                        print(f"[DEBUG] Portal Reg: Adding default proxy for {pt_enum_member.value} to {generated_account_number}")
                         default_proxies_for_new_user[pt_enum_member] = settings_model_class()
-                    else:
-                        print(f"[DEBUG] Portal Reg: Protocol '{pt_enum_member.value}' has no settings_model for {generated_account_number}.")
-                else:
-                    print(f"[DEBUG] Portal Reg: Protocol '{pt_enum_member.value}' not in xray.config or no inbounds for {generated_account_number}.")
-        else:
-            print("[DEBUG] Portal Reg: xray.config or xray.config.inbounds_by_protocol not available for populating default proxies.")
     except Exception as e:
         print(f"[DEBUG] Portal Reg: Error populating default proxies for {generated_account_number}: {str(e)}")
     # --- END MODIFICATION ---
 
     try:
-        print("[DEBUG] Creating UserCreate payload")
         user_payload = UserCreate(
             account_number=generated_account_number,
             proxies=default_proxies_for_new_user, # Use the populated defaults
@@ -169,19 +149,12 @@ async def register_user(
             auto_delete_in_days=None, # Consider making this configurable
             next_plan=None
         )
-        print(f"[DEBUG] UserCreate payload for {generated_account_number}: {user_payload.model_dump_json(indent=2)}")
-
-        print("[DEBUG] Attempting to create user in database")
         # Portal users are not directly created by a specific admin, so admin=None
         new_db_user = crud.create_user(db=db, account_number=generated_account_number, user=user_payload, admin=None)
-        print(f"[DEBUG] User created successfully with ID: {new_db_user.id} for account {generated_account_number}")
 
-        print(f"[DEBUG] Creating access token for {generated_account_number}")
         access_token = create_access_token(data={"sub": new_db_user.account_number})
-        print(f"[DEBUG] Access token created successfully for {generated_account_number}")
 
         redirect_url = request.url_for("portal_account_page") # Ensure this route name is correct
-        print(f"[DEBUG] Generated redirect URL: {redirect_url} for {generated_account_number}")
 
         response = RedirectResponse(url=redirect_url, status_code=303)
         response.set_cookie(
@@ -194,7 +167,6 @@ async def register_user(
             max_age=1800, # 30 minutes
             domain=None # Let the browser determine the domain
         )
-        print(f"[DEBUG] Cookie set successfully for {generated_account_number}")
         return response
 
     except Exception as e:

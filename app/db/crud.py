@@ -365,16 +365,12 @@ def get_users_count(db: Session, status: Optional[UserStatus] = None, admin: Opt
 
 
 def create_user(db: Session, account_number: str, user: UserCreate, admin: Optional[Admin] = None) -> DBUser:
-    print(f"[DEBUG] create_user: Starting user creation for account {account_number}")
-    print(f"[DEBUG] create_user: User data: {user.model_dump()}")
 
     proxies_list = []
     if user.proxies: # Ensure proxies is not None
-        print(f"[DEBUG] create_user: Processing proxies: {user.proxies}")
         for proxy_type_enum, settings_model in user.proxies.items():
             # Convert settings to dict. Pydantic's model_dump handles enum serialization.
             settings_dict = settings_model.model_dump(exclude_none=True)
-            print(f"[DEBUG] create_user: Adding proxy type {proxy_type_enum} with settings {settings_dict}")
             proxies_list.append(
                 Proxy(
                     type=proxy_type_enum,
@@ -384,7 +380,6 @@ def create_user(db: Session, account_number: str, user: UserCreate, admin: Optio
 
     next_plan_orm = None
     if user.next_plan:
-        print(f"[DEBUG] create_user: Processing next plan: {user.next_plan}")
         next_plan_orm = NextPlan(
             data_limit=user.next_plan.data_limit,
             expire=user.next_plan.expire,
@@ -392,7 +387,6 @@ def create_user(db: Session, account_number: str, user: UserCreate, admin: Optio
             fire_on_either=user.next_plan.fire_on_either,
         )
 
-    print(f"[DEBUG] create_user: Creating DBUser object")
     dbuser = DBUser(
         account_number=account_number.lower(),
         proxies=proxies_list,
@@ -408,11 +402,8 @@ def create_user(db: Session, account_number: str, user: UserCreate, admin: Optio
         next_plan=next_plan_orm,
         active_node_id=None # New users don't have an active node
     )
-    print(f"[DEBUG] create_user: Adding user to database")
     db.add(dbuser)
-    print(f"[DEBUG] create_user: Committing changes")
     db.commit()
-    print(f"[DEBUG] create_user: Refreshing user object")
     db.refresh(dbuser)
     print(f"[DEBUG] create_user: User created successfully with ID {dbuser.id}")
     return get_user_by_id(db, dbuser.id) or dbuser # Re-fetch to ensure all relations are loaded

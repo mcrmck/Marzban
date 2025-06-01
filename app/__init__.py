@@ -12,6 +12,22 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .version import __version__
 from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH, DEBUG
 
+# Configure logging
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,  # Set default level to INFO
+        format='%(levelname)s:%(name)s:%(message)s'
+    )
+
+# Reduce verbosity of specific loggers
+logging.getLogger('apscheduler').setLevel(logging.WARNING)
+logging.getLogger('apscheduler.executors.default').setLevel(logging.WARNING)
+logging.getLogger('apscheduler.scheduler').setLevel(logging.WARNING)
+
+# Set app logger level
+logger = logging.getLogger("marzban.app_init")
+logger.setLevel(logging.INFO if not DEBUG else logging.DEBUG)
+
 app = FastAPI(
     title="MarzbanAPI",
     description="Unified GUI Censorship Resistant Solution Powered by Xray",
@@ -20,11 +36,6 @@ app = FastAPI(
     redoc_url="/redoc" if DOCS else None,
     debug=DEBUG
 )
-
-if not logging.getLogger().hasHandlers():
-    logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
-logger = logging.getLogger("marzban.app_init")
-logger.setLevel(logging.DEBUG)
 
 logger.info(f"APP_INIT: Top of file executing. Version: {__version__}, DEBUG: {DEBUG}")
 
@@ -43,23 +54,25 @@ app.add_middleware(
 try:
     static_portal_path = "app/portal/static"
     app.mount("/client-portal/static", StaticFiles(directory=str(static_portal_path)), name="portal_static")
-    logger.info(f"APP_INIT: Mounted portal static files from {static_portal_path}")
 except Exception as e:
     logger.error(f"APP_INIT: Could not mount portal static files from '{static_portal_path}': {e}", exc_info=True)
 
-logger.info("APP_INIT: About to import .dashboard")
 try:
     from . import dashboard
-    logger.info("APP_INIT: Successfully imported .dashboard")
 except ImportError as e:
     logger.error(f"APP_INIT: FAILED to import .dashboard: {e}", exc_info=True)
 
 try:
     from .routers import api_router
     app.include_router(api_router)
-    logger.info("APP_INIT: Successfully imported and included api_router.")
 except ImportError as e:
     logger.error(f"APP_INIT: FAILED to import or include api_router: {e}", exc_info=True)
+
+try:
+    from .portal import mount_portal_routers
+    mount_portal_routers(app)
+except ImportError as e:
+    logger.error(f"APP_INIT: FAILED to import or mount portal routers: {e}", exc_info=True)
 
 def use_route_names_as_operation_ids(current_app: FastAPI):
     for route in current_app.routes:
@@ -70,10 +83,8 @@ use_route_names_as_operation_ids(app)
 @app.on_event("startup")
 def on_app_init_startup():
     # VERY FIRST LINES for unconditional logging:
-    print("APP_INIT_STARTUP_EVENT: CALLED", flush=True)
     logger.error("APP_INIT_STARTUP_EVENT: CALLED (logger.error)")
     try:
-        logger.debug("APP_INIT_STARTUP_EVENT: Inside try block.")
         if XRAY_SUBSCRIPTION_PATH:
             paths = [f"{r.path}/" for r in app.routes if hasattr(r, 'path')]
             paths.append("/api/") # Ensure this is relevant to your routing
@@ -83,17 +94,13 @@ def on_app_init_startup():
 
         if not scheduler.running:
             scheduler.start()
-            logger.info("APP_INIT_STARTUP_EVENT: Scheduler started.")
         else:
             logger.info("APP_INIT_STARTUP_EVENT: Scheduler was already running.")
-        logger.info("APP_INIT_STARTUP_EVENT: Logic finished successfully.")
     except Exception as e_init_startup:
-        print(f"APP_INIT_STARTUP_EVENT: EXCEPTION: {e_init_startup}", flush=True)
         logger.error(f"APP_INIT_STARTUP_EVENT: EXCEPTION: {e_init_startup}", exc_info=True)
 
 @app.on_event("shutdown")
 def on_app_init_shutdown():
-    print("APP_INIT_SHUTDOWN_EVENT: CALLED", flush=True)
     logger.error("APP_INIT_SHUTDOWN_EVENT: CALLED (logger.error)")
     if scheduler.running:
       scheduler.shutdown()

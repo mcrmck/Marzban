@@ -474,9 +474,7 @@ def get_plan_by_id(plan_id: str) -> Optional[Plan]:
         )
     }
     found_plan = plans_config.get(plan_id)
-    if found_plan and (not found_plan.stripe_price_id or "_placeholder" in found_plan.stripe_price_id):
-        # Log if a plan is found but its Stripe ID is missing/placeholder, critical for live payments.
-        logger.warning(f"Plan '{plan_id}' is using a placeholder or missing Stripe Price ID: '{found_plan.stripe_price_id}'. Live payments will fail for this plan.")
+
     return found_plan
 
 # Example of XRAY_SUBSCRIPTION_PATH from config, if needed for url_for fallback in account_page

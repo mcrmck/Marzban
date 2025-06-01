@@ -10,13 +10,10 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from fastapi import FastAPI # For type hinting
 
-print("MAIN.PY: Top of file executing", flush=True)
 
 try:
     from app import app # This is the central FastAPI instance
-    print("MAIN.PY: Successfully imported 'app' from app module", flush=True)
 except ImportError as e:
-    print(f"MAIN.PY: FAILED to import 'app' from app module: {e}", flush=True)
     raise
 
 from config import (DEBUG, UVICORN_HOST, UVICORN_PORT, UVICORN_SSL_CERTFILE,
@@ -32,20 +29,15 @@ if not logging.getLogger().hasHandlers():
     logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO, force=True, format='%(levelname)s:%(name)s:%(message)s')
 logger.setLevel(logging.DEBUG)
 
-print(f"MAIN.PY: DEBUG flag from config is {DEBUG}", flush=True)
 
 # Lifespan function definition (remains defined but won't be attached for this test)
 @asynccontextmanager
 async def main_lifespan(fastapi_app: FastAPI):
-    print("MAIN.PY: main_lifespan - STARTUP (TEMPORARILY NOT USED)", flush=True)
-    logger.info("Main lifespan: Custom startup tasks would run here.")
     yield
-    print("MAIN.PY: main_lifespan - SHUTDOWN (TEMPORARILY NOT USED)", flush=True)
     logger.info("Main lifespan: Custom shutdown tasks would run here.")
 
 # --- CRITICAL CHANGE FOR THIS TEST: Do NOT assign the custom lifespan ---
 # app.router.lifespan_context = main_lifespan # COMMENT THIS LINE OUT
-print("MAIN.PY: Custom 'main_lifespan' is NOT being attached for this test.", flush=True)
 
 
 # Cert Validation and DB Table Creation can remain as placeholders
@@ -65,7 +57,6 @@ except Exception as e:
 
 
 if __name__ == "__main__":
-    print("MAIN.PY: __main__ block executing", flush=True)
     bind_args = {}
     # --- Ensure your Uvicorn bind_args setup is complete here ---
     current_ca_type = UVICORN_SSL_CA_TYPE.lower() if UVICORN_SSL_CA_TYPE else "public"
@@ -89,7 +80,6 @@ if __name__ == "__main__":
 
     log_level_uvicorn = "info"
 
-    print(f"MAIN.PY: Starting Uvicorn with app:app, reload={DEBUG}, log_level={log_level_uvicorn}", flush=True)
     try:
         uvicorn.run(
             "app:app", # Points to Marzban/app/__init__.py's 'app' instance
@@ -99,5 +89,4 @@ if __name__ == "__main__":
             **bind_args # Pass all other computed bind_args (host, port, ssl, uds)
         )
     except Exception as e:
-        print(f"MAIN.PY: Uvicorn failed to start: {e}", flush=True)
         logger.critical(f"Failed to start Uvicorn: {e}", exc_info=True)

@@ -154,3 +154,5 @@ SECRET_KEY = config("SECRET_KEY", default="")
 ALGORITHM = config("ALGORITHM", default="HS256") # HS256 is a common algorithm
 
 PORTAL_JWT_SECRET_KEY = config("PORTAL_JWT_SECRET_KEY", default="")
+
+XRAY_CONFIG_PATH = config("XRAY_CONFIG_PATH", default="/etc/marzban/xray_config/config.json")

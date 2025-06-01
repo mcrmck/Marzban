@@ -264,23 +264,17 @@ class UserResponse(User):
 
     @field_validator("used_traffic", "lifetime_used_traffic", mode='before')
     def cast_traffic_to_int(cls, v):
-        print(f"[DEBUG] cast_traffic_to_int: Input value: {v}, type: {type(v)}")
         if v is None:
-            print("[DEBUG] cast_traffic_to_int: Value is None, returning 0")
             return 0
         try:
             if isinstance(v, (float, int)):
                 result = int(v)
-                print(f"[DEBUG] cast_traffic_to_int: Converted {v} to int: {result}")
                 return result
             if isinstance(v, str):
                 result = int(float(v))
-                print(f"[DEBUG] cast_traffic_to_int: Converted string {v} to int: {result}")
                 return result
-            print(f"[DEBUG] cast_traffic_to_int: Unhandled type {type(v)}, returning 0")
             return 0
         except (ValueError, TypeError) as e:
-            print(f"[DEBUG] cast_traffic_to_int: Error converting value: {e}")
             return 0
 
 
