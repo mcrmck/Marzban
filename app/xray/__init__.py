@@ -3,7 +3,6 @@ import logging # Add logging import
 from random import randint
 from typing import TYPE_CHECKING, Dict, Sequence # Keep existing Sequence if used by ProxyHost type hint
 
-from app.models.proxy import ProxyHostSecurity
 from app.utils.store import DictStorage
 from app.utils.system import check_port
 from app.xray import operations # Ensure this is how operations is meant to be imported
@@ -13,6 +12,7 @@ from xray_api import XRay as XRayAPI # Retaining, though direct use in this file
 from xray_api import exceptions, types
 from xray_api import exceptions as exc
 from config import XRAY_CONFIG_PATH
+from app.db.models import NodeServiceConfiguration # Add this import
 
 # Setup a logger for this module
 logger = logging.getLogger(__name__)
@@ -41,11 +41,11 @@ finally:
 
     if os.path.exists(actual_xray_config_path):
         logger.info(f"XRayConfig file FOUND at {actual_xray_config_path}. Initializing XRayConfig with this path.")
-        # Pass the file path string to config_dict, and also the determined api_port
-        config = XRayConfig(config_dict=actual_xray_config_path, api_port=api_port_to_use)
+        # Pass the file path string to base_template_path, and also the determined api_port
+        config = XRayConfig(base_template_path=actual_xray_config_path, node_api_port=api_port_to_use)
     else:
         logger.error(f"CRITICAL: XRayConfig file NOT FOUND at {actual_xray_config_path}. Falling back to default config structure.")
-        config = XRayConfig(config_dict=None, api_port=api_port_to_use)
+        config = XRayConfig(base_template_path=None, node_api_port=api_port_to_use)
     # --- MODIFICATION END ---
 
     # Clean up variables from port search, ensure they exist before deleting
@@ -73,31 +73,34 @@ def hosts(storage: dict):
     with GetDB() as db_session: # Use a new session for this function
         if hasattr(config, 'inbounds_by_tag') and config.inbounds_by_tag:
             for inbound_tag_key in config.inbounds_by_tag: # Use a different variable name
-                # Pass the db_session to crud.get_hosts
-                inbound_hosts_orm: Sequence[db_models.ProxyHost] = crud.get_hosts(db_session, inbound_tag_key)
+                # Get service configurations for this inbound tag
+                service_configs: Sequence[db_models.NodeServiceConfiguration] = crud.get_service_configurations(db_session, inbound_tag_key)
 
                 storage[inbound_tag_key] = [
                     {
-                        "remark": host_item.remark,
-                        "address": [i.strip() for i in host_item.address.split(',')] if host_item.address else [],
-                        "port": host_item.port,
-                        "path": host_item.path if host_item.path else None,
-                        "sni": [i.strip() for i in host_item.sni.split(',')] if host_item.sni else [],
-                        "host": [i.strip() for i in host_item.host.split(',')] if host_item.host else [],
-                        # Ensure .value is accessed only if the attribute is not None
-                        "alpn": host_item.alpn.value if host_item.alpn else None,
-                        "fingerprint": host_item.fingerprint.value if host_item.fingerprint else None,
-                        "tls": None
-                        if host_item.security == ProxyHostSecurity.inbound_default
-                        else host_item.security.value,
-                        "allowinsecure": host_item.allowinsecure,
-                        "mux_enable": host_item.mux_enable,
-                        "fragment_setting": host_item.fragment_setting,
-                        "noise_setting": host_item.noise_setting,
-                        "random_user_agent": host_item.random_user_agent,
-                        "use_sni_as_host": host_item.use_sni_as_host,
-                        "node_id": host_item.node_id # Make sure ProxyHost ORM model has node_id
-                    } for host_item in inbound_hosts_orm if not host_item.is_disabled # Changed loop var name
+                        "remark": service.service_name,
+                        "address": [service.listen_address] if service.listen_address else [],
+                        "port": service.listen_port,
+                        "path": service.ws_path or service.grpc_service_name or service.http_upgrade_path,
+                        "sni": [service.sni] if service.sni else [],
+                        "host": [service.sni] if service.sni else [], # Use SNI as host if available
+                        "alpn": None, # ALPN is handled in advanced_tls_settings
+                        "fingerprint": service.fingerprint,
+                        "tls": service.security_type.value if service.security_type else None,
+                        "allowinsecure": False, # This should be controlled by security_type
+                        "mux_enable": False, # This is now handled in advanced_stream_settings
+                        "fragment_setting": None, # This is now handled in advanced_stream_settings
+                        "noise_setting": None, # This is now handled in advanced_stream_settings
+                        "random_user_agent": False, # This is now handled in advanced_stream_settings
+                        "use_sni_as_host": True, # Default to using SNI as host
+                        "node_id": service.node_id,
+                        # Include advanced settings
+                        "advanced_protocol_settings": service.advanced_protocol_settings,
+                        "advanced_stream_settings": service.advanced_stream_settings,
+                        "advanced_tls_settings": service.advanced_tls_settings,
+                        "advanced_reality_settings": service.advanced_reality_settings,
+                        "sniffing_settings": service.sniffing_settings
+                    } for service in service_configs if service.enabled
                 ]
         else:
             logger.warning("hosts function: xray.config.inbounds_by_tag is not available or empty. No hosts loaded.")

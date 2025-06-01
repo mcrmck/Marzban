@@ -2,6 +2,7 @@ from enum import Enum
 from typing import List, Optional
 
 from pydantic import ConfigDict, BaseModel, Field
+from app.models.node_service import NodeServiceConfigurationResponse
 
 
 class NodeStatus(str, Enum):
@@ -27,7 +28,6 @@ class Node(BaseModel):
 
 
 class NodeCreate(Node):
-    add_as_new_host: bool = True
     panel_client_cert: Optional[str] = None  # Frontend field name
     panel_client_key: Optional[str] = None   # Frontend field name
     model_config = ConfigDict(json_schema_extra={
@@ -36,7 +36,6 @@ class NodeCreate(Node):
             "address": "192.168.1.1",
             "port": 62050,
             "api_port": 62051,
-            "add_as_new_host": True,
             "usage_coefficient": 1,
             "panel_client_cert": "-----BEGIN CERTIFICATE-----\n...",
             "panel_client_key": "-----BEGIN PRIVATE KEY-----\n..."
@@ -81,6 +80,8 @@ class NodeResponse(Node):
     status: NodeStatus
     message: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
+    service_configurations: List[NodeServiceConfigurationResponse] = []
+
 
 
 class NodeUsageResponse(BaseModel):

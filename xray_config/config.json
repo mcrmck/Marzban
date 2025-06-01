@@ -1,38 +1,45 @@
 {
   "log": {
-    "loglevel": "warning"
+      "loglevel": "warning"
+  },
+  "dns": {
   },
   "routing": {
-    "rules": [
-      {
-        "ip": [
-          "geoip:private"
-        ],
-        "outboundTag": "BLOCK",
-        "type": "field"
-      }
-    ]
+      "domainStrategy": "AsIs",
+      "rules": [
+
+          {
+              "type": "field",
+              "ip": ["geoip:private"],
+              "outboundTag": "block"
+          },
+
+          {
+              "type": "field",
+              "protocol": ["bittorrent"],
+              "outboundTag": "block"
+          }
+      ]
   },
-  "inbounds": [
-    {
-      "tag": "Shadowsocks TCP",
-      "listen": "0.0.0.0",
-      "port": 1080,
-      "protocol": "shadowsocks",
-      "settings": {
-        "clients": [],
-        "network": "tcp,udp"
-      }
-    }
-  ],
   "outbounds": [
-    {
-      "protocol": "freedom",
-      "tag": "DIRECT"
-    },
-    {
-      "protocol": "blackhole",
-      "tag": "BLOCK"
-    }
-  ]
+      {
+          "protocol": "freedom",
+          "settings": {},
+          "tag": "direct"
+      },
+      {
+          "protocol": "blackhole",
+          "settings": {},
+          "tag": "block"
+      }
+  ],
+  "policy": {
+      "system": {
+          "statsOutboundUplink": true,
+          "statsOutboundDownlink": true
+      }
+  },
+  "api": {
+  },
+  "stats": {}
 }

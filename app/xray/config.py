@@ -4,7 +4,7 @@ import json
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import PosixPath
-from typing import Union
+from typing import Union, List, Dict, Optional
 
 import commentjson
 from sqlalchemy import func
@@ -39,130 +39,73 @@ def merge_dicts(a, b):  # B will override A dictionary key and values
 
 class XRayConfig(dict):
     def __init__(self,
-                 config_dict: Union[dict, str, PosixPath, None] = None,
-                 api_host: str = "127.0.0.1",
-                 api_port: int = 8080):
+                 base_template_path: Union[str, PosixPath, None] = None,
+                 node_api_host: str = "127.0.0.1",
+                 node_api_port: int = 62051):
 
-        logger.debug(f"XRayConfig.__init__: Starting initialization with config_dict type: {type(config_dict)}")
-        if config_dict is not None:
-            logger.debug(f"XRayConfig.__init__: config_dict value: {config_dict}")
+        logger.debug(f"XRayConfig.__init__: Starting initialization with base_template_path: {base_template_path}")
 
-        self.api_host = api_host
-        self.api_port = api_port
-        logger.debug(f"XRayConfig.__init__: Using API host: {api_host}, port: {api_port}")
+        self.node_api_host = node_api_host
+        self.node_api_port = node_api_port
+        logger.debug(f"XRayConfig.__init__: Using node API host: {node_api_host}, port: {node_api_port}")
 
-        processed_config = {} # This will hold the configuration to actually use
-
-        if isinstance(config_dict, str):
-            logger.debug(f"XRayConfig.__init__: Attempting to parse string config_dict: {config_dict[:100]}...")
-            try:
-                # considering string as json
-                logger.debug("XRayConfig.__init__: Attempting to parse as JSON")
-                processed_config = commentjson.loads(config_dict)
-                logger.debug("XRayConfig.__init__: Successfully parsed JSON")
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.debug(f"XRayConfig.__init__: JSON parsing failed ({str(e)}), trying as file path")
-                try:
-                    logger.debug(f"XRayConfig.__init__: Attempting to load from file: {config_dict}")
-                    with open(config_dict, 'r') as file:
-                        processed_config = commentjson.loads(file.read())
-                    logger.debug(f"XRayConfig.__init__: Successfully loaded from file: {config_dict}")
-                except FileNotFoundError:
-                    logger.error(f"XRayConfig.__init__: Config file not found: {config_dict}")
-                    config_dict = None
-                except Exception as e:
-                    logger.error(f"XRayConfig.__init__: Error reading config file {config_dict}: {str(e)}")
-                    config_dict = None
-        elif isinstance(config_dict, PosixPath):
-            try:
-                logger.debug(f"XRayConfig.__init__: Attempting to load from PosixPath: {config_dict}")
-                with open(config_dict, 'r') as file:
-                    processed_config = commentjson.loads(file.read())
-                logger.debug(f"XRayConfig.__init__: Successfully loaded from PosixPath: {config_dict}")
-            except FileNotFoundError:
-                logger.error(f"XRayConfig.__init__: Config file not found at PosixPath: {config_dict}")
-                config_dict = None
-            except Exception as e:
-                logger.error(f"XRayConfig.__init__: Error reading from PosixPath {config_dict}: {str(e)}")
-                config_dict = None
-        elif isinstance(config_dict, dict):
-            logger.debug("XRayConfig.__init__: Using provided dictionary as config")
-            processed_config = deepcopy(config_dict)
-        else:
-            logger.debug(f"XRayConfig.__init__: config_dict is of unsupported type: {type(config_dict)}")
-
-        if config_dict is None:
-            logger.warning("XRayConfig.__init__: Initializing with default structure because config_dict is None or could not be loaded.")
-            processed_config = {
-                "log": {
-                    "loglevel": "warning"
+        # Initialize with default structure
+        default_config = {
+            "log": {
+                "loglevel": "warning"
+            },
+            "inbounds": [],
+            "outbounds": [
+                {
+                    "protocol": "freedom",
+                    "settings": {},
+                    "tag": "direct"
                 },
-                "inbounds": [],
-                "outbounds": [
-                    {
-                        "protocol": "freedom",
-                        "settings": {},
-                        "tag": "direct"
-                    },
-                    {
-                        "protocol": "blackhole",
-                        "settings": {},
-                        "tag": "block"
-                    }
-                ],
-                "routing": {
-                    "rules": []
+                {
+                    "protocol": "blackhole",
+                    "settings": {},
+                    "tag": "block"
                 }
-            }
-            logger.debug("XRayConfig.__init__: Default config structure initialized")
-
-        if not isinstance(processed_config, dict):
-            logger.error(f"XRayConfig.__init__: Internal error - processed_config is not a dict. Type: {type(processed_config)}")
-            raise TypeError("Internal error: processed_config is not a dict after input handling.")
-
-        logger.debug(f"XRayConfig.__init__: Final processed_config keys: {list(processed_config.keys())}")
-        super().__init__(processed_config)
-
-        # Initial validation for basic structure if not empty
-        if processed_config:
-            logger.debug("XRayConfig.__init__: Validating initial config structure")
-            self._validate()
-            logger.debug("XRayConfig.__init__: Initial validation complete")
-
-        self.inbounds = []
-        self.inbounds_by_protocol = defaultdict(list)
-        self.inbounds_by_tag = {}
-        self._fallbacks_inbound = {}
-
-        logger.debug("XRayConfig.__init__: Applying API configuration")
-        self._apply_api()
-        logger.debug("XRayConfig.__init__: Resolving inbounds")
-        self._resolve_inbounds()
-        logger.debug("XRayConfig.__init__: Initialization complete")
-
-    def _apply_api(self):
-        api_inbound_entry = self.get_inbound("API_INBOUND") # Check if an inbound with this tag already exists
-        if api_inbound_entry: # If it exists, just ensure its port and listen address are correct
-            api_inbound_entry["port"] = self.api_port
-            api_inbound_entry["listen"] = self.api_host # Overwrite or set listen address
-            # Ensure settings.address is also updated if that's how dokodemo-door expects it
-            if api_inbound_entry.get("protocol") == "dokodemo-door":
-                if "settings" not in api_inbound_entry:
-                    api_inbound_entry["settings"] = {}
-                api_inbound_entry["settings"]["address"] = self.api_host
-            return
-
-        # If no API_INBOUND exists, create it along with api and stats sections
-        self["api"] = self.get("api", {
-            "services": [
-                "HandlerService",
-                "StatsService",
-                "LoggerService"
             ],
-            "tag": "API"
-        })
-        self["stats"] = self.get("stats", {}) # Initialize stats if not present
+            "routing": {
+                "rules": []
+            }
+        }
 
+        # If base template provided, try to load and merge it
+        if base_template_path:
+            try:
+                if isinstance(base_template_path, str):
+                    with open(base_template_path, 'r') as f:
+                        template_config = commentjson.loads(f.read())
+                else:  # PosixPath
+                    with open(base_template_path, 'r') as f:
+                        template_config = commentjson.loads(f.read())
+
+                logger.debug(f"XRayConfig.__init__: Successfully loaded base template from {base_template_path}")
+                # Merge template into default config (template takes precedence)
+                merge_dicts(default_config, template_config)
+            except Exception as e:
+                logger.error(f"XRayConfig.__init__: Error loading base template: {e}")
+                logger.info("XRayConfig.__init__: Using default configuration structure")
+
+        super().__init__(default_config)
+        logger.debug(f"XRayConfig.__init__: Final config keys: {list(self.keys())}")
+
+    def _apply_node_api_and_policy(self):
+        """Configure API, stats, and policy sections for node management."""
+        logger.debug("XRayConfig._apply_node_api_and_policy: Applying node API and policy configuration")
+
+        # API section
+        self["api"] = {
+            "services": ["HandlerService", "StatsService", "LoggerService"],
+            "tag": "API_GRPC_CTRL"
+        }
+
+        # Stats section
+        self["stats"] = {}
+
+        # Policy section
         forced_policies = {
             "levels": {
                 "0": {
@@ -171,312 +114,247 @@ class XRayConfig(dict):
                 }
             },
             "system": {
-                "statsInboundDownlink": False, # Typically false for panel-managed stats
-                "statsInboundUplink": False,   # Typically false for panel-managed stats
-                "statsOutboundDownlink": True,
-                "statsOutboundUplink": True
+                "statsInboundDownlink": True,
+                "statsInboundUplink": True
             }
         }
         current_policy = self.get("policy", {})
         self["policy"] = merge_dicts(current_policy, forced_policies)
 
-        new_api_inbound = {
-            "listen": self.api_host,
-            "port": self.api_port,
+        # Add XRay gRPC API inbound
+        api_inbound = {
+            "tag": "API_GRPC_INBOUND",
+            "listen": self.node_api_host,
+            "port": self.node_api_port,
             "protocol": "dokodemo-door",
             "settings": {
-                "address": self.api_host # Dokodemo typically uses settings.address for the target
-            },
-            "tag": "API_INBOUND"
+                "address": self.node_api_host,
+                "followRedirect": False
+            }
         }
 
-        # Ensure 'inbounds' list exists
+        # Ensure inbounds list exists and add API inbound at the start
         if "inbounds" not in self:
             self["inbounds"] = []
-        self["inbounds"].insert(0, new_api_inbound)
+        self["inbounds"].insert(0, api_inbound)
 
-        # Ensure 'routing' and 'routing.rules' list exist
+        # Add routing rule for API inbound
+        api_rule = {
+            "type": "field",
+            "inboundTag": ["API_GRPC_INBOUND"],
+            "outboundTag": "API_GRPC_CTRL"
+        }
+
+        # Ensure routing rules list exists and add API rule at the start
         if "routing" not in self:
             self["routing"] = {"rules": []}
         elif "rules" not in self["routing"]:
             self["routing"]["rules"] = []
-
-        api_rule = {
-            "inboundTag": [
-                "API_INBOUND"
-            ],
-            "outboundTag": "API", # This requires an outbound with tag "API"
-            "type": "field"
-        }
-        # Check if an outbound with tag "API" exists, if not, consider adding a default one
-        if not self.get_outbound("API"):
-            if "outbounds" not in self:
-                self["outbounds"] = []
-            # Add a default freedom outbound for API if it doesn't exist, or ensure it's configured
-            # For simplicity here, we assume routing to "direct" or similar for API is okay
-            # A specific "API" outbound might be "proxy/freedom" tagged "API"
-            # For now, let's assume the user ensures an appropriate outbound for "API" tag exists
-            # or we simply point to "direct". Using "direct" if "API" outbound is missing:
-            api_rule["outboundTag"] = "direct" # Fallback if "API" outbound doesn't exist
-
         self["routing"]["rules"].insert(0, api_rule)
 
-    def _validate(self):
-        # Allow empty inbounds initially, as _apply_api will add the API inbound
-        if not self.get("outbounds"): # outbounds must exist
-            raise ValueError("XRayConfig: 'outbounds' key is missing or empty.")
+        logger.debug("XRayConfig._apply_node_api_and_policy: Node API and policy configuration applied")
 
-        # Validate after all modifications, especially inbounds and outbounds
-        # This basic validation is fine for the initial structure.
-        # More specific validations occur in _resolve_inbounds.
-        for inbound in self.get('inbounds', []): # use .get for safety
-            if not inbound.get("tag"):
-                raise ValueError("XRayConfig: All inbounds must have a unique tag.")
-            if ',' in inbound.get("tag"):
-                raise ValueError("XRayConfig: Character «,» is not allowed in inbound tag.")
-        for outbound in self.get('outbounds', []):
-            if not outbound.get("tag"):
-                raise ValueError("XRayConfig: All outbounds must have a unique tag.")
+    def _generate_inbound_dict(self, service_db_model: "db_models.NodeServiceConfiguration",
+                             users_for_service: List["db_models.User"]) -> dict:
+        """Generate an XRay inbound configuration for a specific service."""
+        logger.debug(f"XRayConfig._generate_inbound_dict: Generating inbound for service {service_db_model.id}")
 
-    def _resolve_inbounds(self):
-        # Reset internal lists before resolving from the current state of self (the dict)
-        self.inbounds = []
-        self.inbounds_by_protocol = defaultdict(list)
-        self.inbounds_by_tag = {}
-
-        # Find a potential fallback inbound from the configuration itself if defined
-        # This is a placeholder for a more robust fallback mechanism.
-        # For now, we're not auto-assigning fallbacks like the original code did with XRAY_FALLBACKS_INBOUND_TAG.
-        # If a user defines an inbound with a specific setting indicating it's a fallback source,
-        # that could be used. Here, _fallbacks_inbound remains mostly unused.
-        # self._fallbacks_inbound = {} # Example: find and set self._fallbacks_inbound if logic exists
-
-        for inbound_config_dict in self.get('inbounds', []): # Iterate over current inbounds in self
-            # Ensure ProxyTypes has _value2member_map_ or adapt the check
-            if not hasattr(ProxyTypes, '_value2member_map_') or inbound_config_dict.get('protocol') not in ProxyTypes._value2member_map_:
+        # Process clients
+        clients = []
+        for db_user in users_for_service:
+            # Find user's proxy settings for this service's protocol
+            user_proxy = next((p for p in db_user.proxies if p.type == service_db_model.protocol_type), None)
+            if not user_proxy:
                 continue
 
-            if inbound_config_dict.get('tag') in XRAY_EXCLUDE_INBOUND_TAGS:
-                continue
-
-            # Ensure settings and clients sub-dictionaries exist
-            if not inbound_config_dict.get('settings'):
-                inbound_config_dict['settings'] = {}
-            if not inbound_config_dict['settings'].get('clients'):
-                inbound_config_dict['settings']['clients'] = [] # Important for include_db_users
-
-            settings = {
-                "tag": inbound_config_dict["tag"],
-                "protocol": inbound_config_dict["protocol"],
-                "port": inbound_config_dict.get("port"), # Get port directly
-                "network": "tcp", # Default
-                "tls": 'none',  # Default
-                "sni": [],
-                "host": [],
-                "path": "",
-                "header_type": "",
-                "is_fallback": False # Not actively used yet without a fallback mechanism
+            client_entry = {
+                "email": f"{db_user.id}.{db_user.account_number}",
+                **deepcopy(user_proxy.settings)
             }
 
-            # stream settings
-            if stream_settings_dict := inbound_config_dict.get('streamSettings'):
-                net = stream_settings_dict.get('network', 'tcp')
-                current_net_settings = stream_settings_dict.get(f"{net}Settings", {})
-                security = stream_settings_dict.get("security")
-                # Initialize tls_settings to an empty dict to prevent errors if security is None
-                current_tls_settings = stream_settings_dict.get(f"{security}Settings", {}) if security else {}
+            # Handle flow control
+            if 'flow' in client_entry:
+                network_type = service_db_model.network_type or "tcp"
+                security_type = service_db_model.security_type or db_models.SecurityType.NONE
+                advanced_settings = service_db_model.advanced_stream_settings or {}
+                tcp_settings = advanced_settings.get("tcpSettings", {})
+                header_type = tcp_settings.get("header", {}).get("type", "")
 
-                settings['network'] = net
+                if (network_type not in ('tcp', 'kcp', 'raw') or
+                    (network_type in ('tcp', 'kcp', 'raw') and
+                     security_type not in (db_models.SecurityType.TLS, db_models.SecurityType.REALITY)) or
+                    header_type == 'http'):
+                    logger.debug(f"Removing flow from client {client_entry['email']} due to incompatible settings")
+                    del client_entry['flow']
 
-                if security == 'tls':
-                    settings['tls'] = 'tls'
-                    for certificate in current_tls_settings.get('certificates', []):
-                        if cert_file_path := certificate.get("certificateFile"):
-                            try:
-                                with open(cert_file_path, 'rb') as file:
-                                    cert_bytes = file.read()
-                                    settings['sni'].extend(get_cert_SANs(cert_bytes))
-                            except FileNotFoundError:
-                                print(f"Warning: Certificate file not found: {cert_file_path} for inbound {settings['tag']}")
-                            except Exception as e:
-                                print(f"Warning: Error reading certificate file {cert_file_path}: {e}")
+            clients.append(client_entry)
 
-                        if cert_data_inline := certificate.get("certificate"):
-                            if isinstance(cert_data_inline, list):
-                                cert_data_inline = '\n'.join(cert_data_inline)
-                            if isinstance(cert_data_inline, str):
-                                cert_data_inline = cert_data_inline.encode()
-                            try:
-                                settings['sni'].extend(get_cert_SANs(cert_data_inline))
-                            except Exception as e:
-                                print(f"Warning: Error processing inline certificate for SNI in inbound {settings['tag']}: {e}")
+        # Protocol settings
+        inbound_proto_settings = {}
+        if service_db_model.protocol_type != ProxyTypes.Shadowsocks:
+            inbound_proto_settings["clients"] = clients
 
-                elif security == 'reality':
-                    settings['fp'] = current_tls_settings.get('fingerprint', 'chrome')
-                    settings['tls'] = 'reality'
-                    settings['sni'] = current_tls_settings.get('serverNames', []) # Should be 'serverNames' for Xray spec
-                    settings['pbk'] = current_tls_settings.get('publicKey')
+        # Protocol-specific settings
+        if service_db_model.protocol_type == ProxyTypes.VLESS:
+            inbound_proto_settings["decryption"] = "none"
+            if service_db_model.advanced_protocol_settings:
+                merge_dicts(inbound_proto_settings, service_db_model.advanced_protocol_settings)
+            if service_db_model.advanced_fallback_settings_json:
+                inbound_proto_settings["fallbacks"] = service_db_model.advanced_fallback_settings_json
 
-                    if not settings['pbk']:
-                         raise ValueError(
-                            f"Panel requires 'publicKey' to be explicitly provided in realitySettings for inbound '{settings['tag']}'. Private key derivation is no longer supported by the panel."
-                        )
+        elif service_db_model.protocol_type == ProxyTypes.VMess:
+            if service_db_model.advanced_protocol_settings:
+                merge_dicts(inbound_proto_settings, service_db_model.advanced_protocol_settings)
 
-                    settings['sids'] = current_tls_settings.get('shortIds', [])
-                    if not settings['sids']:
-                         raise ValueError(
-                            f"You need to define at least one shortID in realitySettings of inbound '{settings['tag']}'"
-                        )
-                    settings['spx'] = current_tls_settings.get('spiderX', "")
+        elif service_db_model.protocol_type == ProxyTypes.Trojan:
+            if service_db_model.advanced_protocol_settings:
+                merge_dicts(inbound_proto_settings, service_db_model.advanced_protocol_settings)
+            if service_db_model.advanced_fallback_settings_json:
+                inbound_proto_settings["fallbacks"] = service_db_model.advanced_fallback_settings_json
 
+        elif service_db_model.protocol_type == ProxyTypes.Shadowsocks:
+            inbound_proto_settings = deepcopy(service_db_model.advanced_protocol_settings or {})
+            if not inbound_proto_settings:
+                inbound_proto_settings = {
+                    "method": "aes-256-gcm",
+                    "password": "marzban_default_ss_password"
+                }
+                logger.warning(f"Using default Shadowsocks settings for service {service_db_model.id}")
 
-                if net in ('tcp', 'raw'):
-                    header = current_net_settings.get('header', {})
-                    request = header.get('request', {})
-                    path_list = request.get('path', [])
-                    host_list_from_headers = request.get('headers', {}).get('Host', [])
+        # Stream settings
+        stream_settings = {}
+        network_type = service_db_model.network_type or "tcp"
+        stream_settings["network"] = network_type
 
-                    settings['header_type'] = header.get('type', '')
+        if service_db_model.security_type != db_models.SecurityType.NONE:
+            stream_settings["security"] = service_db_model.security_type.value
 
-                    if isinstance(path_list, str) or isinstance(host_list_from_headers, str):
-                        raise ValueError(f"Settings of {settings['tag']} for path and host must be list, not str for TCP HTTP header")
+        # Network-specific settings
+        network_specific_config = {}
+        if network_type == "ws":
+            network_specific_config["path"] = service_db_model.ws_path or "/"
+        elif network_type == "grpc":
+            network_specific_config["serviceName"] = service_db_model.grpc_service_name or "default_grpc"
+        elif network_type == "http":
+            network_specific_config["path"] = service_db_model.http_upgrade_path or "/"
 
-                    settings['path'] = path_list[0] if path_list else ""
-                    settings['host'] = host_list_from_headers if host_list_from_headers else []
+        # Merge advanced stream settings
+        if service_db_model.advanced_stream_settings:
+            advanced_network_settings = service_db_model.advanced_stream_settings.get(f"{network_type}Settings", {})
+            merge_dicts(network_specific_config, advanced_network_settings)
 
+            # Merge other top-level settings
+            for key, value in service_db_model.advanced_stream_settings.items():
+                if not key.endswith("Settings"):
+                    stream_settings[key] = value
 
-                elif net == 'ws':
-                    settings['path'] = current_net_settings.get('path', '')
-                    host_val_ws = current_net_settings.get('Host', current_net_settings.get('headers', {}).get('Host'))
+        if network_specific_config:
+            stream_settings[f"{network_type}Settings"] = network_specific_config
 
-                    if isinstance(settings['path'], list) or isinstance(host_val_ws, list):
-                        raise ValueError(f"Settings of {settings['tag']} for path and host must be str, not list for WebSocket")
+        # Security settings
+        if service_db_model.security_type == db_models.SecurityType.TLS:
+            tls_settings = {"serverName": service_db_model.sni}
+            if service_db_model.fingerprint:
+                tls_settings["fingerprint"] = service_db_model.fingerprint
+            if service_db_model.advanced_tls_settings:
+                merge_dicts(tls_settings, service_db_model.advanced_tls_settings)
+            stream_settings["tlsSettings"] = tls_settings
 
-                    settings['host'] = [host_val_ws] if host_val_ws else []
-                    settings["heartbeatPeriod"] = current_net_settings.get('heartbeatPeriod', 0)
+        elif service_db_model.security_type == db_models.SecurityType.REALITY:
+            reality_settings = {
+                "serverName": service_db_model.sni,
+                "publicKey": service_db_model.reality_public_key,
+                "shortIds": [service_db_model.reality_short_id]
+            }
+            if service_db_model.fingerprint:
+                reality_settings["fingerprint"] = service_db_model.fingerprint
+            if service_db_model.advanced_reality_settings:
+                merge_dicts(reality_settings, service_db_model.advanced_reality_settings)
+            stream_settings["realitySettings"] = reality_settings
 
+        # Sniffing settings
+        sniffing = service_db_model.advanced_sniffing_settings_json or {
+            "enabled": True,
+            "destOverride": ["http", "tls", "quic", "fakedns"]
+        }
 
-                elif net == 'grpc' or net == 'gun':
-                    settings['path'] = current_net_settings.get('serviceName', '')
-                    authority_grpc = current_net_settings.get('authority', '')
-                    settings['host'] = [authority_grpc] if authority_grpc else []
-                    settings['multiMode'] = current_net_settings.get('multiMode', False)
+        # Assemble final inbound configuration
+        inbound_dict = {
+            "tag": service_db_model.xray_inbound_tag or f"marzban_service_{service_db_model.id}",
+            "protocol": service_db_model.protocol_type.value,
+            "listen": service_db_model.listen_address or "0.0.0.0",
+            "port": service_db_model.listen_port,
+            "settings": inbound_proto_settings,
+            "streamSettings": stream_settings,
+            "sniffing": sniffing
+        }
 
-                # Add other network types (quic, httpupgrade, etc.) from your original _resolve_inbounds if needed,
-                # ensuring they read from 'current_net_settings' and 'current_tls_settings'.
+        logger.debug(f"XRayConfig._generate_inbound_dict: Generated inbound for service {service_db_model.id}")
+        return inbound_dict
 
-            self.inbounds.append(settings) # Processed settings for internal use
-            self.inbounds_by_tag[settings['tag']] = settings
-            self.inbounds_by_protocol[settings['protocol']].append(settings)
+    def build_node_config(self, node_orm: "db_models.Node",
+                         users_on_node: List["db_models.User"]) -> "XRayConfig":
+        """Build a complete XRay configuration for a specific node."""
+        logger.info(f"XRayConfig.build_node_config: Building config for node {node_orm.name}")
 
+        # Update API port from node
+        self.node_api_port = node_orm.api_port
+        logger.debug(f"XRayConfig.build_node_config: Using node API port: {self.node_api_port}")
 
-    def get_inbound(self, tag) -> dict | None:
-        for inbound in self.get('inbounds', []):
-            if inbound.get('tag') == tag:
-                return inbound
-        return None
+        # Apply node API and policy configuration
+        self._apply_node_api_and_policy()
 
-    def get_outbound(self, tag) -> dict | None:
-        for outbound in self.get('outbounds', []):
-            if outbound.get('tag') == tag:
-                return outbound
-        return None
+        # Clear existing inbounds except API inbound
+        api_inbound = next((inb for inb in self["inbounds"] if inb["tag"] == "API_GRPC_INBOUND"), None)
+        self["inbounds"] = [api_inbound] if api_inbound else []
 
-    def to_json(self, **json_kwargs):
-        # Return a JSON representation of self (the main dict)
-        return json.dumps(dict(self), **json_kwargs)
+        # Process each service configuration
+        for service in node_orm.service_configurations:
+            if not service.enabled:
+                logger.debug(f"Skipping disabled service {service.id} on node {node_orm.name}")
+                continue
 
+            # Filter users for this service
+            relevant_users = [
+                user for user in users_on_node
+                if any(p.type == service.protocol_type for p in user.proxies)
+            ]
 
-    def copy(self) -> XRayConfig: # Ensure it returns an instance of XRayConfig
-        # Create a new XRayConfig instance from a deepcopy of the current instance's dictionary data.
-        # This ensures that the new instance also goes through __init__ processing if necessary,
-        # but for a simple copy of the dict content that's already processed, a direct deepcopy is fine.
-        # However, to maintain integrity of api_host/port and re-run resolutions:
-        new_config_dict = deepcopy(dict(self))
-        return XRayConfig(config_dict=new_config_dict, api_host=self.api_host, api_port=self.api_port)
+            if not relevant_users and service.protocol_type not in (ProxyTypes.HTTP, ProxyTypes.SOCKS):
+                logger.warning(f"No relevant users found for service {service.id} on node {node_orm.name}")
+                continue
 
+            # Generate inbound configuration
+            inbound_dict = self._generate_inbound_dict(service, relevant_users)
+            self["inbounds"].append(inbound_dict)
 
-    def include_db_users(self) -> XRayConfig:
-        logger.debug("XRayConfig.include_db_users: Starting to include DB users in config")
-        config_with_users = self.copy()
-        logger.debug("XRayConfig.include_db_users: Created copy of base config")
-
-        with GetDB() as db:
-            logger.debug("XRayConfig.include_db_users: Querying active users from database")
-            query = db.query(
-                db_models.User.id,
-                db_models.User.account_number,
-                func.lower(db_models.Proxy.type).label('proxy_type_value'),
-                db_models.Proxy.settings
-            ).join(
-                db_models.Proxy, db_models.User.id == db_models.Proxy.user_id
-            ).filter(
-                db_models.User.status.in_([UserStatus.active, UserStatus.on_hold])
-            )
-            db_user_proxies = query.all()
-            logger.debug(f"XRayConfig.include_db_users: Found {len(db_user_proxies)} active users with proxies")
-
-            grouped_user_proxies_by_protocol = defaultdict(list)
-            for row in db_user_proxies:
-                grouped_user_proxies_by_protocol[row.proxy_type_value].append({
-                    "user_id": row.id,
-                    "account_number": row.account_number,
-                    "settings": row.settings
-                })
-            logger.debug(f"XRayConfig.include_db_users: Grouped users by protocol: {list(grouped_user_proxies_by_protocol.keys())}")
-
-            for original_inbound_tag, resolved_inbound_details in config_with_users.inbounds_by_tag.items():
-                inbound_protocol = resolved_inbound_details.get("protocol")
-                if not inbound_protocol:
-                    logger.debug(f"XRayConfig.include_db_users: Skipping inbound {original_inbound_tag} - no protocol defined")
-                    continue
-
-                users_for_this_protocol = grouped_user_proxies_by_protocol.get(inbound_protocol, [])
-                if not users_for_this_protocol:
-                    logger.debug(f"XRayConfig.include_db_users: No users found for protocol {inbound_protocol} in inbound {original_inbound_tag}")
-                    continue
-
-                logger.debug(f"XRayConfig.include_db_users: Processing {len(users_for_this_protocol)} users for protocol {inbound_protocol} in inbound {original_inbound_tag}")
-                target_inbound_dict = config_with_users.get_inbound(original_inbound_tag)
-                if not target_inbound_dict or "settings" not in target_inbound_dict:
-                    logger.error(f"XRayConfig.include_db_users: Invalid inbound configuration for {original_inbound_tag}")
-                    continue
-
-                if "clients" not in target_inbound_dict["settings"]:
-                    target_inbound_dict["settings"]["clients"] = []
-
-                target_inbound_dict["settings"]["clients"] = []
-
-                for user_proxy_data in users_for_this_protocol:
-                    client_entry = {
-                        "email": f"{user_proxy_data['user_id']}.{user_proxy_data['account_number']}",
-                        **user_proxy_data["settings"]
-                    }
-
-                    if client_entry.get('flow') and (
-                            resolved_inbound_details.get('network', 'tcp') not in ('tcp', 'raw', 'kcp') or
-                            (resolved_inbound_details.get('network', 'tcp') in ('tcp', 'raw', 'kcp') and
-                             resolved_inbound_details.get('tls') not in ('tls', 'reality')) or
-                            resolved_inbound_details.get('header_type') == 'http'
-                    ):
-                        logger.debug(f"XRayConfig.include_db_users: Removing flow from client {client_entry['email']} due to incompatible settings")
-                        client_entry_copy = client_entry.copy()
-                        del client_entry_copy['flow']
-                        target_inbound_dict["settings"]["clients"].append(client_entry_copy)
-                    else:
-                        target_inbound_dict["settings"]["clients"].append(client_entry)
-
-                logger.debug(f"XRayConfig.include_db_users: Added {len(target_inbound_dict['settings']['clients'])} clients to inbound {original_inbound_tag}")
+        logger.info(f"XRayConfig.build_node_config: Built config for node {node_orm.name} with {len(self['inbounds'])} inbounds")
 
         if DEBUG:
             try:
-                debug_file = 'generated_config_with_users-debug.json'
-                logger.debug(f"XRayConfig.include_db_users: Writing debug config to {debug_file}")
+                debug_file = f'generated_config_node_{node_orm.id}-debug.json'
+                logger.debug(f"Writing debug config to {debug_file}")
                 with open(debug_file, 'w') as f:
-                    f.write(config_with_users.to_json(indent=4))
-                logger.debug("XRayConfig.include_db_users: Successfully wrote debug config file")
+                    f.write(self.to_json(indent=4))
             except Exception as e:
-                logger.error(f"XRayConfig.include_db_users: Error writing debug config: {str(e)}")
+                logger.error(f"Error writing debug config: {e}")
 
-        logger.debug("XRayConfig.include_db_users: Finished including DB users in config")
-        return config_with_users
+        return self
+
+    def copy(self) -> "XRayConfig":
+        """Create a deep copy of this configuration."""
+        new_dict = deepcopy(dict(self))
+        new_instance = XRayConfig(base_template_path=None,
+                                node_api_host=self.node_api_host,
+                                node_api_port=self.node_api_port)
+        new_instance.clear()
+        new_instance.update(new_dict)
+        return new_instance
+
+    def as_dict(self) -> dict:
+        """Return the configuration as a plain dictionary."""
+        return dict(self)
+
+    def to_json(self, **json_kwargs):
+        """Convert the configuration to a JSON string."""
+        return json.dumps(dict(self), **json_kwargs)

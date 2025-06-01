@@ -30,6 +30,11 @@ import {
   Tooltip,
   useToast,
   VStack,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
 } from "@chakra-ui/react";
 import {
   EyeIcon,
@@ -68,6 +73,7 @@ import { DeleteIcon } from "./DeleteUserModal";
 import { ReloadIcon } from "./Filters";
 import { Icon } from "./Icon";
 import { NodeModalStatusBadge } from "./NodeModalStatusBadge";
+import { NodeServicesConfigurator } from './NodeServicesConfigurator';
 
 import { fetch } from "service/http";
 import { Input } from "./Input";
@@ -184,50 +190,59 @@ const NodeAccordion: FC<AccordionInboundType> = ({ toggleAccordion, node }) => {
         <AccordionIcon />
       </AccordionButton>
       <AccordionPanel px={2} pb={2}>
-        <VStack pb={3} alignItems="flex-start">
-          {nodeStatus === "error" && (
-            <Alert status="error" size="xs">
-              <Box>
-                <HStack w="full">
-                  <AlertIcon w={4} />
-                  <Text marginInlineEnd={0}>{node.message}</Text>
-                </HStack>
-                <HStack justifyContent="flex-end" w="full">
-                  <Button
-                    size="sm"
-                    aria-label="reconnect node"
-                    leftIcon={<ReloadIcon />}
-                    onClick={() => reconnect()}
-                    disabled={isReconnecting}
-                  >
-                    {isReconnecting
-                      ? t("nodes.reconnecting")
-                      : t("nodes.reconnect")}
-                  </Button>
-                </HStack>
-              </Box>
-            </Alert>
-          )}
-        </VStack>
-        <NodeForm
-          form={form}
-          mutate={mutate}
-          isLoading={isLoading}
-          submitBtnText={t("nodes.editNode")}
-          btnLeftAdornment={
-            <Tooltip label={t("delete")} placement="top">
-              <IconButton
-                colorScheme="red"
-                variant="ghost"
-                size="sm"
-                aria-label="delete node"
-                onClick={handleDeleteNode}
-              >
-                <DeleteIcon />
-              </IconButton>
-            </Tooltip>
-          }
-        />
+        <Tabs>
+          <TabList>
+            <Tab>Basic Settings</Tab>
+            <Tab>Services</Tab>
+          </TabList>
+
+          <TabPanels>
+            <TabPanel>
+              <VStack pb={3} alignItems="flex-start">
+                {nodeStatus === "error" && (
+                  <Alert status="error" size="xs">
+                    <Box>
+                      <HStack w="full">
+                        <AlertIcon w={4} />
+                        <Text marginInlineEnd={0}>{node.message}</Text>
+                      </HStack>
+                      <HStack justifyContent="flex-end" w="full">
+                        <Button
+                          size="sm"
+                          aria-label="reconnect node"
+                          leftIcon={<ReloadIcon />}
+                          onClick={() => reconnect()}
+                          isLoading={isReconnecting}
+                        >
+                          {t("Reconnect")}
+                        </Button>
+                      </HStack>
+                    </Box>
+                  </Alert>
+                )}
+                <NodeForm
+                  form={form}
+                  mutate={mutate}
+                  isLoading={isLoading}
+                  submitBtnText={t("Update")}
+                  btnLeftAdornment={
+                    <IconButton
+                      aria-label="delete node"
+                      icon={<DeleteIcon />}
+                      colorScheme="red"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDeleteNode}
+                    />
+                  }
+                />
+              </VStack>
+            </TabPanel>
+            <TabPanel>
+              {typeof node.id === 'number' && <NodeServicesConfigurator nodeId={node.id} />}
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
       </AccordionPanel>
     </AccordionItem>
   );
@@ -248,10 +263,7 @@ const AddNodeForm: FC<AddNodeFormType> = ({
   const { addNode } = useNodes();
   const form = useForm<NodeType>({
     resolver: zodResolver(NodeSchema),
-    defaultValues: {
-      ...getNodeDefaultValues(),
-      add_as_new_host: false,
-    },
+    defaultValues: getNodeDefaultValues(),
   });
   const { isLoading, mutate } = useMutation(addNode, {
     onSuccess: () => {
@@ -632,13 +644,6 @@ const NodeForm: NodeFormType = ({
           </AccordionItem>
         </Accordion>
 
-        {addAsHost && (
-          <FormControl py={1}>
-            <Checkbox {...form.register("add_as_new_host")}>
-              <FormLabel m={0}>{t("nodes.addHostForEveryInbound")}</FormLabel>
-            </Checkbox>
-          </FormControl>
-        )}
         <HStack w="full">
           {btnLeftAdornment}
           <Button
@@ -682,14 +687,14 @@ export const NodesDialog: FC = () => {
     <>
       <Modal isOpen={isEditingNodes} onClose={onClose}>
         <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-        <ModalContent mx="3" w="fit-content" maxW="3xl">
+        <ModalContent mx="3" w="fit-content" maxW="6xl">
           <ModalHeader pt={6}>
             <Icon color="primary">
               <ModalIcon color="white" />
             </Icon>
           </ModalHeader>
           <ModalCloseButton mt={3} />
-          <ModalBody w="440px" pb={6} pt={3}>
+          <ModalBody w="800px" pb={6} pt={3}>
             <Text mb={3} opacity={0.8} fontSize="sm">
               {t("nodes.title")}
             </Text>

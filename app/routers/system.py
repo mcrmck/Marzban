@@ -6,7 +6,8 @@ from app import xray
 from app.version import __version__
 from app.db import Session, crud, get_db
 from app.models.admin import Admin
-from app.models.proxy import ProxyHost, ProxyInbound, ProxyTypes
+from app.db.models import NodeServiceConfiguration
+from app.models.node_service import NodeServiceConfigurationResponse
 from app.models.system import SystemStats
 from app.models.user import UserStatus
 from app.utils import responses
@@ -64,41 +65,43 @@ def get_system_stats(
     )
 
 
-@router.get("/inbounds", response_model=Dict[ProxyTypes, List[ProxyInbound]])
-def get_inbounds(admin: Admin = Depends(Admin.get_current)):
-    """Retrieve inbound configurations grouped by protocol."""
-    return xray.config.inbounds_by_protocol
-
-
 @router.get(
-    "/hosts", response_model=Dict[str, List[ProxyHost]], responses={403: responses._403}
+    "/hosts", response_model=Dict[str, List[NodeServiceConfigurationResponse]], responses={403: responses._403}
 )
 def get_hosts(
     db: Session = Depends(get_db), admin: Admin = Depends(Admin.check_sudo_admin)
 ):
-    """Get a list of proxy hosts grouped by inbound tag."""
-    hosts = {tag: crud.get_hosts(db, tag) for tag in xray.config.inbounds_by_tag}
+    """Get a list of service configurations grouped by inbound tag."""
+    hosts = {tag: crud.get_service_configurations(db, tag) for tag in xray.config.inbounds_by_tag}
     return hosts
 
 
 @router.put(
-    "/hosts", response_model=Dict[str, List[ProxyHost]], responses={403: responses._403}
+    "/hosts", response_model=Dict[str, List[NodeServiceConfigurationResponse]], responses={403: responses._403}
 )
 def modify_hosts(
-    modified_hosts: Dict[str, List[ProxyHost]],
+    modified_hosts: Dict[str, List[NodeServiceConfigurationResponse]],
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin),
 ):
-    """Modify proxy hosts and update the configuration."""
+    """Modify service configurations and update the configuration."""
     for inbound_tag in modified_hosts:
         if inbound_tag not in xray.config.inbounds_by_tag:
             raise HTTPException(
                 status_code=400, detail=f"Inbound {inbound_tag} doesn't exist"
             )
 
+    # Convert Pydantic models to SQLAlchemy models
+    db_hosts = {}
     for inbound_tag, hosts in modified_hosts.items():
-        crud.update_hosts(db, inbound_tag, hosts)
+        db_hosts[inbound_tag] = [
+            NodeServiceConfiguration(**host.model_dump(exclude={'id', 'node_id'}))
+            for host in hosts
+        ]
+
+    for inbound_tag, hosts in db_hosts.items():
+        crud.update_service_configurations(db, inbound_tag, hosts)
 
     xray.hosts.update()
 
-    return {tag: crud.get_hosts(db, tag) for tag in xray.config.inbounds_by_tag}
+    return {tag: crud.get_service_configurations(db, tag) for tag in xray.config.inbounds_by_tag}

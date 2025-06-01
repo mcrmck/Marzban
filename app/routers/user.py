@@ -144,7 +144,7 @@ def modify_user(
     user_response_for_bg_and_report = UserResponse.model_validate(dbuser_updated_orm)
 
     # xray.operations.update_user will handle logic based on new status and active_node_id
-    bg.add_task(xray.operations.update_user, user_payload=user_response_for_bg_and_report)
+    bg.add_task(xray.operations.update_user, user_id=dbuser_updated_orm.id)
 
     report.user_updated(
         user=user_response_for_bg_and_report,

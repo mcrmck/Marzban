@@ -1,11 +1,12 @@
 from functools import lru_cache
 from typing import TYPE_CHECKING, Optional, Dict, List
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import logger, xray # xray.api, xray.nodes, xray.config, xray.exc
 from app.db import GetDB, crud # crud is used for node status updates
+from app.db import models as db_models
 from app.models.node import NodeStatus
 from app.models.user import UserResponse, UserStatus # Added UserStatus
 from app.models.proxy import ProxyTypes # To iterate user.proxies if needed
@@ -13,11 +14,14 @@ from app.utils.concurrency import threaded_function
 from app.xray.node import XRayNode # For type hinting if node objects are passed directly
 # from xray_api import XRay as XRayAPI # Already available via xray.api and node.api
 from xray_api.types.account import Account, XTLSFlows # Account models for Xray API
+from app.xray.config import XRayConfig
+import config
 
 if TYPE_CHECKING:
     # from app.db import User as DBUser # No longer directly type hinting DBUser in public functions
     from app.db.models import Node as DBNode # For add_node
     from xray_api import XRay as XRayAPI # For type hinting api parameters
+    from app.db.models import NodeServiceConfiguration
 
 
 @lru_cache(maxsize=None)
@@ -126,28 +130,149 @@ def remove_user(account_number: str): # Called when user is fully deleted
         #    pass
 
 @threaded_function
-def update_user(user_payload: UserResponse): # user_payload is the *new* state
-    logger.info(f"Xray Ops: Updating user {user_payload.account_number} based on new payload.")
+def update_user(user_id: int):
+    """
+    Updates a user's configuration on their active node.
+    """
     with GetDB() as db:
-        db_user_orm = crud.get_user(db, user_payload.account_number)
-        if not db_user_orm:
-            logger.error(f"Update failed: User {user_payload.account_number} not found in DB.")
+        user = crud.get_user_by_id(db, user_id)
+        if not user:
+            logger.error(f"update_user: User ID {user_id} not found in database.")
             return
 
-        current_active_node_id = db_user_orm.active_node_id
+        if not user.active_node_id:
+            logger.info(f"User ID {user_id} has no active node. No update needed.")
+            return
 
-        if user_payload.status not in [UserStatus.active, UserStatus.on_hold]: # e.g. disabled, expired
-            if current_active_node_id is not None:
-                logger.info(f"User {user_payload.account_number} status is {user_payload.status}. Deactivating from node {current_active_node_id}.")
-                # Call the version that also clears DB active_node_id
-                deactivate_user_from_active_node(user_payload.account_number) # This is threaded, will open its own DB session
-        else: # User is active or on_hold
-            if current_active_node_id is not None:
-                logger.info(f"User {user_payload.account_number} is {user_payload.status} and active on node {current_active_node_id}. Re-applying config.")
-                # Re-activate to apply potentially changed proxy settings or ensure presence
-                # activate_user_on_node will handle XRay and also re-set active_node_id in DB (which is fine)
-                activate_user_on_node(user_payload.account_number, current_active_node_id) # This is threaded
-            # If they became active but weren't on a node, they need to explicitly activate one via API.
+        node = crud.get_node_by_id(db, user.active_node_id)
+        if not node:
+            logger.error(f"update_user: Node ID {user.active_node_id} not found in database.")
+            return
+
+        if node.status != NodeStatus.connected:
+            logger.warning(f"Node ID {user.active_node_id} is not connected. Attempting to connect first.")
+            connect_node(user.active_node_id)
+            return
+
+        node_instance = xray.nodes.get(user.active_node_id)
+        if not node_instance:
+            logger.error(f"update_user: Node ID {user.active_node_id} not found in xray.nodes.")
+            return
+
+        try:
+            # Build node-specific config with updated user
+            node_config_builder = XRayConfig(
+                base_template_path=config.XRAY_CONFIG_PATH,
+                node_api_port=node.api_port
+            )
+            users_on_node = crud.get_users_by_active_node_id(db, user.active_node_id)
+            node_specific_xray_config_obj = node_config_builder.build_node_config(node, users_on_node)
+
+            # Restart node with updated config
+            node_instance.restart(node_specific_xray_config_obj)
+            logger.info(f"Successfully updated user ID {user_id} on node ID {user.active_node_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to update user ID {user_id} on node ID {user.active_node_id}: {e}", exc_info=True)
+            _change_node_status(user.active_node_id, NodeStatus.error, message=str(e))
+
+@threaded_function
+def activate_user_on_node(user_id: int, node_id: int):
+    """
+    Activates a user on a specific node by updating their active_node_id and restarting the node.
+    """
+    with GetDB() as db:
+        user = crud.get_user_by_id(db, user_id)
+        if not user:
+            logger.error(f"activate_user_on_node: User ID {user_id} not found in database.")
+            return
+
+        node = crud.get_node_by_id(db, node_id)
+        if not node:
+            logger.error(f"activate_user_on_node: Node ID {node_id} not found in database.")
+            return
+
+        if node.status != NodeStatus.connected:
+            logger.warning(f"Node ID {node_id} is not connected. Attempting to connect first.")
+            connect_node(node_id)
+            return
+
+        # Update user's active node
+        user.active_node_id = node_id
+        db.commit()
+
+        node_instance = xray.nodes.get(node_id)
+        if not node_instance:
+            logger.error(f"activate_user_on_node: Node ID {node_id} not found in xray.nodes.")
+            return
+
+        try:
+            # Build node-specific config with activated user
+            node_config_builder = XRayConfig(
+                base_template_path=config.XRAY_CONFIG_PATH,
+                node_api_port=node.api_port
+            )
+            users_on_node = crud.get_users_by_active_node_id(db, node_id)
+            node_specific_xray_config_obj = node_config_builder.build_node_config(node, users_on_node)
+
+            # Restart node with updated config
+            node_instance.restart(node_specific_xray_config_obj)
+            logger.info(f"Successfully activated user ID {user_id} on node ID {node_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to activate user ID {user_id} on node ID {node_id}: {e}", exc_info=True)
+            _change_node_status(node_id, NodeStatus.error, message=str(e))
+
+@threaded_function
+def deactivate_user(user_id: int):
+    """
+    Deactivates a user by removing them from their active node and restarting the node.
+    """
+    with GetDB() as db:
+        user = crud.get_user_by_id(db, user_id)
+        if not user:
+            logger.error(f"deactivate_user: User ID {user_id} not found in database.")
+            return
+
+        if not user.active_node_id:
+            logger.info(f"User ID {user_id} has no active node. No deactivation needed.")
+            return
+
+        node_id = user.active_node_id
+        node = crud.get_node_by_id(db, node_id)
+        if not node:
+            logger.error(f"deactivate_user: Node ID {node_id} not found in database.")
+            return
+
+        # Remove user from active node
+        user.active_node_id = None
+        db.commit()
+
+        if node.status != NodeStatus.connected:
+            logger.info(f"Node ID {node_id} is not connected. User deactivated in database only.")
+            return
+
+        node_instance = xray.nodes.get(node_id)
+        if not node_instance:
+            logger.error(f"deactivate_user: Node ID {node_id} not found in xray.nodes.")
+            return
+
+        try:
+            # Build node-specific config without the deactivated user
+            node_config_builder = XRayConfig(
+                base_template_path=config.XRAY_CONFIG_PATH,
+                node_api_port=node.api_port
+            )
+            users_on_node = crud.get_users_by_active_node_id(db, node_id)
+            node_specific_xray_config_obj = node_config_builder.build_node_config(node, users_on_node)
+
+            # Restart node with updated config
+            node_instance.restart(node_specific_xray_config_obj)
+            logger.info(f"Successfully deactivated user ID {user_id} from node ID {node_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to deactivate user ID {user_id} from node ID {node_id}: {e}", exc_info=True)
+            _change_node_status(node_id, NodeStatus.error, message=str(e))
 
 # --- Node Management ---
 # These functions seem mostly fine regarding their interaction with Xray nodes.
@@ -245,9 +370,9 @@ _connecting_nodes: Dict[int, bool] = {}
 
 
 @threaded_function
-def connect_node(node_id: int, config=None):
+def connect_node(node_id: int):
     """
-    Connects to a node, starts its Xray core with the given config (or full user config).
+    Connects to a node and starts its Xray core with a node-specific configuration.
     """
     global _connecting_nodes
 
@@ -255,49 +380,50 @@ def connect_node(node_id: int, config=None):
         logger.info(f"Node ID {node_id} connection already in progress. Skipping.")
         return
 
-    dbnode_for_connect: Optional["DBNode"] = None # Ensure type hint
-    with GetDB() as db: # Fetch DBNode details within this session
-        dbnode_for_connect = crud.get_node_by_id(db, node_id)
-
-    if not dbnode_for_connect:
-        logger.error(f"connect_node: Node ID {node_id} not found in database. Cannot connect.")
-        return
-
-    if dbnode_for_connect.status == NodeStatus.disabled:
-        logger.info(f"Node ID {node_id} ({dbnode_for_connect.name}) is disabled in DB. Skipping connection attempt.")
-        remove_node(node_id) # Ensure it's not in the active xray.nodes tracking
-        return
-
-    node_instance: Optional[XRayNode] = xray.nodes.get(dbnode_for_connect.id)
-    if not node_instance or (hasattr(node_instance, 'connected') and not node_instance.connected):
-        # If not tracked or explicitly not connected, (re)add it.
-        # add_node internally calls remove_node, so it ensures a fresh XRayNode object.
-        logger.info(f"Node ID {node_id} not found in xray.nodes or not connected. Attempting to (re)add.")
-        node_instance = add_node(dbnode_for_connect) # add_node returns the XRayNode instance
-        if not node_instance: # Should not happen if add_node is robust
-            logger.error(f"Failed to obtain XRayNode instance for node ID {node_id} in connect_node.")
-            return
-
-    # At this point, node_instance should be a valid XRayNode object from xray.nodes
-
     try:
         _connecting_nodes[node_id] = True
         _change_node_status(node_id, NodeStatus.connecting, message="Attempting to connect and start Xray...")
-        logger.info(f"Connecting to node \"{dbnode_for_connect.name}\" (ID: {node_id})")
 
-        if config is None:
-            logger.debug(f"No specific config provided for node {node_id}, generating full user config.")
-            config = xray.config.include_db_users() # This generates the XRayConfig object
+        # Get node instance
+        node_instance = xray.nodes.get(node_id)
+        if not node_instance:
+            with GetDB() as db:
+                dbnode_for_connect = crud.get_node_by_id(db, node_id)
+                if not dbnode_for_connect:
+                    logger.error(f"connect_node: Node ID {node_id} not found in database. Cannot connect.")
+                    return
+                if dbnode_for_connect.status == NodeStatus.disabled:
+                    logger.info(f"Node ID {node_id} ({dbnode_for_connect.name}) is disabled in DB. Skipping connection attempt.")
+                    remove_node(node_id)
+                    return
+                node_instance = add_node(dbnode_for_connect)
 
-        node_instance.start(config) # Pass the XRayConfig object (which is a dict subclass)
+        # Build node-specific config
+        with GetDB() as db:
+            node_orm = crud.get_node_by_id(db, node_id)
+            if not node_orm:
+                logger.error(f"connect_node: Node ID {node_id} not found in database during config build.")
+                return
+
+            # Load service configurations and users
+            users_on_this_node = crud.get_users_by_active_node_id(db, node_id)
+
+            # Create and build node-specific config
+            node_config_builder = XRayConfig(
+                base_template_path=config.XRAY_CONFIG_PATH,
+                node_api_port=node_orm.api_port
+            )
+            node_specific_xray_config_obj = node_config_builder.build_node_config(node_orm, users_on_this_node)
+
+        # Start the node with its specific config
+        node_instance.start(node_specific_xray_config_obj)
         version = node_instance.get_version()
         _change_node_status(node_id, NodeStatus.connected, version=version, message="Successfully connected and Xray started.")
-        logger.info(f"Successfully connected to node \"{dbnode_for_connect.name}\". Xray version: {version}")
+        logger.info(f"Successfully connected to node \"{node_orm.name}\". Xray version: {version}")
 
     except Exception as e:
-        logger.error(f"Failed to connect/start node \"{dbnode_for_connect.name}\" (ID: {node_id}): {e}", exc_info=True)
+        logger.error(f"Failed to connect/start node ID {node_id}: {e}", exc_info=True)
         _change_node_status(node_id, NodeStatus.error, message=str(e))
-        # Optionally try to disconnect if start failed partially
         try:
             if node_instance and hasattr(node_instance, 'disconnect'):
                 node_instance.disconnect()
@@ -309,49 +435,54 @@ def connect_node(node_id: int, config=None):
 
 
 @threaded_function
-def restart_node(node_id: int, config=None):
+def restart_node(node_id: int):
     """
-    Restarts the Xray core on a specific node with the given config (or full user config).
+    Restarts the Xray core on a specific node with a node-specific configuration.
     """
-    dbnode_for_restart: Optional["DBNode"] = None
     with GetDB() as db:
         dbnode_for_restart = crud.get_node_by_id(db, node_id)
+        if not dbnode_for_restart:
+            logger.error(f"restart_node: Node ID {node_id} not found in database. Cannot restart.")
+            return
 
-    if not dbnode_for_restart:
-        logger.error(f"restart_node: Node ID {node_id} not found in database. Cannot restart.")
-        return
+        if dbnode_for_restart.status == NodeStatus.disabled:
+            logger.info(f"Node ID {node_id} ({dbnode_for_restart.name}) is disabled. Skipping restart.")
+            return
 
-    if dbnode_for_restart.status == NodeStatus.disabled:
-        logger.info(f"Node ID {node_id} ({dbnode_for_restart.name}) is disabled. Skipping restart.")
-        return
-
-    node_instance = xray.nodes.get(dbnode_for_restart.id)
+    node_instance = xray.nodes.get(node_id)
     if not node_instance:
-        logger.warning(f"Node ID {node_id} not found in tracked xray.nodes. Attempting to add and connect first.")
-        # If node isn't tracked, it implies it wasn't connected. Try to connect it.
-        connect_node(node_id, config) # connect_node will handle adding it to xray.nodes
-        return # connect_node is threaded, so this function call ends here.
+        logger.warning(f"Node ID {node_id} not found in tracked xray.nodes. Attempting to connect first.")
+        connect_node(node_id)
+        return
 
     if not node_instance.connected or not node_instance.started:
-        logger.warning(f"Node ID {node_id} ({dbnode_for_restart.name}) is not connected/started. Attempting to connect instead of restart.")
-        connect_node(node_id, config)
+        logger.warning(f"Node ID {node_id} is not connected/started. Attempting to connect instead of restart.")
+        connect_node(node_id)
         return
 
     try:
-        _change_node_status(node_id, NodeStatus.connecting, message="Restarting Xray core...") # Show as connecting during restart
-        logger.info(f"Restarting Xray core of node \"{dbnode_for_restart.name}\" (ID: {node_id})")
+        _change_node_status(node_id, NodeStatus.connecting, message="Restarting Xray core...")
 
-        if config is None:
-            logger.debug(f"No specific config provided for node {node_id} restart, generating full user config.")
-            config = xray.config.include_db_users()
+        # Build node-specific config
+        with GetDB() as db:
+            node_orm = crud.get_node_by_id(db, node_id)
+            users_on_this_node = crud.get_users_by_active_node_id(db, node_id)
 
-        node_instance.restart(config) # Pass XRayConfig object
-        version = node_instance.get_version() # Get version after restart
+            # Create and build node-specific config
+            node_config_builder = XRayConfig(
+                base_template_path=config.XRAY_CONFIG_PATH,
+                node_api_port=node_orm.api_port
+            )
+            node_specific_xray_config_obj = node_config_builder.build_node_config(node_orm, users_on_this_node)
+
+        # Restart the node with its specific config
+        node_instance.restart(node_specific_xray_config_obj)
+        version = node_instance.get_version()
         _change_node_status(node_id, NodeStatus.connected, version=version, message="Xray core restarted successfully.")
         logger.info(f"Xray core of node \"{dbnode_for_restart.name}\" restarted. Current version: {version}")
 
     except Exception as e:
-        logger.error(f"Failed to restart Xray core on node \"{dbnode_for_restart.name}\" (ID: {node_id}): {e}", exc_info=True)
+        logger.error(f"Failed to restart Xray core on node ID {node_id}: {e}", exc_info=True)
         _change_node_status(node_id, NodeStatus.error, message=str(e))
         try:
             if node_instance and hasattr(node_instance, 'disconnect'):
@@ -494,6 +625,18 @@ def get_tls():
             "key": tls_orm.key,
             "certificate": tls_orm.certificate
         }
+
+# Add new CRUD function for getting users by active node ID
+def get_users_by_active_node_id(db: Session, node_id: int) -> List[db_models.User]:
+    """Get all users with the given active_node_id, with their proxies loaded."""
+    return db.query(db_models.User).options(
+        joinedload(db_models.User.proxies)
+    ).filter(
+        db_models.User.active_node_id == node_id
+    ).all()
+
+# Add to crud module
+crud.get_users_by_active_node_id = get_users_by_active_node_id
 
 __all__ = [
     "add_user",

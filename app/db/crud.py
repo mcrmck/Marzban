@@ -24,16 +24,15 @@ from app.db.models import (
     NodeUserUsage,
     NotificationReminder,
     Proxy,
-    ProxyHost as DBProxyHost, # Renamed to avoid conflict with Pydantic model
-    ProxyInbound,
     System,
     User as DBUser, # Renamed to avoid conflict with Pydantic model
     UserTemplate,
     UserUsageResetLogs,
+    NodeServiceConfiguration,
 )
 from app.models.admin import AdminCreate, AdminModify, AdminPartialModify
 from app.models.node import NodeCreate, NodeModify, NodeStatus, NodeUsageResponse
-from app.models.proxy import ProxyHost as ProxyHostModify # Pydantic model
+from app.models.node_service import NodeServiceConfigurationCreate, NodeServiceConfigurationUpdate
 from app.models.proxy import ProxyTypes
 from app.models.user import (
     ReminderType,
@@ -52,149 +51,6 @@ import logging
 
 # Set logging level to DEBUG
 logger.setLevel(logging.DEBUG)
-
-
-def add_default_host(db: Session, inbound: ProxyInbound):
-    """
-    Adds a default host to a proxy inbound.
-
-    Args:
-        db (Session): Database session.
-        inbound (ProxyInbound): Proxy inbound to add the default host to.
-    """
-    host = DBProxyHost(remark="🚀 Marz ({USERNAME}) [{PROTOCOL} - {TRANSPORT}]", address="{SERVER_IP}", inbound=inbound)
-    db.add(host)
-    db.commit()
-
-
-def get_or_create_inbound(db: Session, inbound_tag: str) -> ProxyInbound:
-    """
-    Retrieves or creates a proxy inbound based on the given tag.
-
-    Args:
-        db (Session): Database session.
-        inbound_tag (str): The tag of the inbound.
-
-    Returns:
-        ProxyInbound: The retrieved or newly created proxy inbound.
-    """
-    inbound = db.query(ProxyInbound).filter(ProxyInbound.tag == inbound_tag).first()
-    if not inbound:
-        inbound = ProxyInbound(tag=inbound_tag)
-        db.add(inbound)
-        db.commit()
-        add_default_host(db, inbound)
-        db.refresh(inbound)
-    return inbound
-
-
-def get_hosts(db: Session, inbound_tag: str) -> List[DBProxyHost]:
-    """
-    Retrieves hosts for a given inbound tag.
-    Note: For the new model, you'll likely use get_proxy_hosts_by_node_id more often.
-
-    Args:
-        db (Session): Database session.
-        inbound_tag (str): The tag of the inbound.
-
-    Returns:
-        List[DBProxyHost]: List of hosts for the inbound.
-    """
-    inbound = get_or_create_inbound(db, inbound_tag)
-    return inbound.hosts
-
-
-def add_host(db: Session, inbound_tag: str, host_data: ProxyHostModify, node_id: Optional[int] = None) -> List[DBProxyHost]:
-    """
-    Adds a new host to a proxy inbound, optionally associating it with a node.
-
-    Args:
-        db (Session): Database session.
-        inbound_tag (str): The tag of the inbound.
-        host_data (ProxyHostModify): Host details to be added (Pydantic model).
-        node_id (Optional[int]): The ID of the node this host is associated with.
-
-
-    Returns:
-        List[DBProxyHost]: Updated list of hosts for the inbound.
-    """
-    inbound = get_or_create_inbound(db, inbound_tag)
-    new_db_host = DBProxyHost(
-            remark=host_data.remark,
-            address=host_data.address,
-            port=host_data.port,
-            path=host_data.path,
-            sni=host_data.sni,
-            host=host_data.host,
-            inbound_tag=inbound.tag, # Set inbound_tag directly
-            node_id=node_id, # Associate with a node
-            security=host_data.security,
-            alpn=host_data.alpn,
-            fingerprint=host_data.fingerprint,
-            allowinsecure=host_data.allowinsecure,
-            is_disabled=host_data.is_disabled,
-            mux_enable=host_data.mux_enable,
-            fragment_setting=host_data.fragment_setting,
-            noise_setting=host_data.noise_setting,
-            random_user_agent=host_data.random_user_agent,
-            use_sni_as_host=host_data.use_sni_as_host
-        )
-    # inbound.hosts.append(new_db_host) # Adding directly to session is fine
-    db.add(new_db_host)
-    db.commit()
-    db.refresh(inbound) # Refresh inbound to reflect new host in its collection if needed by caller
-    return inbound.hosts
-
-
-def update_hosts(db: Session, inbound_tag: str, modified_hosts_data: List[ProxyHostModify]) -> List[DBProxyHost]:
-    """
-    Updates hosts for a given inbound tag. This replaces all existing hosts for the inbound.
-    NOTE: This function replaces ALL hosts for an inbound_tag. If hosts can be associated with different nodes
-    but share an inbound_tag, this wholesale replacement might be too broad. Consider if you need
-    to update hosts on a per-node basis for a given inbound_tag instead.
-
-    Args:
-        db (Session): Database session.
-        inbound_tag (str): The tag of the inbound.
-        modified_hosts_data (List[ProxyHostModify]): List of modified hosts (Pydantic models).
-
-    Returns:
-        List[DBProxyHost]: Updated list of hosts for the inbound.
-    """
-    inbound = get_or_create_inbound(db, inbound_tag)
-
-    # Delete existing hosts for this specific inbound tag
-    db.query(DBProxyHost).filter(DBProxyHost.inbound_tag == inbound_tag).delete(synchronize_session=False)
-    db.flush()
-
-    new_host_objects = []
-    for host_data in modified_hosts_data:
-        new_db_host = DBProxyHost(
-            remark=host_data.remark,
-            address=host_data.address,
-            port=host_data.port,
-            path=host_data.path,
-            sni=host_data.sni,
-            host=host_data.host,
-            inbound_tag=inbound.tag,
-            node_id=host_data.node_id, # Assuming ProxyHostModify Pydantic model now includes node_id
-            security=host_data.security,
-            alpn=host_data.alpn,
-            fingerprint=host_data.fingerprint,
-            allowinsecure=host_data.allowinsecure,
-            is_disabled=host_data.is_disabled,
-            mux_enable=host_data.mux_enable,
-            fragment_setting=host_data.fragment_setting,
-            noise_setting=host_data.noise_setting,
-            random_user_agent=host_data.random_user_agent,
-            use_sni_as_host=host_data.use_sni_as_host,
-        )
-        new_host_objects.append(new_db_host)
-
-    db.add_all(new_host_objects)
-    db.commit()
-    db.refresh(inbound)
-    return inbound.hosts
 
 
 def get_user_queryset(db: Session) -> Query:
@@ -1037,21 +893,16 @@ def get_users_by_active_node(db: Session, node_id: int) -> List[DBUser]:
     return get_user_queryset(db).filter(DBUser.active_node_id == node_id).all()
 
 
-def get_proxy_hosts_by_node_id(db: Session, node_id: int) -> List[DBProxyHost]:
-    """
-    Retrieves all ProxyHost records associated with a specific node_id.
-    """
-    return db.query(DBProxyHost).filter(DBProxyHost.node_id == node_id).all()
-
 def update_user_instance(db: Session, db_user: DBUser) -> DBUser:
     """
     Generic update for a user instance that's already been modified in the session.
     Adds to session (idempotent if already there), commits, and refreshes.
     """
-    db.add(db_user) # Ensures the object is in the session if it wasn't already attached or was modified
+    db.add(db_user)
     db.commit()
     db.refresh(db_user)
     return db_user
+
 
 def get_users_for_usage_mapping(db: Session) -> List[Tuple[int, str]]:
     """
@@ -1173,3 +1024,182 @@ def store_panel_tls_credentials(db: Session, key: str, certificate: str) -> TLS:
     db.commit()
     db.refresh(tls_entry)
     return tls_entry
+
+# --- Node Service Configuration CRUD functions ---
+def get_node_service(db: Session, id: int) -> Optional[NodeServiceConfiguration]:
+    """Get a service configuration by its ID."""
+    return db.query(NodeServiceConfiguration).filter(NodeServiceConfiguration.id == id).first()
+
+def get_node_service_by_tag(db: Session, xray_inbound_tag: str) -> Optional[NodeServiceConfiguration]:
+    """Get a service configuration by its Xray inbound tag."""
+    return db.query(NodeServiceConfiguration).filter(NodeServiceConfiguration.xray_inbound_tag == xray_inbound_tag).first()
+
+def get_services_for_node(
+    db: Session,
+    node_id: int,
+    skip: int = 0,
+    limit: int = 100
+) -> List[NodeServiceConfiguration]:
+    """Get all service configurations for a specific node."""
+    return (
+        db.query(NodeServiceConfiguration)
+        .filter(NodeServiceConfiguration.node_id == node_id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_service_for_node(
+    db: Session,
+    id: int,
+    node_id: int
+) -> Optional[NodeServiceConfiguration]:
+    """Get a specific service configuration, ensuring it belongs to the specified node."""
+    return (
+        db.query(NodeServiceConfiguration)
+        .filter(
+            NodeServiceConfiguration.id == id,
+            NodeServiceConfiguration.node_id == node_id
+        )
+        .first()
+    )
+
+def create_with_node(
+    db: Session,
+    obj_in: NodeServiceConfigurationCreate,
+    node_id: int
+) -> NodeServiceConfiguration:
+    """Create a new service configuration for a specific node."""
+    # Generate xray_inbound_tag if not provided
+    if not obj_in.xray_inbound_tag:
+        obj_in.xray_inbound_tag = f"node{node_id}_proto{obj_in.protocol_type.value}_port{obj_in.listen_port}"
+
+    # Check for tag collisions on this node
+    existing = get_node_service_by_tag(db, obj_in.xray_inbound_tag)
+    if existing and existing.node_id == node_id:
+        raise ValueError(f"Service with tag {obj_in.xray_inbound_tag} already exists on this node")
+
+    db_obj = NodeServiceConfiguration(
+        node_id=node_id,
+        **obj_in.model_dump()
+    )
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    return db_obj
+
+def update(
+    db: Session,
+    db_obj: NodeServiceConfiguration,
+    obj_in: NodeServiceConfigurationUpdate
+) -> NodeServiceConfiguration:
+    """Update a service configuration."""
+    update_data = obj_in.model_dump(exclude_unset=True)
+
+    # Handle xray_inbound_tag updates carefully
+    if 'xray_inbound_tag' in update_data:
+        new_tag = update_data['xray_inbound_tag']
+        existing = get_node_service_by_tag(db, new_tag)
+        if existing and existing.id != db_obj.id:
+            raise ValueError(f"Service with tag {new_tag} already exists")
+
+    for field, value in update_data.items():
+        setattr(db_obj, field, value)
+
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    return db_obj
+
+def remove(db: Session, id: int) -> Optional[NodeServiceConfiguration]:
+    """Remove a service configuration."""
+    obj = db.query(NodeServiceConfiguration).get(id)
+    if obj:
+        db.delete(obj)
+        db.commit()
+    return obj
+
+def ensure_all_default_proxies_for_user(db: Session, user_id: int) -> None:
+    """
+    Ensures a user has default proxy credentials for all standard proxy types.
+    Creates any missing proxy types with secure default settings.
+    """
+    from app.models.proxy import ProxyTypes
+    import uuid
+    import secrets
+    from app.db.models import User, Proxy
+
+    # Fetch user and verify existence
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        logger.error(f"ensure_all_default_proxies_for_user: User ID {user_id} not found.")
+        return
+
+    # Get existing proxy types for the user
+    existing_proxy_types = {p.type for p in db_user.proxies}
+
+    # Define default settings for each proxy type
+    default_settings = {
+        ProxyTypes.VLESS: {"id": str(uuid.uuid4()), "flow": "xtls-rprx-vision"},
+        ProxyTypes.VMess: {"id": str(uuid.uuid4()), "alterId": 0},
+        ProxyTypes.Trojan: {"password": secrets.token_urlsafe(16)},
+        ProxyTypes.Shadowsocks: {"method": "aes-256-gcm", "password": secrets.token_urlsafe(16)}
+    }
+
+    # Track if any new proxies were added
+    new_proxies_added = False
+
+    # Iterate through all standard proxy types
+    for proxy_type in [ProxyTypes.VLESS, ProxyTypes.VMess, ProxyTypes.Trojan, ProxyTypes.Shadowsocks]:
+        if proxy_type not in existing_proxy_types:
+            logger.info(f"Creating default {proxy_type.value} proxy settings for user {db_user.account_number}")
+
+            # Create new proxy with default settings
+            db_proxy = Proxy(
+                user_id=user_id,
+                type=proxy_type,
+                settings=default_settings[proxy_type]
+            )
+            db.add(db_proxy)
+            new_proxies_added = True
+
+    # Commit changes if any new proxies were added
+    if new_proxies_added:
+        db.commit()
+        logger.info(f"Successfully created default proxy settings for user {db_user.account_number}")
+
+def get_service_configurations(db: Session, inbound_tag: str) -> List[NodeServiceConfiguration]:
+    """Get all service configurations for a given inbound tag."""
+    return db.query(NodeServiceConfiguration).filter(
+        NodeServiceConfiguration.xray_inbound_tag == inbound_tag
+    ).all()
+
+def update_service_configurations(
+    db: Session,
+    inbound_tag: str,
+    configurations: List[NodeServiceConfiguration]
+) -> None:
+    """Update service configurations for a given inbound tag."""
+    # First, get existing configurations
+    existing = get_service_configurations(db, inbound_tag)
+
+    # Delete configurations that are no longer present
+    existing_ids = {c.id for c in existing}
+    new_ids = {c.id for c in configurations if c.id is not None}
+    to_delete = existing_ids - new_ids
+
+    if to_delete:
+        db.query(NodeServiceConfiguration).filter(
+            NodeServiceConfiguration.id.in_(to_delete)
+        ).delete(synchronize_session=False)
+
+    # Update or create configurations
+    for config in configurations:
+        if config.id is None:
+            # New configuration
+            db.add(config)
+        else:
+            # Update existing configuration
+            db.merge(config)
+
+    db.commit()

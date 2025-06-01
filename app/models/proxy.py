@@ -1,10 +1,9 @@
 import json
-import re
 from enum import Enum
 from typing import Optional, Union
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.utils.system import random_password
 from xray_api.types.account import (
@@ -16,19 +15,14 @@ from xray_api.types.account import (
     XTLSFlows,
 )
 
-FRAGMENT_PATTERN = re.compile(r'^((\d{1,4}-\d{1,4})|(\d{1,4})),((\d{1,3}-\d{1,3})|(\d{1,3})),(tlshello|\d|\d\-\d)$')
-
-NOISE_PATTERN = re.compile(
-    r'^(rand:(\d{1,4}-\d{1,4}|\d{1,4})|str:.+|hex:.+|base64:.+)(,(\d{1,4}-\d{1,4}|\d{1,4}))?(&(rand:(\d{1,4}-\d{1,4}|\d{1,4})|str:.+|hex:.+|base64:.+)(,(\d{1,4}-\d{1,4}|\d{1,4}))?)*$')
-
-
 class ProxyTypes(str, Enum):
     # proxy_type = protocol
-
     VMess = "vmess"
     VLESS = "vless"
     Trojan = "trojan"
     Shadowsocks = "shadowsocks"
+    HTTP = "http"
+    SOCKS = "socks"
 
     @property
     def account_model(self):
@@ -40,6 +34,7 @@ class ProxyTypes(str, Enum):
             return TrojanAccount
         if self == self.Shadowsocks:
             return ShadowsocksAccount
+        return None
 
     @property
     def settings_model(self):
@@ -51,6 +46,7 @@ class ProxyTypes(str, Enum):
             return TrojanSettings
         if self == self.Shadowsocks:
             return ShadowsocksSettings
+        return None
 
 
 class ProxySettings(BaseModel, use_enum_values=True):
@@ -102,140 +98,3 @@ class ShadowsocksSettings(ProxySettings):
                 data['method'] = method_value.value
             # If it's already a string, leave it as is
         return data
-
-
-class ProxyHostSecurity(str, Enum):
-    inbound_default = "inbound_default"
-    none = "none"
-    tls = "tls"
-
-
-ProxyHostALPN = Enum(
-    "ProxyHostALPN",
-    {
-        "none": "",
-        "h3": "h3",
-        "h2": "h2",
-        "http/1.1": "http/1.1",
-        "h3,h2,http/1.1": "h3,h2,http/1.1",
-        "h3,h2": "h3,h2",
-        "h2,http/1.1": "h2,http/1.1",
-    },
-)
-
-
-ProxyHostFingerprint = Enum(
-    "ProxyHostFingerprint",
-    {
-        "none": "",
-        "chrome": "chrome",
-        "firefox": "firefox",
-        "safari": "safari",
-        "ios": "ios",
-        "android": "android",
-        "edge": "edge",
-        "360": "360",
-        "qq": "qq",
-        "random": "random",
-        "randomized": "randomized",
-    },
-)
-
-
-class FormatVariables(dict):
-    def __missing__(self, key):
-        return key.join("{}")
-
-
-class ProxyHost(BaseModel):
-    remark: str
-    address: str
-    port: Optional[int] = Field(None, nullable=True)
-    sni: Optional[str] = Field(None, nullable=True)
-    host: Optional[str] = Field(None, nullable=True)
-    path: Optional[str] = Field(None, nullable=True)
-    security: ProxyHostSecurity = ProxyHostSecurity.inbound_default
-    alpn: ProxyHostALPN = ProxyHostALPN.none
-    fingerprint: ProxyHostFingerprint = ProxyHostFingerprint.none
-    allowinsecure: Union[bool, None] = None
-    is_disabled: Union[bool, None] = None
-    mux_enable: Union[bool, None] = None
-    fragment_setting: Optional[str] = Field(None, nullable=True)
-    noise_setting: Optional[str] = Field(None, nullable=True)
-    random_user_agent: Union[bool, None] = None
-    use_sni_as_host: Union[bool, None] = None
-    model_config = ConfigDict(from_attributes=True)
-
-    @field_validator("remark", mode="after")
-    def validate_remark(cls, v):
-        try:
-            v.format_map(FormatVariables())
-        except ValueError as exc:
-            raise ValueError("Invalid formatting variables")
-
-        return v
-
-    @field_validator("address", mode="after")
-    def validate_address(cls, v):
-        try:
-            v.format_map(FormatVariables())
-        except ValueError as exc:
-            raise ValueError("Invalid formatting variables")
-
-        return v
-
-    @field_validator("fragment_setting", check_fields=False)
-    @classmethod
-    def validate_fragment(cls, v):
-        if v and not FRAGMENT_PATTERN.match(v):
-            raise ValueError(
-                "Fragment setting must be like this: length,interval,packet (10-100,100-200,tlshello)."
-            )
-        return v
-
-    @field_validator("noise_setting", check_fields=False)
-    @classmethod
-    def validate_noise(cls, v):
-        if v:
-            if not NOISE_PATTERN.match(v):
-                raise ValueError(
-                    "Noise setting must be like this: packet,delay (rand:10-20,100-200)."
-                )
-            if len(v) > 2000:
-                raise ValueError(
-                    "Noise can't be longer that 2000 character"
-                )
-        return v
-
-
-class ProxyInbound(BaseModel):
-    tag: str
-    protocol: ProxyTypes
-    network: str
-    tls: str
-    port: Union[int, str]
-
-class ProxyHostModify(BaseModel):
-    remark: str
-    address: str  # Address of the node or specific host
-    port: Optional[int] = None # Port from the inbound details
-    path: Optional[str] = None
-    sni: Optional[str] = None  # Can be node's address, or specific SNI for the host
-    host: Optional[str] = None # Can be node's address, or specific Host header for the host
-    security: Optional[ProxyHostSecurity] = ProxyHostSecurity.inbound_default # Default from enum
-    alpn: Optional[ProxyHostALPN] = ProxyHostALPN.none # Default from enum
-    fingerprint: Optional[ProxyHostFingerprint] = ProxyHostFingerprint.none # Default from enum
-    allowinsecure: Optional[bool] = False # Default to False for new hosts
-    is_disabled: Optional[bool] = False
-    mux_enable: Optional[bool] = False
-    fragment_setting: Optional[str] = None
-    noise_setting: Optional[str] = None
-    random_user_agent: Optional[bool] = False
-    use_sni_as_host: Optional[bool] = False
-    node_id: int  # Required: links this host to a specific node
-
-    class Config:
-        use_enum_values = True # For serialization behavior with enums
-        # Pydantic v2 uses model_config, Pydantic v1 uses class Config
-        # If using Pydantic v2, it would be:
-        # model_config = {"use_enum_values": True}

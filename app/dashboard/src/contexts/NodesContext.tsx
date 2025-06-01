@@ -22,7 +22,6 @@ export const NodeSchema = z.object({
     .nullable()
     .optional(),
   message: z.string().nullable().optional(),
-  add_as_new_host: z.boolean().optional(),
   usage_coefficient: z.number().or(z.string().transform((v) => parseFloat(v))),
   panel_client_cert: z.string().optional(),
   panel_client_key: z.string().optional(),

@@ -18,7 +18,6 @@ from app.models.node import (
     NodeStatus,
     NodesUsageResponse,
 )
-from app.models.proxy import ProxyHostModify, ProxyHostSecurity
 from app.models.node import Node as DBNode
 
 from app.utils import responses
@@ -29,87 +28,6 @@ LOG_BATCH_INTERVAL = 0.5  # Seconds between log batch sends
 router = APIRouter(
     tags=["Node"], prefix="/api", responses={401: responses._401, 403: responses._403}
 )
-
-
-def add_host_if_needed(dbnode_id: int, create_hosts_flag: bool): # Takes node_id
-    """Add a host for every inbound if specified flag is true, linked to the node."""
-    if not create_hosts_flag:
-        logger.info(f"Node ID {dbnode_id}: add_as_new_host is false. Skipping ProxyHost creation.")
-        return
-
-    with GetDB() as db: # Background task creates its own DB session
-        dbnode = crud.get_node_by_id(db, dbnode_id)
-        if not dbnode:
-            logger.error(f"add_host_if_needed: Node ID {dbnode_id} not found. Cannot create hosts.")
-            return
-
-        logger.info(f"Node '{dbnode.name}' (ID: {dbnode.id}): add_as_new_host is true. Creating ProxyHost entries.")
-
-        # Ensure xray.config is accessible; it holds the template inbounds
-        if not hasattr(xray, 'config') or not hasattr(xray.config, 'inbounds_by_tag'):
-            logger.error("xray.config or xray.config.inbounds_by_tag not available in add_host_if_needed. Cannot create hosts.")
-            return
-
-        created_hosts_count = 0
-        for inbound_tag, inbound_details in xray.config.inbounds_by_tag.items():
-            protocol = inbound_details.get("protocol", "PROTOCOL").upper()
-            # transport = inbound_details.get("streamSettings", {}).get("network", "TRANSPORT").upper() # Original, but might be confusing
-            transport = inbound_details.get("network", "TRANSPORT").upper() # Get network directly from resolved inbound
-
-            host_remark = f"{dbnode.name} ({inbound_tag}) [{protocol} - {transport}]"
-            host_address = dbnode.address # Use the node's address
-            host_port = inbound_details.get("port") # Port from the resolved inbound details
-
-            # For SNI/Host, using node's address is a sensible default.
-            # Security and path can also be derived from resolved inbound_details.
-            default_sni = dbnode.address
-            default_host_header = dbnode.address
-            default_path = inbound_details.get("path", "")
-
-            # Determine security. If inbound_details has 'tls' (e.g., 'tls', 'reality'), map to ProxyHostSecurity enum.
-            inbound_tls_setting = inbound_details.get("tls") # This is 'tls', 'reality', or 'none' from resolved config
-            host_security_enum = ProxyHostSecurity.inbound_default # Default
-            if inbound_tls_setting == "tls":
-                host_security_enum = ProxyHostSecurity.tls
-            elif inbound_tls_setting == "reality":
-                host_security_enum = ProxyHostSecurity.reality
-            elif inbound_tls_setting == "none": # explicit none
-                host_security_enum = ProxyHostSecurity.none
-
-
-            host_data = ProxyHostModify(
-                remark=host_remark,
-                address=host_address,
-                node_id=dbnode.id, # Crucially, link this host to the new node
-                port=host_port,
-                sni=default_sni, # Default based on node address
-                host=default_host_header, # Default based on node address
-                security=host_security_enum,
-                path=default_path, # Default based on resolved inbound path
-                is_disabled=False,
-                # Set other ProxyHostModify fields to sensible defaults if needed
-                # alpn, fingerprint, allowinsecure, mux_enable etc. will take their defaults from Pydantic model
-            )
-            try:
-                # crud.add_host in your provided crud.py takes (db, inbound_tag, host_data, node_id)
-                # but ProxyHostModify now includes node_id.
-                # Let's assume crud.add_host is adapted or we call a more direct creation.
-                # For now, assuming it can take host_data which includes node_id.
-                # If crud.add_host expects node_id separately, adjust this call.
-                # Based on your crud.py, add_host takes:
-                # add_host(db: Session, inbound_tag: str, host_data: ProxyHostModify, node_id: Optional[int] = None)
-                # The node_id in host_data should be sufficient. The extra node_id param in add_host might be redundant.
-                # Let's pass it anyway if the function expects it.
-                crud.add_host(db, inbound_tag, host_data, node_id=dbnode.id)
-                created_hosts_count += 1
-            except Exception as e:
-                logger.error(f"Failed to add host for inbound_tag '{inbound_tag}' on node '{dbnode.name}': {e}", exc_info=True)
-
-        if created_hosts_count > 0 and hasattr(xray, 'hosts') and callable(getattr(xray.hosts, 'update', None)):
-            logger.info(f"Created {created_hosts_count} new proxy hosts for node {dbnode.name}. Updating xray.hosts.")
-            xray.hosts.update() # Presumed to reload host configurations
-        elif created_hosts_count == 0:
-            logger.info(f"No new proxy hosts created for node {dbnode.name} based on current xray.config inbounds.")
 
 
 @router.get("/node/settings", response_model=NodeSettings)
@@ -128,7 +46,7 @@ def add_node(
     db: Session = Depends(get_db),
     _: Admin = Depends(Admin.check_sudo_admin),
 ):
-    """Add a new node to the database and optionally add it as a host."""
+    """Add a new node to the database."""
     try:
         dbnode = crud.create_node(db, new_node)
     except IntegrityError:
@@ -138,7 +56,6 @@ def add_node(
         )
 
     bg.add_task(xray.operations.connect_node, node_id=dbnode.id)
-    bg.add_task(add_host_if_needed, dbnode_id=dbnode.id, create_hosts_flag=new_node.add_as_new_host)
 
     logger.info(f'New node "{dbnode.name}" added')
     return dbnode

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 import os
 import stripe # type: ignore
 import re
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 import uuid
 
@@ -137,32 +137,11 @@ async def activate_user_plan(
         "status": UserStatusModify.active,
         "data_limit": new_data_limit,
         "expire": new_expire,
-        # "used_traffic": 0, # Resetting traffic might be desired, but let's confirm if it should be here or separate
         "on_hold_expire_duration": None,
         "on_hold_timeout": None,
         "note": db_user_orm.note, # Preserve existing note
         "data_limit_reset_strategy": db_user_orm.data_limit_reset_strategy, # Preserve existing strategy
-        # --- MODIFICATION START: Preserve proxies ---
-        # To preserve existing proxies, set 'proxies' to None in the payload.
-        # This tells crud.update_user to skip proxy modifications.
-        # If 'proxies' is omitted from this dict, UserModify's default_factory=dict
-        # would make it an empty dict {}, leading to proxy deletion.
-        # --- MODIFICATION END ---
     }
-
-    # If you intend to reset traffic on plan activation, uncomment this:
-    # user_modify_payload_dict["used_traffic"] = 0
-    # However, resetting traffic is often a separate admin action or tied to data_limit_reset_strategy.
-    # For now, let's assume traffic is not reset by default on plan change unless data_limit is also set.
-    # If a new data_limit is applied, it might imply traffic reset.
-    # The current crud.update_user does not automatically reset used_traffic.
-    # If 'used_traffic' is part of UserModify, you can set it.
-    # Let's check UserModify model: it inherits from User, which does not have 'used_traffic'.
-    # 'used_traffic' is in UserResponse.
-    # So, 'used_traffic' cannot be directly set via UserModify.
-    # If traffic reset is needed, crud.reset_user_data_usage should be called separately
-    # or crud.update_user needs to be enhanced.
-    # For now, removing "used_traffic" from this payload as it's not in UserModify.
 
     # Filter for only fields present in UserModify model to avoid errors
     valid_user_modify_fields = UserModify.model_fields.keys()
@@ -170,19 +149,6 @@ async def activate_user_plan(
 
     try:
         user_modify_payload = UserModify(**filtered_payload_dict)
-
-        # ADD THESE EXACT LOG LINES:
-        logger.debug(f"activate_user_plan: --- Proxies Debug ---")
-        if 'proxies' in filtered_payload_dict:
-            logger.debug(f"activate_user_plan: 'proxies' key was IN filtered_payload_dict. Value: {filtered_payload_dict.get('proxies')}, Type: {type(filtered_payload_dict.get('proxies'))}")
-        else:
-            logger.debug(f"activate_user_plan: 'proxies' key was OMITTED from filtered_payload_dict.")
-
-        logger.debug(f"activate_user_plan: user_modify_payload object instantiated.")
-        logger.debug(f"activate_user_plan: user_modify_payload.proxies IS: {user_modify_payload.proxies}") # Direct attribute access
-        logger.debug(f"activate_user_plan: Type of user_modify_payload.proxies: {type(user_modify_payload.proxies)}")
-        logger.debug(f"activate_user_plan: --- End Proxies Debug ---")
-
     except Exception as e:
         logger.error(f"activate_user_plan: Pydantic validation error for UserModify for user {user_account_number}: {e}. Payload: {filtered_payload_dict}", exc_info=True)
         return False
@@ -192,14 +158,19 @@ async def activate_user_plan(
 
         # If traffic reset is desired upon plan activation (e.g., new data limit applied)
         # and the plan implies it, you might call it here.
-        # For example, if plan.data_limit is not None (meaning a new limit is set):
         if plan.data_limit is not None: # Or some other condition indicating traffic reset
             logger.info(f"activate_user_plan: Plan includes data limit, resetting traffic for user {user_account_number}.")
             updated_user_orm = crud.reset_user_data_usage(db=db, dbuser=updated_user_orm) # Returns the updated user
 
+        # Ensure user has all default proxy types
+        logger.info(f"activate_user_plan: Ensuring default proxy types for user {user_account_number}")
+        crud.ensure_all_default_proxies_for_user(db=db, user_id=updated_user_orm.id)
+
+        # Refresh the user object to get the updated proxies
+        db.refresh(updated_user_orm)
         user_response_for_xray = UserResponse.model_validate(updated_user_orm)
 
-        background_tasks.add_task(xray.operations.update_user, user_payload=user_response_for_xray)
+        background_tasks.add_task(xray.operations.update_user, user_id=updated_user_orm.id)
 
         logger.info(f"activate_user_plan: User {user_account_number} processed for plan {plan_id}. Xray update task scheduled.")
         return True

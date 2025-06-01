@@ -14,6 +14,7 @@ import requests
 import rpyc
 from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager # For SANIgnoringAdaptor
+from websocket import create_connection, WebSocketConnectionClosedException, WebSocketTimeoutException
 
 from app.xray.config import XRayConfig # Assuming this path is correct in your project
 from xray_api import XRay as XRayAPI # Assuming this path is correct
@@ -159,7 +160,7 @@ class ReSTXRayNode:
     def _prepare_config(self, config: XRayConfig) -> XRayConfig:
         """
         Prepares the XRay configuration by inlining certificate file contents.
-        Modifies the config object in-place.
+        Modifies the config object in-place and returns it.
         """
         logger.debug(f"Node {self.name} ({self.id}): Preparing XRay config, inlining certificate files.")
         # This logic assumes 'certificateFile' and 'keyFile' paths are accessible
@@ -509,12 +510,11 @@ class ReSTXRayNode:
                  raise NodeAPIError(status_code=0, detail="Pre-start connection failed.")
 
         prepared_config = self._prepare_config(config)
-        prepared_config_json = prepared_config.to_json()
+        prepared_config_dict = prepared_config.as_dict()
+        prepared_config_json = py_json.dumps(prepared_config_dict)
 
         try:
             logger.debug(f"Node {self.name} ({self.id}): Sending /start request with config.")
-            # The body for /start should be {"config": prepared_config_json}.
-            # session_id is added by make_request.
             res = self.make_request(path="/start", method="POST", timeout=10, config=prepared_config_json)
         except NodeAPIError as exc:
             if 'Xray is started already' in str(exc.detail): # Check string representation
@@ -533,9 +533,6 @@ class ReSTXRayNode:
                 logger.info(f"Node {self.name} ({self.id}): gRPC API connection to XRay core OK after start.")
         except ConnectionError as e: # Catch errors from self.api property
             logger.error(f"Node {self.name} ({self.id}): Failed to establish gRPC API connection after starting XRay: {e}", exc_info=True)
-            # Depending on requirements, you might want to mark _started as False or raise a more critical error.
-            # For now, we'll assume ReST start was successful but gRPC is problematic.
-            # raise # Optionally re-raise if gRPC is mandatory for "started" state
 
         return res
 
@@ -568,11 +565,13 @@ class ReSTXRayNode:
                  logger.error(f"Node {self.name} ({self.id}): Connection attempt failed. Cannot restart XRay.")
                  raise NodeAPIError(status_code=0, detail="Pre-restart connection failed.")
 
-        prepared_config_dict = self._prepare_config(config).as_dict()
+        prepared_config = self._prepare_config(config)
+        prepared_config_dict = prepared_config.as_dict()
+        prepared_config_json = py_json.dumps(prepared_config_dict)
 
         try:
             logger.debug(f"Node {self.name} ({self.id}): Sending /restart request with config.")
-            res = self.make_request(path="/restart", method="POST", timeout=10, config=prepared_config_dict)
+            res = self.make_request(path="/restart", method="POST", timeout=10, config=prepared_config_json)
         except NodeAPIError as e:
             logger.error(f"Node {self.name} ({self.id}): Error restarting XRay: {e.detail}", exc_info=True)
             raise
@@ -586,7 +585,6 @@ class ReSTXRayNode:
                 logger.info(f"Node {self.name} ({self.id}): gRPC API connection after restart OK.")
         except ConnectionError as e:
             logger.error(f"Node {self.name} ({self.id}): Failed to establish gRPC API connection after restarting XRay: {e}", exc_info=True)
-            # raise # Optionally re-raise
 
         return res
 
@@ -925,8 +923,8 @@ class RPyCXRayNode:
             self.connect()
 
         prepared_config = self._prepare_config(config)
-        # RPyC service on node might expect a dict or a JSON string. Assuming JSON string for now.
-        json_config_str = prepared_config.to_json()
+        prepared_config_dict = prepared_config.as_dict()
+        json_config_str = py_json.dumps(prepared_config_dict)
 
         try:
             self.remote.start(json_config_str) # Call RPyC service's start method
@@ -966,7 +964,8 @@ class RPyCXRayNode:
             self.connect()
 
         prepared_config = self._prepare_config(config)
-        json_config_str = prepared_config.to_json()
+        prepared_config_dict = prepared_config.as_dict()
+        json_config_str = py_json.dumps(prepared_config_dict)
 
         try:
             self.remote.restart(json_config_str) # Call RPyC service's restart method

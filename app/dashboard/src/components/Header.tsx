@@ -49,7 +49,6 @@ const LightIcon = chakra(SunIcon, iconProps);
 const CoreSettingsIcon = chakra(Cog6ToothIcon, iconProps);
 const SettingsIcon = chakra(Bars3Icon, iconProps);
 const LogoutIcon = chakra(ArrowLeftOnRectangleIcon, iconProps);
-const HostsIcon = chakra(LinkIcon, iconProps);
 const NodesIcon = chakra(SquaresPlusIcon, iconProps);
 const NodesUsageIcon = chakra(ChartPieIcon, iconProps);
 const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
@@ -76,7 +75,6 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
   };
 
   const {
-    onEditingHosts,
     onResetAllUsage,
     onEditingNodes,
     onShowingNodesUsage,
@@ -122,14 +120,6 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
             <MenuList minW="170px" zIndex={99999} className="menuList">
               {isSudo() && (
                 <>
-                  <MenuItem
-                    maxW="170px"
-                    fontSize="sm"
-                    icon={<HostsIcon />}
-                    onClick={onEditingHosts.bind(null, true)}
-                  >
-                    {t("header.hostSettings")}
-                  </MenuItem>
                   <MenuItem
                     maxW="170px"
                     fontSize="sm"

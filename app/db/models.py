@@ -23,13 +23,10 @@ from sqlalchemy.sql.expression import select, text
 from app import xray
 from app.db.base import Base
 from app.models.node import NodeStatus
-from app.models.proxy import (
-    ProxyHostALPN,
-    ProxyHostFingerprint,
-    ProxyHostSecurity,
-    ProxyTypes,
-)
+from app.models.proxy import ProxyTypes
+from app.models.protocol_types import ProtocolType, NetworkType, SecurityType
 from app.models.user import ReminderType, UserDataLimitResetStrategy, UserStatus
+import enum
 
 
 class Admin(Base):
@@ -196,9 +193,7 @@ class UserTemplate(Base):
     username_prefix = Column(String(20), nullable=True)
     username_suffix = Column(String(20), nullable=True)
 
-    inbounds = relationship(
-        "ProxyInbound", secondary=template_inbounds_association
-    )
+    # Removed inbounds relationship as it's no longer needed
 
 
 class UserUsageResetLogs(Base):
@@ -219,61 +214,6 @@ class Proxy(Base):
     user = relationship("User", back_populates="proxies")
     type = Column(Enum(ProxyTypes), nullable=False) # Ensure ProxyTypes is correctly defined
     settings = Column(JSON, nullable=False)
-
-
-class ProxyInbound(Base):
-    __tablename__ = "inbounds"
-
-    id = Column(Integer, primary_key=True)
-    tag = Column(String(256), unique=True, nullable=False, index=True)
-    hosts = relationship(
-        "ProxyHost", back_populates="inbound", cascade="all, delete-orphan"
-    )
-
-
-class ProxyHost(Base):
-    __tablename__ = "hosts"
-
-    id = Column(Integer, primary_key=True)
-    remark = Column(String(256), unique=False, nullable=False)
-    address = Column(String(256), unique=False, nullable=False)
-    port = Column(Integer, nullable=True)
-    path = Column(String(256), unique=False, nullable=True)
-    sni = Column(String(1000), unique=False, nullable=True)
-    host = Column(String(1000), unique=False, nullable=True)
-    security = Column(
-        Enum(ProxyHostSecurity),
-        unique=False,
-        nullable=False,
-        default=ProxyHostSecurity.inbound_default,
-    )
-    alpn = Column(
-        Enum(ProxyHostALPN),
-        unique=False,
-        nullable=False,
-        default=ProxyHostSecurity.none,
-        server_default=ProxyHostSecurity.none.name
-    )
-    fingerprint = Column(
-        Enum(ProxyHostFingerprint),
-        unique=False,
-        nullable=False,
-        default=ProxyHostSecurity.none,
-        server_default=ProxyHostSecurity.none.name
-    )
-
-    inbound_tag = Column(String(256), ForeignKey("inbounds.tag"), nullable=False)
-    inbound = relationship("ProxyInbound", back_populates="hosts")
-    allowinsecure = Column(Boolean, nullable=True)
-    is_disabled = Column(Boolean, nullable=True, default=False)
-    mux_enable = Column(Boolean, nullable=False, default=False, server_default='0')
-    fragment_setting = Column(String(100), nullable=True)
-    noise_setting = Column(String(2000), nullable=True)
-    random_user_agent = Column(Boolean, nullable=False, default=False, server_default='0')
-    use_sni_as_host = Column(Boolean, nullable=False, default=False, server_default="0")
-    node_id = Column(Integer, ForeignKey("nodes.id", name="fk_proxy_host_node"), nullable=True, index=True)
-    # Assuming 'Node' model will have a backref like 'proxy_hosts'
-    node = relationship("Node", back_populates="proxy_hosts")
 
 
 class System(Base):
@@ -307,33 +247,27 @@ class Node(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(256, collation='NOCASE'), unique=True)
     address = Column(String(256), unique=False, nullable=False)
-
-    # This 'port' should be the ReST/RPyC API port of the Marzban Node service (e.g., 6001 for your ReST setup)
     port = Column(Integer, unique=False, nullable=False)
-
-    # This 'api_port' is for the XRay gRPC API (e.g., 62051)
     api_port = Column(Integer, unique=False, nullable=False)
-
     xray_version = Column(String(32), nullable=True)
     status = Column(Enum(NodeStatus), nullable=False, default=NodeStatus.connecting)
     message = Column(String(1024), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    last_status_change = Column(DateTime, default=datetime.utcnow) # Added from your previous log
+    last_status_change = Column(DateTime, default=datetime.utcnow)
     uplink = Column(BigInteger, default=0)
     downlink = Column(BigInteger, default=0)
-    usage_coefficient = Column(Float, nullable=False, server_default=text("1.0"), default=1.0) # Added default=1.0
-
-    # === NEW COLUMNS REQUIRED FOR PANEL'S mTLS CLIENT CREDS ===
-    # These store the PEM string content of the panel's client certificate and private key
-    # that the panel will use to authenticate itself TO THIS NODE.
-    panel_client_cert_pem = Column(String, nullable=True) # Or Text if certs can be very long
-    panel_client_key_pem = Column(String, nullable=True)  # Or Text. Store securely!
+    usage_coefficient = Column(Float, nullable=False, server_default=text("1.0"), default=1.0)
+    panel_client_cert_pem = Column(String, nullable=True)
+    panel_client_key_pem = Column(String, nullable=True)
 
     # Relationships
     user_usages = relationship("NodeUserUsage", back_populates="node", cascade="all, delete-orphan")
     usages = relationship("NodeUsage", back_populates="node", cascade="all, delete-orphan")
-    proxy_hosts = relationship("ProxyHost", back_populates="node", cascade="all, delete-orphan")
-
+    service_configurations = relationship(
+        "NodeServiceConfiguration",
+        back_populates="node",
+        cascade="all, delete-orphan"
+    )
 
 
 class NodeUserUsage(Base):
@@ -376,3 +310,56 @@ class NotificationReminder(Base):
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class NodeServiceConfiguration(Base):
+    __tablename__ = "node_service_configurations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    node_id = Column(Integer, ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False) # Ensure cascade delete
+
+    service_name = Column(String(255), nullable=False, index=True, comment="User-friendly name for this service, e.g., 'US-VLESS-WS-TLS'")
+    enabled = Column(Boolean, default=True, nullable=False)
+
+    # Core Inbound Details
+    protocol_type = Column(Enum(ProtocolType, name="protocol_type_enum"), nullable=False)
+    listen_address = Column(String(255), nullable=True, default="0.0.0.0", comment="Listen IP on the node; null or 0.0.0.0 for all interfaces")
+    listen_port = Column(Integer, nullable=False, comment="Listening port on the node for this service")
+
+    # Stream Settings - Common
+    network_type = Column(Enum(NetworkType, name="network_type_enum"), nullable=True, comment="Network type for stream settings (ws, grpc, etc.)")
+    security_type = Column(Enum(SecurityType, name="security_type_enum"), nullable=False, default=SecurityType.NONE, comment="Security for stream settings (tls, reality)")
+
+    # Stream Settings - Specific Paths/Identifiers (denormalized for ease of use and UI)
+    ws_path = Column(String(255), nullable=True, comment="Path for WebSocket (e.g., /vless)")
+    grpc_service_name = Column(String(255), nullable=True, comment="Service name for gRPC")
+    http_upgrade_path = Column(String(255), nullable=True, comment="Path for HTTP/2 upgrade (if network_type is http)") # For h2
+
+    # Security Settings - Common (denormalized for ease of use and UI)
+    sni = Column(String(255), nullable=True, comment="Server Name Indication for TLS/REALITY")
+    fingerprint = Column(String(255), nullable=True, comment="uTLS fingerprint or REALITY fingerprint")
+    reality_short_id = Column(String(255), nullable=True, comment="REALITY short ID")
+    reality_public_key = Column(String(255), nullable=True, comment="REALITY public key")
+    # reality_private_key is sensitive and should ideally be managed on the node or securely pushed,
+    # but if panel generates it, it needs secure storage or to be transient. For now, let's assume panel might store/provide public part.
+
+    # Advanced/Raw JSON settings for full Xray compatibility
+    # These allow storing parts of the Xray config that are not covered by specific fields
+    # or for overriding behavior.
+    # Note: User-specific client lists (like VLESS/VMess/Trojan 'clients') are NOT stored here.
+    # They are generated at runtime when pushing config to the node, by combining these service
+    # settings with the User.proxies data.
+
+    advanced_protocol_settings = Column(JSON, nullable=True, comment="JSON for Xray 'settings' object (protocol-specific, e.g., VLESS decryption, fallbacks)")
+    advanced_stream_settings = Column(JSON, nullable=True, comment="JSON for Xray 'streamSettings' (e.g., tcpSettings, kcpSettings, QUIC params, specific ws/grpc headers)")
+    advanced_tls_settings = Column(JSON, nullable=True, comment="JSON for Xray 'tlsSettings' (e.g., ALPN, custom certs if not panel-managed)")
+    advanced_reality_settings = Column(JSON, nullable=True, comment="JSON for Xray 'realitySettings' (e.g., spiderX, advanced REALITY params)")
+    sniffing_settings = Column(JSON, nullable=True, comment="JSON for Xray 'sniffing' object")
+
+    # Panel-generated tag for this inbound in the Xray config. Could be like "service-{id}-{protocol}"
+    # Needs to be unique per Xray instance.
+    xray_inbound_tag = Column(String(255), nullable=True, unique=False, index=True, comment="Internal Xray tag for this inbound; panel generates if null. Must be unique per node.")
+
+
+    node = relationship("Node", back_populates="service_configurations")
+
+    def __repr__(self):
+        return f"<NodeServiceConfiguration(id={self.id}, name='{self.service_name}', node_id={self.node_id})>"
