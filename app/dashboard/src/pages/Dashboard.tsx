@@ -1,10 +1,9 @@
-import { Box, VStack } from "@chakra-ui/react";
+import { Box, Tabs, TabList, TabPanels, Tab, TabPanel, VStack } from "@chakra-ui/react";
 import { CoreSettingsModal } from "components/CoreSettingsModal";
 import { DeleteUserModal } from "components/DeleteUserModal";
 import { Filters } from "components/Filters";
 import { Footer } from "components/Footer";
 import { Header } from "components/Header";
-import { NodesDialog } from "components/NodesModal";
 import { NodesUsage } from "components/NodesUsage";
 import { QRCodeDialog } from "components/QRCodeDialog";
 import { ResetAllUsageModal } from "components/ResetAllUsageModal";
@@ -12,12 +11,13 @@ import { ResetUserUsageModal } from "components/ResetUserUsageModal";
 import { RevokeSubscriptionModal } from "components/RevokeSubscriptionModal";
 import { UserDialog } from "components/UserDialog";
 import { UsersTable } from "components/UsersTable";
+import { NodesTable } from "components/NodesTable";
 import { fetchInbounds, useDashboard } from "contexts/DashboardContext";
 import { FC, useEffect } from "react";
 import { Statistics } from "../components/Statistics";
+import { useTranslation } from "react-i18next";
 
 export const Dashboard: FC = () => {
-  // Destructure all necessary state and functions from the context
   const {
     deletingUser,
     onDeletingUser,
@@ -25,56 +25,66 @@ export const Dashboard: FC = () => {
     onResetUsageUser,
     revokeSubscriptionUser,
     onRevokeSubscriptionUser,
-    refetchUsers // Keep existing destructured items
+    refetchUsers
   } = useDashboard();
+  const { t } = useTranslation();
 
   useEffect(() => {
-    // Using refetchUsers from the destructured context
     refetchUsers();
     fetchInbounds();
-    // The Zustand `getState()` approach can also work but direct destructuring is common for hooks.
-    // useDashboard.getState().refetchUsers();
-  }, [refetchUsers]); // Added refetchUsers to dependency array if it's stable, or remove if not needed.
+  }, [refetchUsers]);
 
   return (
     <VStack justifyContent="space-between" minH="100vh" p="6" rowGap={4}>
       <Box w="full">
         <Header />
         <Statistics mt="4" />
-        <Filters />
-        <UsersTable />
-        <UserDialog />
 
-        {/* Corrected DeleteUserModal usage */}
-        {deletingUser && (
-          <DeleteUserModal
-            isOpen={!!deletingUser}
-            onClose={() => onDeletingUser(null)}
-            user={deletingUser}
-          />
-        )}
+        <Tabs mt="4">
+          <TabList>
+            <Tab>{t("users")}</Tab>
+            <Tab>{t("nodes")}</Tab>
+          </TabList>
 
-        <QRCodeDialog />
+          <TabPanels>
+            <TabPanel>
+              <Filters />
+              <UsersTable />
+              <UserDialog />
 
-        {/* Corrected ResetUserUsageModal usage */}
-        {resetUsageUser && (
-          <ResetUserUsageModal
-            isOpen={!!resetUsageUser}
-            onClose={() => onResetUsageUser(null)}
-            user={resetUsageUser}
-          />
-        )}
+              {deletingUser && (
+                <DeleteUserModal
+                  isOpen={!!deletingUser}
+                  onClose={() => onDeletingUser(null)}
+                  user={deletingUser}
+                />
+              )}
 
-        {/* Corrected RevokeSubscriptionModal usage */}
-        {revokeSubscriptionUser && (
-          <RevokeSubscriptionModal
-            isOpen={!!revokeSubscriptionUser}
-            onClose={() => onRevokeSubscriptionUser(null)}
-            user={revokeSubscriptionUser}
-          />
-        )}
+              <QRCodeDialog />
 
-        <NodesDialog />
+              {resetUsageUser && (
+                <ResetUserUsageModal
+                  isOpen={!!resetUsageUser}
+                  onClose={() => onResetUsageUser(null)}
+                  user={resetUsageUser}
+                />
+              )}
+
+              {revokeSubscriptionUser && (
+                <RevokeSubscriptionModal
+                  isOpen={!!revokeSubscriptionUser}
+                  onClose={() => onRevokeSubscriptionUser(null)}
+                  user={revokeSubscriptionUser}
+                />
+              )}
+            </TabPanel>
+
+            <TabPanel>
+              <NodesTable />
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
+
         <NodesUsage />
         <ResetAllUsageModal />
         <CoreSettingsModal />

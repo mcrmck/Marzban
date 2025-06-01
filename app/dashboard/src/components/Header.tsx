@@ -19,7 +19,6 @@ import {
   DocumentMinusIcon,
   LinkIcon,
   MoonIcon,
-  SquaresPlusIcon,
   SunIcon,
 } from "@heroicons/react/24/outline";
 import { useDashboard } from "contexts/DashboardContext";
@@ -37,6 +36,7 @@ import { REPO_URL } from "constants/Project";
 type HeaderProps = {
   actions?: ReactNode;
 };
+
 const iconProps = {
   baseStyle: {
     w: 4,
@@ -49,18 +49,8 @@ const LightIcon = chakra(SunIcon, iconProps);
 const CoreSettingsIcon = chakra(Cog6ToothIcon, iconProps);
 const SettingsIcon = chakra(Bars3Icon, iconProps);
 const LogoutIcon = chakra(ArrowLeftOnRectangleIcon, iconProps);
-const NodesIcon = chakra(SquaresPlusIcon, iconProps);
 const NodesUsageIcon = chakra(ChartPieIcon, iconProps);
 const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
-const NotificationCircle = chakra(Box, {
-  baseStyle: {
-    bg: "yellow.500",
-    w: "2",
-    h: "2",
-    rounded: "full",
-    position: "absolute",
-  },
-});
 
 const NOTIFICATION_KEY = "marzban-menu-notification";
 
@@ -76,7 +66,6 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
 
   const {
     onResetAllUsage,
-    onEditingNodes,
     onShowingNodesUsage,
   } = useDashboard();
   const { t } = useTranslation();
@@ -104,30 +93,17 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
       </Text>
       <Box overflow="auto" css={{ direction: "rtl" }}>
         <HStack alignItems="center">
-          <Menu onClose={handleOnClose}> {/* Assuming handleOnClose was meant for Menu */}
+          <Menu onClose={handleOnClose}>
             <MenuButton
               as={IconButton}
               size="sm"
               variant="outline"
-              icon={
-                <>
-                  <SettingsIcon />
-                  {/* Logic for NotificationCircle would go here if needed */}
-                </>
-              }
+              icon={<SettingsIcon />}
               position="relative"
             ></MenuButton>
             <MenuList minW="170px" zIndex={99999} className="menuList">
               {isSudo() && (
                 <>
-                  <MenuItem
-                    maxW="170px"
-                    fontSize="sm"
-                    icon={<NodesIcon />}
-                    onClick={onEditingNodes.bind(null, true)}
-                  >
-                    {t("header.nodeSettings")}
-                  </MenuItem>
                   <MenuItem
                     maxW="170px"
                     fontSize="sm"
