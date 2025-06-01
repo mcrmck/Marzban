@@ -26,6 +26,7 @@ import {
   ModalOverlay,
   Switch,
   Text,
+  Textarea,
   Tooltip,
   useToast,
   VStack,
@@ -326,6 +327,8 @@ const NodeForm: NodeFormType = ({
 }) => {
   const { t } = useTranslation();
   const [showCertificate, setShowCertificate] = useState(false);
+  const [showClientCert, setShowClientCert] = useState(false);
+  const [showClientKey, setShowClientKey] = useState(false);
   const { data: nodeSettings, isLoading: nodeSettingsLoading } = useQuery({
     queryKey: "node-settings",
     queryFn: () =>
@@ -380,14 +383,14 @@ const NodeForm: NodeFormType = ({
                   label={t(
                     !showCertificate
                       ? "nodes.show-certificate"
-                      : "nodes.show-certificate"
+                      : "nodes.hide-certificate"
                   )}
                 >
                   <IconButton
                     aria-label={t(
                       !showCertificate
                         ? "nodes.show-certificate"
-                        : "nodes.show-certificate"
+                        : "nodes.hide-certificate"
                     )}
                     onClick={setShowCertificate.bind(null, !showCertificate)}
                     colorScheme="whiteAlpha"
@@ -482,7 +485,7 @@ const NodeForm: NodeFormType = ({
           </Box>
         </HStack>
         <HStack alignItems="flex-start" w="100%">
-        <Box>
+          <Box>
             <CustomInput
               label={t("nodes.nodePort")}
               size="sm"
@@ -510,6 +513,125 @@ const NodeForm: NodeFormType = ({
             />
           </Box>
         </HStack>
+
+        <Accordion allowToggle w="full">
+          <AccordionItem>
+            <h2>
+              <AccordionButton>
+                <Box flex="1" textAlign="left" fontSize="sm" fontWeight="medium">
+                  {t("nodes.advancedSSLSettings", "Advanced mTLS Settings (Panel to Node)")}
+                </Box>
+                <AccordionIcon />
+              </AccordionButton>
+            </h2>
+            <AccordionPanel pb={4}>
+              <VStack spacing={4}>
+                <Alert status="info" size="sm">
+                  <AlertIcon />
+                  <AlertDescription fontSize="xs">
+                    {t("nodes.mtlsHint", "Provide the Panel's client certificate and key if the node requires mTLS for the connection from the Panel.")}
+                  </AlertDescription>
+                </Alert>
+                <FormControl>
+                  <FormLabel fontSize="sm" htmlFor="panel_client_cert">
+                    {t("nodes.panelClientCert", "Panel Client Certificate (PEM)")}
+                  </FormLabel>
+                  <HStack>
+                    <Textarea
+                      id="panel_client_cert"
+                      size="sm"
+                      placeholder={t("nodes.pastePanelClientCert", "Paste the content of your panel's client.crt here")}
+                      {...form.register("panel_client_cert")}
+                      isInvalid={!!form.formState?.errors?.panel_client_cert}
+                      fontFamily="monospace"
+                      rows={7}
+                    />
+                    <Tooltip
+                      placement="top"
+                      label={t(
+                        !showClientCert
+                          ? "nodes.show-certificate"
+                          : "nodes.hide-certificate"
+                      )}
+                    >
+                      <IconButton
+                        aria-label={t(
+                          !showClientCert
+                            ? "nodes.show-certificate"
+                            : "nodes.hide-certificate"
+                        )}
+                        onClick={setShowClientCert.bind(null, !showClientCert)}
+                        colorScheme="whiteAlpha"
+                        color="primary"
+                        size="xs"
+                      >
+                        {!showClientCert ? (
+                          <EyeIcon width="15px" />
+                        ) : (
+                          <EyeSlashIcon width="15px" />
+                        )}
+                      </IconButton>
+                    </Tooltip>
+                  </HStack>
+                  {form.formState?.errors?.panel_client_cert && (
+                    <Text color="red.500" fontSize="xs" mt={1}>
+                      {form.formState.errors.panel_client_cert.message}
+                    </Text>
+                  )}
+                </FormControl>
+
+                <FormControl>
+                  <FormLabel fontSize="sm" htmlFor="panel_client_key">
+                    {t("nodes.panelClientKey", "Panel Client Private Key (PEM)")}
+                  </FormLabel>
+                  <HStack>
+                    <Textarea
+                      id="panel_client_key"
+                      size="sm"
+                      placeholder={t("nodes.pastePanelClientKey", "Paste the content of your panel's client.key here")}
+                      {...form.register("panel_client_key")}
+                      isInvalid={!!form.formState?.errors?.panel_client_key}
+                      fontFamily="monospace"
+                      rows={7}
+                    />
+                    <Tooltip
+                      placement="top"
+                      label={t(
+                        !showClientKey
+                          ? "nodes.show-certificate"
+                          : "nodes.hide-certificate"
+                      )}
+                    >
+                      <IconButton
+                        aria-label={t(
+                          !showClientKey
+                            ? "nodes.show-certificate"
+                            : "nodes.hide-certificate"
+                        )}
+                        onClick={setShowClientKey.bind(null, !showClientKey)}
+                        colorScheme="whiteAlpha"
+                        color="primary"
+                        size="xs"
+                      >
+                        {!showClientKey ? (
+                          <EyeIcon width="15px" />
+                        ) : (
+                          <EyeSlashIcon width="15px" />
+                        )}
+                      </IconButton>
+                    </Tooltip>
+                  </HStack>
+                  {form.formState?.errors?.panel_client_key && (
+                    <Text color="red.500" fontSize="xs" mt={1}>
+                      {form.formState.errors.panel_client_key.message}
+                    </Text>
+                  )}
+                </FormControl>
+              </VStack>
+            </AccordionPanel>
+          </AccordionItem>
+        </Accordion>
+
         {addAsHost && (
           <FormControl py={1}>
             <Checkbox {...form.register("add_as_new_host")}>

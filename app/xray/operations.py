@@ -176,23 +176,33 @@ def remove_node(node_id: int):
 def add_node(dbnode: "DBNode") -> XRayNode: # Return XRayNode instance
     """
     Removes any existing tracked node with the same ID, then creates and tracks a new XRayNode instance.
+    Uses the node's own panel_client_key_pem and panel_client_cert_pem for mTLS authentication.
     """
-    logger.info(f"Adding/Re-adding node: {dbnode.name} (ID: {dbnode.id}), Address: {dbnode.address}:{dbnode.api_port}")
+    logger.info(f"Adding/Re-adding node: {dbnode.name} (ID: {dbnode.id}), Address: {dbnode.address}:{dbnode.port}")
     remove_node(dbnode.id) # Ensure clean state
 
-    tls_config = get_tls()
-    if not tls_config.get("key") or not tls_config.get("certificate"):
-        logger.error(f"Cannot add node {dbnode.name} (ID: {dbnode.id}): TLS key/certificate is missing from DB.")
-        # Depending on how critical TLS is for node communication, you might raise an error
-        # or allow adding the node in a non-operational state.
-        # For now, it will proceed but XRayNode might fail to connect if SSL is mandatory.
+    # Check for required mTLS credentials
+    if not dbnode.panel_client_key_pem or not dbnode.panel_client_cert_pem:
+        error_msg = f"Cannot add node {dbnode.name} (ID: {dbnode.id}): Missing panel_client_key_pem or panel_client_cert_pem in database."
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
-    new_xray_node_instance = XRayNode(address=dbnode.address,
-                                     port=dbnode.port, # This is likely the proxy port, not API port for XRayNode connection
-                                     api_port=dbnode.api_port, # This is the Xray API port for XRayNode
-                                     ssl_key=tls_config['key'],
-                                     ssl_cert=tls_config['certificate'],
-                                     usage_coefficient=dbnode.usage_coefficient)
+    logger.info(f"Creating XRayNode for dbnode: id={dbnode.id}, name='{dbnode.name}', "
+                f"address='{dbnode.address}', port={dbnode.port}, api_port={dbnode.api_port}, "
+                f"has_client_key={bool(dbnode.panel_client_key_pem)}, "
+                f"has_client_cert={bool(dbnode.panel_client_cert_pem)}")
+
+    new_xray_node_instance = XRayNode(
+        node_id=dbnode.id,
+        name=dbnode.name,
+        address=dbnode.address,
+        port=dbnode.port,  # This is the Marzban Node's ReST/RPyC API port (e.g., 6001)
+        api_port=dbnode.api_port, # This is the XRay gRPC API port (e.g., 62051)
+        ssl_key_content=dbnode.panel_client_key_pem,
+        ssl_cert_content=dbnode.panel_client_cert_pem,
+        usage_coefficient=dbnode.usage_coefficient,
+        node_type_preference=getattr(dbnode, 'node_type_preference', None)
+    )
     xray.nodes[dbnode.id] = new_xray_node_instance
     logger.info(f"Node {dbnode.name} (ID: {dbnode.id}) added to xray.nodes.")
     return new_xray_node_instance
@@ -469,6 +479,21 @@ def deactivate_user_from_active_node(account_number: str): # Gets user and activ
         crud.update_user_instance(db, db_user)
         logger.info(f"User {account_number} deactivated from node {node_id_to_deactivate} and DB updated.")
 
+
+@lru_cache(maxsize=None)
+def get_tls():
+    # This function is fine, uses its own DB session.
+    # from app.db import GetDB, get_tls_certificate # Original import
+    with GetDB() as db:
+        # Use the new CRUD function that returns the ORM model or key/cert directly
+        tls_orm = crud.get_panel_tls_credentials(db) # MODIFIED LINE
+        if not tls_orm or not tls_orm.key or not tls_orm.certificate:
+            logger.error("Panel's client TLS key or certificate not found in database. Panel <-> Node mTLS will fail if required by node.")
+            return {"key": None, "certificate": None}
+        return {
+            "key": tls_orm.key,
+            "certificate": tls_orm.certificate
+        }
 
 __all__ = [
     "add_user",

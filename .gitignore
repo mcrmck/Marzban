@@ -184,3 +184,5 @@ certs/
 *.p7m
 *.p7s
 *.env.node1
+*.csr
+*.srl

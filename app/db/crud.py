@@ -5,8 +5,7 @@ Functions for managing proxy hosts, users, user templates, nodes, and administra
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
-# Remove the built-in select import
-# import select
+from .models import TLS
 
 from sqlalchemy import and_, delete, func, or_, select  # Add select here
 from sqlalchemy.orm import Query, Session, joinedload
@@ -938,7 +937,9 @@ def create_node(db: Session, node_data: NodeCreate) -> Node: # Renamed param
         address=node_data.address,
         port=node_data.port,
         api_port=node_data.api_port,
-        usage_coefficient=node_data.usage_coefficient
+        usage_coefficient=node_data.usage_coefficient,
+        panel_client_cert_pem=node_data.panel_client_cert_pem,
+        panel_client_key_pem=node_data.panel_client_key_pem
     )
     db.add(dbnode)
     db.commit()
@@ -958,6 +959,12 @@ def remove_node(db: Session, dbnode_obj: Node) -> Node: # Renamed param
 def update_node(db: Session, dbnode_obj: Node, modify_data: NodeModify) -> Node: # Renamed params
     update_data = modify_data.model_dump(exclude_unset=True)
     original_status = dbnode_obj.status
+
+    # Handle mTLS fields if they are present in the update data
+    if 'panel_client_cert' in update_data:
+        update_data['panel_client_cert_pem'] = update_data.pop('panel_client_cert')
+    if 'panel_client_key' in update_data:
+        update_data['panel_client_key_pem'] = update_data.pop('panel_client_key')
 
     for key, value in update_data.items():
         if hasattr(dbnode_obj, key): setattr(dbnode_obj, key, value)
@@ -1159,10 +1166,19 @@ def aggregate_node_user_usages_to_node_usage(db: Session, event_datetime_utc: da
             )
             db.add(new_node_usage)
 
-    # Commit is typically handled by the calling job.
-    # try:
-    #     db.commit()
-    # except Exception:
-    #     db.rollback()
-    #     raise
+def get_panel_tls_credentials(db: Session) -> Optional[TLS]:
+    """Returns the panel's client TLS ORM model instance from the DB, or None if not found."""
+    return db.query(TLS).first()
 
+def store_panel_tls_credentials(db: Session, key: str, certificate: str) -> TLS:
+    """Stores or updates the panel's client TLS key and certificate in the database."""
+    tls_entry = db.query(TLS).first()
+    if not tls_entry:
+        tls_entry = TLS(key=key, certificate=certificate)
+        db.add(tls_entry)
+    else:
+        tls_entry.key = key
+        tls_entry.certificate = certificate
+    db.commit()
+    db.refresh(tls_entry)
+    return tls_entry

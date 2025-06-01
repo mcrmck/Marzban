@@ -22,10 +22,14 @@ class Node(BaseModel):
     port: int = 62050
     api_port: int = 62051
     usage_coefficient: float = Field(gt=0, default=1.0)
+    panel_client_cert_pem: Optional[str] = None
+    panel_client_key_pem: Optional[str] = None
 
 
 class NodeCreate(Node):
     add_as_new_host: bool = True
+    panel_client_cert: Optional[str] = None  # Frontend field name
+    panel_client_key: Optional[str] = None   # Frontend field name
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "name": "DE node",
@@ -33,9 +37,19 @@ class NodeCreate(Node):
             "port": 62050,
             "api_port": 62051,
             "add_as_new_host": True,
-            "usage_coefficient": 1
+            "usage_coefficient": 1,
+            "panel_client_cert": "-----BEGIN CERTIFICATE-----\n...",
+            "panel_client_key": "-----BEGIN PRIVATE KEY-----\n..."
         }
     })
+
+    def model_post_init(self, __context) -> None:
+        # Map frontend field names to backend field names
+        if self.panel_client_cert:
+            self.panel_client_cert_pem = self.panel_client_cert
+        if self.panel_client_key:
+            self.panel_client_key_pem = self.panel_client_key
+        super().model_post_init(__context)
 
 
 class NodeModify(Node):
@@ -45,6 +59,8 @@ class NodeModify(Node):
     api_port: Optional[int] = Field(None, nullable=True)
     status: Optional[NodeStatus] = Field(None, nullable=True)
     usage_coefficient: Optional[float] = Field(None, nullable=True)
+    panel_client_cert: Optional[str] = Field(None, nullable=True)  # Frontend field name
+    panel_client_key: Optional[str] = Field(None, nullable=True)   # Frontend field name
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "name": "DE node",
@@ -52,7 +68,9 @@ class NodeModify(Node):
             "port": 62050,
             "api_port": 62051,
             "status": "disabled",
-            "usage_coefficient": 1.0
+            "usage_coefficient": 1.0,
+            "panel_client_cert": "-----BEGIN CERTIFICATE-----\n...",
+            "panel_client_key": "-----BEGIN PRIVATE KEY-----\n..."
         }
     })
 

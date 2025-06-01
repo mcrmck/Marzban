@@ -307,18 +307,31 @@ class Node(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(256, collation='NOCASE'), unique=True)
     address = Column(String(256), unique=False, nullable=False)
+
+    # This 'port' should be the ReST/RPyC API port of the Marzban Node service (e.g., 6001 for your ReST setup)
     port = Column(Integer, unique=False, nullable=False)
+
+    # This 'api_port' is for the XRay gRPC API (e.g., 62051)
     api_port = Column(Integer, unique=False, nullable=False)
+
     xray_version = Column(String(32), nullable=True)
     status = Column(Enum(NodeStatus), nullable=False, default=NodeStatus.connecting)
-    last_status_change = Column(DateTime, default=datetime.utcnow)
     message = Column(String(1024), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_status_change = Column(DateTime, default=datetime.utcnow) # Added from your previous log
     uplink = Column(BigInteger, default=0)
     downlink = Column(BigInteger, default=0)
+    usage_coefficient = Column(Float, nullable=False, server_default=text("1.0"), default=1.0) # Added default=1.0
+
+    # === NEW COLUMNS REQUIRED FOR PANEL'S mTLS CLIENT CREDS ===
+    # These store the PEM string content of the panel's client certificate and private key
+    # that the panel will use to authenticate itself TO THIS NODE.
+    panel_client_cert_pem = Column(String, nullable=True) # Or Text if certs can be very long
+    panel_client_key_pem = Column(String, nullable=True)  # Or Text. Store securely!
+
+    # Relationships
     user_usages = relationship("NodeUserUsage", back_populates="node", cascade="all, delete-orphan")
     usages = relationship("NodeUsage", back_populates="node", cascade="all, delete-orphan")
-    usage_coefficient = Column(Float, nullable=False, server_default=text("1.0"), default=1)
     proxy_hosts = relationship("ProxyHost", back_populates="node", cascade="all, delete-orphan")
 
 

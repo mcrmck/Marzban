@@ -25,18 +25,15 @@ services:
       - marzban_network
 
   marzban-node-1:
-    build: # MODIFIED section for marzban-node-1
-      context: ./node  # Points to your local node/ directory
-      dockerfile: Dockerfile # Uses the Dockerfile inside your node/ directory (node/Dockerfile)
+    build:
+      context: ./node
+      dockerfile: Dockerfile
     restart: always
-    env_file: .env.node1 # All node-specific environment variables are now in .env.node1 (at project root)
+    env_file: .env.node1
     ports:
-      # Expose Xray's actual proxy ports (e.g., VLESS/VMess/Trojan inbounds)
-      # These depend on your Xray config template managed by the panel.
-      # Example: if your template has an inbound on 443 and 80
       - "443:443"
       - "80:80"
-      # Add other ports your Xray inbounds will use
+      - "6001:6001"  # Add the REST API port
     volumes:
       # Mounts your generated server.crt, server.key, and ca.crt into the container
       # ./node1-certs/ on your host (project_root/node1-certs/) should contain:
@@ -44,6 +41,12 @@ services:
       #   - server.key (Node's server private key)
       #   - ca.crt     (The CA certificate that signed the panel's client.crt)
       - ./node1-certs:/etc/marzban-node/certs:ro # Mount as read-only (path is relative to project root)
+    environment:
+      - SERVICE_PORT=6001
+      - SERVICE_PROTOCOL=rest
+      - SSL_CERT_FILE=/etc/marzban-node/certs/server.crt
+      - SSL_KEY_FILE=/etc/marzban-node/certs/server.key
+      - SSL_CLIENT_CERT_FILE=/etc/marzban-node/certs/ca.crt
     networks:
       - marzban_network
     # depends_on: # Optional: Can be useful for controlling startup order

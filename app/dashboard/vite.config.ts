@@ -4,25 +4,36 @@ import svgr from "vite-plugin-svgr";
 import { visualizer } from "rollup-plugin-visualizer";
 import tsconfigPaths from "vite-tsconfig-paths";
 
-
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [
-    tsconfigPaths(),
-    react({
-      include: "**/*.tsx",
-    }),
-    svgr(),
-    visualizer(),
-    splitVendorChunkPlugin(),
-  ],
-  build: {
-    minify: false, // Disable minification completely to preserve console logs
-    sourcemap: true, // Enable source maps for better debugging
-    rollupOptions: {
-      output: {
-        manualChunks: undefined
+export default defineConfig(({ mode }) => {
+  const isDev = mode === 'development';
+
+  return {
+    plugins: [
+      tsconfigPaths(),
+      react({
+        include: "**/*.tsx",
+      }),
+      svgr(),
+      visualizer(),
+      splitVendorChunkPlugin(),
+    ],
+    base: '/dashboard/',
+    build: {
+      outDir: 'build',
+      assetsDir: 'statics',
+      minify: !isDev, // Only disable minification in development
+      sourcemap: isDev, // Only enable source maps in development
+      rollupOptions: {
+        output: {
+          manualChunks: undefined
+        }
       }
+    },
+    server: {
+      port: 3000,
+      strictPort: true,
+      host: '0.0.0.0'
     }
-  }
+  };
 });
