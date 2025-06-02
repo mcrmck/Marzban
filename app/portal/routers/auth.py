@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.portal.auth import create_access_token
 from app.db import get_db, crud
-from app.models.user import UserCreate, UserStatusCreate, UserStatus # Make sure UserStatus is imported if used directly
+from app.models.user import UserCreate, UserStatusCreate, UserStatus, UserResponse # Make sure UserStatus is imported if used directly
 from app import xray
 from app.models.proxy import ProxyTypes
 
@@ -151,6 +151,9 @@ async def register_user(
         )
         # Portal users are not directly created by a specific admin, so admin=None
         new_db_user = crud.create_user(db=db, account_number=generated_account_number, user=user_payload, admin=None)
+
+        # Validate the user response with database session in context
+        user_response = UserResponse.model_validate(new_db_user, context={'db': db})
 
         access_token = create_access_token(data={"sub": new_db_user.account_number})
 

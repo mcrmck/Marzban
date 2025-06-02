@@ -1,8 +1,9 @@
 import re
 from distutils.version import LooseVersion # type: ignore
 
-from fastapi import APIRouter, Depends, Header, Path, Request, Response
+from fastapi import APIRouter, Depends, Header, Path, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
 
 from app.db import Session, crud, get_db # crud.get_user_by_sub_token will be used by get_validated_sub
 from app.dependencies import get_validated_sub, validate_dates
@@ -129,12 +130,13 @@ def user_subscription(
 
 @router.get("/{token}/info", response_model=SubscriptionUserResponse)
 def user_subscription_info(
-    db_user_response: UserResponse = Depends(get_validated_sub), # db_user_response is Pydantic UserResponse
+    db_user_response: UserResponse = Depends(get_validated_sub),
+    db: Session = Depends(get_db)
 ):
     # Convert to SubscriptionUserResponse if needed, or ensure UserResponse matches its fields
     # For now, assume UserResponse is sufficient or SubscriptionUserResponse is a superset/compatible
     # If SubscriptionUserResponse has specific fields not in UserResponse, model_validate from db_user_response
-    return SubscriptionUserResponse.model_validate(db_user_response.model_dump())
+    return SubscriptionUserResponse.model_validate(db_user_response.model_dump(), context={'db': db})
 
 
 @router.get("/{token}/usage") # This endpoint might not be directly used by clients but is available

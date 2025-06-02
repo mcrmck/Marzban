@@ -25,7 +25,7 @@ def add_notification_reminders(db: Session, user: "User", now: datetime = dateti
             if usage_percent >= percent:
                 if not get_notification_reminder(db, user.id, ReminderType.data_usage, threshold=percent):
                     report.data_usage_percent_reached(
-                        db, usage_percent, UserResponse.model_validate(user),
+                        db, usage_percent, UserResponse.model_validate(user, context={'db': db}),
                         user.id, user.expire, threshold=percent
                     )
                 break
@@ -37,7 +37,7 @@ def add_notification_reminders(db: Session, user: "User", now: datetime = dateti
             if expire_days <= days_left:
                 if not get_notification_reminder(db, user.id, ReminderType.expiration_date, threshold=days_left):
                     report.expire_days_reached(
-                        db, expire_days, UserResponse.model_validate(user),
+                        db, expire_days, UserResponse.model_validate(user, context={'db': db}),
                         user.id, user.expire, threshold=days_left
                     )
                 break
@@ -45,10 +45,28 @@ def add_notification_reminders(db: Session, user: "User", now: datetime = dateti
 
 def reset_user_by_next_report(db: Session, user: "User"):
     user = reset_user_by_next(db, user)
+    xray.operations.update_user(user.id, db)
+    report.user_data_reset_by_next(user=UserResponse.model_validate(user, context={'db': db}), user_admin=user.admin)
 
-    xray.operations.update_user(user)
 
-    report.user_data_reset_by_next(user=UserResponse.model_validate(user), user_admin=user.admin)
+def check_user_data_usage(db: Session, user: "User"):
+    if user.data_limit and user.used_traffic >= user.data_limit:
+        user.status = UserStatus.limited
+        db.commit()
+        usage_percent = (user.used_traffic / user.data_limit) * 100 if user.data_limit else 0
+        report.user_limited(
+            db, usage_percent, UserResponse.model_validate(user, context={'db': db}),
+        )
+
+
+def check_user_expiration(db: Session, user: "User"):
+    if user.expire and user.expire <= int(datetime.utcnow().timestamp()):
+        user.status = UserStatus.expired
+        db.commit()
+        expire_days = (user.expire - int(datetime.utcnow().timestamp())) // (24 * 3600)
+        report.user_expired(
+            db, expire_days, UserResponse.model_validate(user, context={'db': db}),
+        )
 
 
 def review():
@@ -84,7 +102,7 @@ def review():
             update_user_status(db, user, status)
 
             report.status_change(username=user.username, status=status,
-                                 user=UserResponse.model_validate(user), user_admin=user.admin)
+                                 user=UserResponse.model_validate(user, context={'db': db}), user_admin=user.admin)
 
             logger.info(f"User \"{user.username}\" status changed to {status}")
 
@@ -110,7 +128,7 @@ def review():
             start_user_expire(db, user)
 
             report.status_change(username=user.username, status=status,
-                                 user=UserResponse.model_validate(user), user_admin=user.admin)
+                                 user=UserResponse.model_validate(user, context={'db': db}), user_admin=user.admin)
 
             logger.info(f"User \"{user.username}\" status changed to {status}")
 

@@ -1,17 +1,22 @@
 import base64
+import json # For logging dicts
 import logging
 import random
 import secrets
 from collections import defaultdict
 from datetime import datetime as dt
 from datetime import timedelta
-from typing import TYPE_CHECKING, List, Literal, Union, Optional, Dict, Any # Added Any
+from typing import TYPE_CHECKING, List, Literal, Union, Optional, Dict, Any
 
 from jdatetime import date as jd # type: ignore
 
-from app import xray, logger # Added logger
+# Ensure xray, logger are available. If xray.config or xray.hosts are not yet populated
+# when this module loads, their usage in functions must be robust.
+from app import xray, logger # Main app logger
 from app.utils.system import get_public_ip, get_public_ipv6, readable_size
-from app.models.proxy import ProxyTypes, ShadowsocksSettings # Added ShadowsocksSettings
+from app.models.proxy import ProxyTypes, ShadowsocksSettings
+from app.db import crud as db_crud # For fetching node details
+from app.db import SessionLocal # To get a DB session if needed
 
 # Import subscription configuration classes correctly
 from .v2ray import V2rayShareLink, V2rayJsonConfig
@@ -19,10 +24,9 @@ from .singbox import SingBoxConfiguration
 from .outline import OutlineConfiguration
 from .clash import ClashConfiguration, ClashMetaConfiguration
 
-
 if TYPE_CHECKING:
-    from app.models.user import UserResponse # This is a Pydantic model
-    from app.db.models import ProxyHost as DBProxyHost # For type hint if directly used
+    from app.models.user import UserResponse
+    # from app.db.models import ProxyHost as DBProxyHost # No longer used
 
 from config import (
     ACTIVE_STATUS_TEXT,
@@ -36,30 +40,24 @@ SERVER_IP = get_public_ip()
 SERVER_IPV6 = get_public_ipv6()
 
 STATUS_EMOJIS = {
-    "active": "✅",
-    "expired": "⌛️",
-    "limited": "🪫",
-    "disabled": "❌",
-    "on_hold": "🔌",
+    "active": "✅", "expired": "⌛️", "limited": "🪫",
+    "disabled": "❌", "on_hold": "🔌",
 }
-
 STATUS_TEXTS = {
-    "active": ACTIVE_STATUS_TEXT,
-    "expired": EXPIRED_STATUS_TEXT,
-    "limited": LIMITED_STATUS_TEXT,
-    "disabled": DISABLED_STATUS_TEXT,
+    "active": ACTIVE_STATUS_TEXT, "expired": EXPIRED_STATUS_TEXT,
+    "limited": LIMITED_STATUS_TEXT, "disabled": DISABLED_STATUS_TEXT,
     "on_hold": ONHOLD_STATUS_TEXT,
 }
 
+# --- Helper functions (generate_v2ray_links, etc.) remain the same ---
+# They all call process_inbounds_and_tags, which is what we're modifying.
 
-# Helper functions for specific formats now accept active_node_id
 def generate_v2ray_links(proxies: dict, inbounds: dict, extra_data: dict, reverse: bool, active_node_id: Optional[int]) -> list:
     format_variables = setup_format_variables(extra_data)
     conf = V2rayShareLink()
-    # Assuming V2rayShareLink.add can handle settings being Pydantic models (it uses .model_dump())
-    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id)
+    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id) # type: ignore
 
-
+# ... (generate_clash_subscription, generate_singbox_subscription, etc. are similar)
 def generate_clash_subscription(
         proxies: dict, inbounds: dict, extra_data: dict, reverse: bool, active_node_id: Optional[int], is_meta: bool = False
 ) -> str:
@@ -68,7 +66,7 @@ def generate_clash_subscription(
     else:
         conf = ClashConfiguration()
     format_variables = setup_format_variables(extra_data)
-    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id)
+    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id) # type: ignore
 
 
 def generate_singbox_subscription(
@@ -76,7 +74,7 @@ def generate_singbox_subscription(
 ) -> str:
     conf = SingBoxConfiguration()
     format_variables = setup_format_variables(extra_data)
-    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id)
+    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id) # type: ignore
 
 
 def generate_outline_subscription(
@@ -84,7 +82,7 @@ def generate_outline_subscription(
 ) -> str:
     conf = OutlineConfiguration()
     format_variables = setup_format_variables(extra_data)
-    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id)
+    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id) # type: ignore
 
 
 def generate_v2ray_json_subscription(
@@ -92,316 +90,316 @@ def generate_v2ray_json_subscription(
 ) -> str:
     conf = V2rayJsonConfig()
     format_variables = setup_format_variables(extra_data)
-    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id)
+    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf, reverse, active_node_id) # type: ignore
 
 
+# --- generate_subscription remains the same ---
 def generate_subscription(
-        user: "UserResponse", # This is Pydantic UserResponse
+        user: "UserResponse",
         config_format: Literal["v2ray", "clash-meta", "clash", "sing-box", "outline", "v2ray-json"],
         as_base64: bool,
         reverse: bool,
-        active_node_id_override: Optional[int] = None # New parameter
+        active_node_id_override: Optional[int] = None
 ) -> str:
-    # user.selected_nodes logic removed.
-    # user.proxies are the Pydantic models of proxy settings (e.g. VLESSSettings)
-    # user.inbounds is Dict[ProxyTypes, List[str (tag)]]
+    # Use the node ID from the override if provided, otherwise from the user object
+    # This assumes user.active_node_id is correctly populated by UserResponse.build_dynamic_fields
+    current_active_node_id = active_node_id_override if active_node_id_override is not None else user.active_node_id
 
     kwargs = {
-        "proxies": user.proxies, # Pass the full user.proxies dict
-        "inbounds": user.inbounds,
-        "extra_data": user.model_dump(), # Use model_dump() for Pydantic models
+        "proxies": user.proxies,
+        "inbounds": user.inbounds, # This is Dict[ProxyTypes, List[str_tags]]
+        "extra_data": user.model_dump(exclude_none=True), # Get full user data as dict
         "reverse": reverse,
-        "active_node_id": active_node_id_override # Pass the active node ID
+        "active_node_id": current_active_node_id
     }
-
-    config_str = "" # Initialize to empty string
-
+    # ... (rest of the function is the same) ...
+    config_str = ""
     if config_format == "v2ray":
-        links = generate_v2ray_links(**kwargs) # type: ignore
+        links = generate_v2ray_links(**kwargs)
         config_str = "\n".join(links)
     elif config_format == "clash-meta":
-        config_str = generate_clash_subscription(**kwargs, is_meta=True) # type: ignore
+        config_str = generate_clash_subscription(**kwargs, is_meta=True)
     elif config_format == "clash":
-        config_str = generate_clash_subscription(**kwargs) # type: ignore
+        config_str = generate_clash_subscription(**kwargs)
     elif config_format == "sing-box":
-        config_str = generate_singbox_subscription(**kwargs) # type: ignore
+        config_str = generate_singbox_subscription(**kwargs)
     elif config_format == "outline":
-        config_str = generate_outline_subscription(**kwargs) # type: ignore
+        config_str = generate_outline_subscription(**kwargs)
     elif config_format == "v2ray-json":
-        config_str = generate_v2ray_json_subscription(**kwargs) # type: ignore
+        config_str = generate_v2ray_json_subscription(**kwargs)
     else:
         raise ValueError(f'Unsupported format "{config_format}"')
 
     if as_base64:
         config_str = base64.b64encode(config_str.encode()).decode()
-
     return config_str
 
-
+# --- format_time_left and setup_format_variables remain the same ---
 def format_time_left(seconds_left: int) -> str:
-    if not seconds_left or seconds_left <= 0: # Also check for None or 0
+    if not seconds_left or seconds_left <= 0:
         return "∞"
-    # ... (rest of the function remains the same)
     minutes, seconds = divmod(seconds_left, 60)
     hours, minutes = divmod(minutes, 60)
     days, hours = divmod(hours, 24)
-    months, days = divmod(days, 30) # Approximation
-
+    months, days = divmod(days, 30)
     result = []
     if months: result.append(f"{months}m")
     if days: result.append(f"{days}d")
-    if hours and (days < 7): result.append(f"{hours}h") # Show hours if less than a week of days
-    if minutes and not (months or days): result.append(f"{minutes}m") # Show minutes if no months/days
-    if not result and seconds_left > 0 : result.append(f"{int(seconds_left)}s") # Show seconds if nothing else and >0
+    if hours and (days < 7): result.append(f"{hours}h")
+    if minutes and not (months or days): result.append(f"{minutes}m")
+    if not result and seconds_left > 0 : result.append(f"{int(seconds_left)}s")
+    return " ".join(result) if result else "0s"
 
-    return " ".join(result) if result else "0s" # Handle case where result is empty (e.g. very short duration)
-
-
-def setup_format_variables(extra_data: dict) -> dict: # extra_data is from user.model_dump()
-    from app.models.user import UserStatus # Local import to avoid circular dependency issues at module level
-
-    user_status_val = extra_data.get("status") # This will be the enum member's value, e.g., "active"
-    # Convert string status to UserStatus enum member if necessary for comparison, though direct string compare is fine too.
-    # user_status_enum = UserStatus(user_status_val) if user_status_val else None
-
+def setup_format_variables(extra_data: dict) -> dict:
+    from app.models.user import UserStatus
+    user_status_val = extra_data.get("status")
     expire_timestamp = extra_data.get("expire")
     on_hold_expire_duration = extra_data.get("on_hold_expire_duration")
-    # ... (rest of setup_format_variables remains the same) ...
     now = dt.utcnow()
     now_ts = now.timestamp()
+    days_left_str = "∞"; time_left_str = "∞"; expire_date_str = "∞"; jalali_expire_date_str = "∞"
 
-    days_left_str = "∞"
-    time_left_str = "∞"
-    expire_date_str = "∞"
-    jalali_expire_date_str = "∞"
-
-    if user_status_val != UserStatus.on_hold.value: # Compare with enum's value
+    if user_status_val != UserStatus.on_hold.value:
         if expire_timestamp is not None and expire_timestamp >= 0:
             seconds_left = expire_timestamp - int(now_ts)
             expire_datetime = dt.fromtimestamp(expire_timestamp)
             expire_date_str = expire_datetime.strftime("%Y-%m-%d")
             try:
-                jalali_expire_date_str = jd.fromgregorian(
-                    date=expire_datetime.date() # Pass date object
-                ).strftime("%Y-%m-%d")
-            except Exception: # Catch potential errors from jdatetime
-                jalali_expire_date_str = expire_date_str # Fallback
-
+                jalali_expire_date_str = jd.fromgregorian(date=expire_datetime.date()).strftime("%Y-%m-%d")
+            except Exception: jalali_expire_date_str = expire_date_str
             if seconds_left > 0 :
                 days_left_val = (expire_datetime - now).days
-                days_left_str = str(days_left_val +1) if days_left_val >=0 else "0" # ensure non-negative days count
+                days_left_str = str(days_left_val + 1) if days_left_val >=0 else "0"
                 time_left_str = format_time_left(seconds_left)
-            else:
-                days_left_str = "0"
-                time_left_str = "0s"
-    else: # UserStatus.on_hold
+            else: days_left_str = "0"; time_left_str = "0s"
+    else:
         if on_hold_expire_duration is not None and on_hold_expire_duration > 0:
             days_left_str = str(timedelta(seconds=on_hold_expire_duration).days)
             time_left_str = format_time_left(on_hold_expire_duration)
-            expire_date_str = "-" # No specific expiry date when on hold
-            jalali_expire_date_str = "-"
-
-    data_limit_str = "∞"
-    data_left_str = "∞"
+            expire_date_str = "-"; jalali_expire_date_str = "-"
+    data_limit_str = "∞"; data_left_str = "∞"
     data_limit_val = extra_data.get("data_limit")
-    if data_limit_val is not None and data_limit_val > 0:  # Check if data_limit is set and positive
+    if data_limit_val is not None and data_limit_val > 0:
         data_limit_str = readable_size(data_limit_val)
         data_left_val = data_limit_val - extra_data.get("used_traffic", 0)
-        data_left_str = readable_size(max(0, data_left_val))  # Ensure non-negative
-    elif data_limit_val == 0:  # Explicitly 0 means limited after any usage
-        data_limit_str = readable_size(0)
-        data_left_str = readable_size(0)
-
-    status_emoji = STATUS_EMOJIS.get(user_status_val, "")
-    status_text = STATUS_TEXTS.get(user_status_val, "")
-    account_number = extra_data.get("account_number", "{ACCOUNT_NUMBER}")  # Use account_number from user data
-
-    format_variables = defaultdict(
-        lambda: "", # Default to empty string instead of "<missing>"
-        {
-            "SERVER_IP": SERVER_IP or "",
-            "SERVER_IPV6": SERVER_IPV6 or "",
-            "USERNAME": account_number, # Use account_number as USERNAME placeholder
-            "ACCOUNT_NUMBER": account_number,
-            "DATA_USAGE": readable_size(extra_data.get("used_traffic", 0)),
-            "DATA_LIMIT": data_limit_str,
-            "DATA_LEFT": data_left_str,
-            "DAYS_LEFT": days_left_str,
-            "EXPIRE_DATE": expire_date_str,
-            "JALALI_EXPIRE_DATE": jalali_expire_date_str,
-            "TIME_LEFT": time_left_str,
-            "STATUS_EMOJI": status_emoji,
-            "STATUS_TEXT": status_text,
-        },
-    )
-    return format_variables
+        data_left_str = readable_size(max(0, data_left_val))
+    elif data_limit_val == 0:
+        data_limit_str = readable_size(0); data_left_str = readable_size(0)
+    status_emoji = STATUS_EMOJIS.get(user_status_val, ""); status_text = STATUS_TEXTS.get(user_status_val, "")
+    account_number = extra_data.get("account_number", "{ACCOUNT_NUMBER}")
+    return defaultdict(lambda: "", {
+        "SERVER_IP": SERVER_IP or "", "SERVER_IPV6": SERVER_IPV6 or "",
+        "USERNAME": account_number, "ACCOUNT_NUMBER": account_number,
+        "DATA_USAGE": readable_size(extra_data.get("used_traffic", 0)),
+        "DATA_LIMIT": data_limit_str, "DATA_LEFT": data_left_str,
+        "DAYS_LEFT": days_left_str, "EXPIRE_DATE": expire_date_str,
+        "JALALI_EXPIRE_DATE": jalali_expire_date_str, "TIME_LEFT": time_left_str,
+        "STATUS_EMOJI": status_emoji, "STATUS_TEXT": status_text,
+    })
 
 
 def process_inbounds_and_tags(
-        user_inbounds: Dict[ProxyTypes, List[str]], # from user.inbounds
-        user_proxies: Dict[ProxyTypes, Any],       # from user.proxies (Pydantic models)
+        user_inbounds: Dict[ProxyTypes, List[str]], # e.g., {ProxyTypes.VLESS: ['marzban_service_1']}
+        user_proxies: Dict[ProxyTypes, Any],       # e.g., {ProxyTypes.VLESS: VLESSSettingsModelInstance}
         format_variables: dict,
         conf: Union[
             V2rayShareLink, V2rayJsonConfig, SingBoxConfiguration,
             ClashConfiguration, OutlineConfiguration
         ],
         reverse: bool,
-        active_node_id: Optional[int] # New parameter
+        active_node_id: Optional[int]
 ) -> Union[List, str]:
 
+    # Use the main app logger or a specific one for this module
+    _logger = logging.getLogger(f"{__name__}.process_inbounds_and_tags") # More specific
+    _logger.info(f"Processing inbounds for user {format_variables.get('ACCOUNT_NUMBER', 'N/A')}, active_node_id: {active_node_id}")
+    _logger.debug(f"Received user_inbounds: {user_inbounds}")
+    _logger.debug(f"Received user_proxies keys: {[k.value for k in user_proxies.keys()] if user_proxies else 'None'}")
 
-    processed_conf_tags = [] # To keep track of added proxy remarks for some client types
+    if not xray.config or not xray.config.inbounds_by_tag:
+        _logger.error("Global xray.config or xray.config.inbounds_by_tag is not loaded/available. Cannot generate links.")
+        return conf.render(reverse=reverse) # type: ignore
+
+    _logger.debug(f"Available global XRay inbound tags (xray.config.inbounds_by_tag.keys()): {list(xray.config.inbounds_by_tag.keys())}")
 
     all_user_tags_with_protocol = []
-    for protocol_enum, tags in user_inbounds.items():
-        for tag_name in tags:
+    if not user_inbounds:
+        _logger.warning("User has no specific inbounds (user_inbounds map is empty). No links will be generated.")
+        return conf.render(reverse=reverse) # type: ignore
+
+    for protocol_enum, tags_for_protocol in user_inbounds.items():
+        for tag_name in tags_for_protocol:
             all_user_tags_with_protocol.append({'protocol': protocol_enum, 'tag': tag_name})
 
+    if not all_user_tags_with_protocol:
+        _logger.warning("No tags to process after parsing user_inbounds. No links generated.")
+        return conf.render(reverse=reverse) # type: ignore
 
+    _logger.debug(f"Total tags to process for user: {all_user_tags_with_protocol}")
+
+    # Sorting based on global XRay config order (if still desired)
     global_inbound_order_map = {tag: index for index, tag in enumerate(xray.config.inbounds_by_tag.keys())}
-
     sorted_user_tags_with_protocol = sorted(
         all_user_tags_with_protocol,
-        key=lambda x: global_inbound_order_map.get(x['tag'], float('inf'))
+        key=lambda x: global_inbound_order_map.get(x['tag'], float('inf')) # Tags not in global config go last
     )
-
-    # MODIFICATION START: Logic to handle active_node_id and nodeless hosts
-    for item in sorted_user_tags_with_protocol:
-        protocol_enum: ProxyTypes = item['protocol']
-        tag_name: str = item['tag']
+    _logger.debug(f"Sorted tags for processing: {sorted_user_tags_with_protocol}")
 
 
-        proxy_specific_settings = user_proxies.get(protocol_enum)
-        if not proxy_specific_settings:
+    node_public_address = None
+    node_name_for_remark = "Server" # Default remark node name
+
+    if active_node_id is not None:
+        # Fetch active node's details (especially its public FQDN or IP)
+        # This requires a DB session.
+        db_for_node_fetch = SessionLocal()
+        try:
+            active_node_orm = db_crud.get_node_by_id(db_for_node_fetch, active_node_id)
+            if active_node_orm:
+                # Assuming Node model has an 'address' field for its public FQDN/IP
+                # And a 'name' field for remarks.
+                node_public_address = active_node_orm.address
+                node_name_for_remark = active_node_orm.name
+                _logger.info(f"  Fetched active node {active_node_id}: Name='{node_name_for_remark}', PublicAddress='{node_public_address}'")
+                if not node_public_address:
+                    _logger.warning(f"  Active node {active_node_id} ('{node_name_for_remark}') has no public address configured. Link generation may fail or use fallbacks.")
+            else:
+                _logger.error(f"  Active node with ID {active_node_id} not found in database. Cannot determine public address for links.")
+                return conf.render(reverse=reverse) # type: ignore
+        finally:
+            db_for_node_fetch.close()
+    else:
+        _logger.info("  No active_node_id provided; link generation will rely on global SERVER_IP or addresses within XRay config if public.")
+        # If no active_node_id, we might use a globally defined SERVER_IP or assume service listen address is public.
+        # This path is less common if users always activate specific nodes.
+        node_public_address = SERVER_IP # Fallback, or handle as error if specific node address is always expected
+
+
+    for item_idx, item_data in enumerate(sorted_user_tags_with_protocol):
+        protocol_enum: ProxyTypes = item_data['protocol']
+        service_tag_name: str = item_data['tag'] # e.g., 'marzban_service_1'
+
+        _logger.info(f"  Processing user's service tag {item_idx + 1}/{len(sorted_user_tags_with_protocol)}: Protocol='{protocol_enum.value}', Tag='{service_tag_name}' for NodeID={active_node_id}")
+
+        user_protocol_settings = user_proxies.get(protocol_enum)
+        if not user_protocol_settings:
+            _logger.warning(f"    User {format_variables.get('ACCOUNT_NUMBER')} missing proxy settings for protocol {protocol_enum.value}. Skipping tag '{service_tag_name}'.")
             continue
 
-        global_inbound_config = xray.config.inbounds_by_tag.get(tag_name)
-        if not global_inbound_config:
+        # Get the full XRay inbound configuration for this specific tag from the panel's loaded XRay config
+        # This 'actual_xray_inbound_config' is the source of truth for ports, paths, SNI from XRay's perspective.
+        actual_xray_inbound_config = xray.config.inbounds_by_tag.get(service_tag_name)
+        if not actual_xray_inbound_config:
+            _logger.warning(f"    Service tag '{service_tag_name}' (for user protocol {protocol_enum.value}) not found in the panel's loaded XRay configuration (xray.config.inbounds_by_tag). Skipping.")
             continue
+        _logger.debug(f"    Found XRay inbound config for tag '{service_tag_name}': Port={actual_xray_inbound_config.get('port')}, Listen='{actual_xray_inbound_config.get('listen')}'")
 
 
-        current_format_variables = format_variables.copy()
-        current_format_variables.update({
-            "PROTOCOL": global_inbound_config.get("protocol","").upper(),
-            "TRANSPORT": global_inbound_config.get("network","")
-        })
-
-        all_host_dicts_for_tag = xray.hosts.get(tag_name, [])
-
-        selected_host_dicts = [] # Initialize list for hosts that will be added to subscription
-
-        if active_node_id is not None:
-            logger.debug(f"User {current_format_variables.get('ACCOUNT_NUMBER')} has active_node_id {active_node_id}. "
-                         f"Filtering for ProxyHosts matching node_id {active_node_id} for tag '{tag_name}'.")
-            for host_dict_candidate in all_host_dicts_for_tag:
-                if host_dict_candidate.get('node_id') == active_node_id and \
-                   not host_dict_candidate.get('is_disabled', False):
-                    selected_host_dicts.append(host_dict_candidate)
-
-            if not selected_host_dicts:
-                logger.warning(f"User {current_format_variables.get('ACCOUNT_NUMBER')} has active_node_id {active_node_id}, "
-                               f"but no enabled ProxyHosts found for tag '{tag_name}' on this node. Skipping this tag for this node.")
-                continue # Skip to the next tag in sorted_user_tags_with_protocol
-
-        else: # active_node_id is None
-            logger.info(f"User {current_format_variables.get('ACCOUNT_NUMBER')} has no active_node_id. "
-                        f"Looking for enabled ProxyHosts with node_id=None (master instance) for tag '{tag_name}'.")
-            for host_dict_candidate in all_host_dicts_for_tag:
-                if host_dict_candidate.get('node_id') is None and \
-                   not host_dict_candidate.get('is_disabled', False):
-                    selected_host_dicts.append(host_dict_candidate)
-
-            if not selected_host_dicts:
-                logger.info(f"User {current_format_variables.get('ACCOUNT_NUMBER')} has no active_node_id, "
-                            f"and no enabled ProxyHosts with node_id=None found for tag '{tag_name}'. Skipping this tag.")
-                continue # Skip to the next tag in sorted_user_tags_with_protocol
-
-
-
-        for host_config_dict in selected_host_dicts: # Iterate only selected hosts
-            combined_inbound_details = global_inbound_config.copy()
-
-            host_addresses = host_config_dict.get("address", [])
-            if not host_addresses or not isinstance(host_addresses, list) or not host_addresses[0]:
-                logger.warning(f"Skipping host {host_config_dict.get('remark', 'Unknown')} for tag {tag_name} due to missing or invalid address.")
+        # Determine the final public address for the link
+        final_link_address = node_public_address # Default to the active node's address
+        if not final_link_address:
+            # If node address wasn't found, try fallback to XRay listen address ONLY if it's not a bind-all/localhost
+            xray_listen_addr = actual_xray_inbound_config.get("listen", "0.0.0.0")
+            if xray_listen_addr and xray_listen_addr not in ["0.0.0.0", "127.0.0.1", "::"]:
+                final_link_address = xray_listen_addr
+                _logger.info(f"    Using XRay listen address '{xray_listen_addr}' as public address for tag '{service_tag_name}' (node public address was not available).")
+            else:
+                _logger.error(f"    Cannot determine a public address for tag '{service_tag_name}' (NodeID: {active_node_id}, NodeAddr: {node_public_address}, XRayListen: {xray_listen_addr}). Skipping link generation for this tag.")
                 continue
-            processed_address = random.choice(host_addresses)
-            if '*' in processed_address:
-                 processed_address = processed_address.replace("*", secrets.token_hex(8))
 
-            sni_list_from_host = host_config_dict.get("sni")
-            final_sni_list = sni_list_from_host if sni_list_from_host is not None else global_inbound_config.get("sni")
-            processed_sni = ""
-            if final_sni_list and isinstance(final_sni_list, list):
-                salt = secrets.token_hex(8)
-                processed_sni = random.choice(final_sni_list).replace("*", salt)
+        final_link_port = actual_xray_inbound_config.get("port") # Port should come from XRay config
 
-            req_host_list_from_host = host_config_dict.get("host")
-            final_req_host_list = req_host_list_from_host if req_host_list_from_host is not None else global_inbound_config.get("host")
-            processed_req_host = ""
-            if final_req_host_list and isinstance(final_req_host_list, list):
-                salt = secrets.token_hex(8)
-                processed_req_host = random.choice(final_req_host_list).replace("*", salt)
+        # Prepare `link_specific_details` from `actual_xray_inbound_config`
+        link_specific_details = actual_xray_inbound_config.copy() # Includes port, protocol, settings, streamSettings
+        stream_settings = link_specific_details.get("streamSettings", {})
 
-            path_from_host = host_config_dict.get("path")
-            processed_path_template = path_from_host if path_from_host is not None else global_inbound_config.get("path", "")
-            processed_path = processed_path_template.format_map(current_format_variables)
+        _logger.debug(f"    Actual XRay inbound config for tag '{service_tag_name}':")
+        _logger.debug(f"      Full config: {json.dumps(actual_xray_inbound_config, default=str, indent=2)}")
+        _logger.debug(f"      Stream settings: {json.dumps(stream_settings, default=str, indent=2)}")
 
-            if host_config_dict.get("use_sni_as_host", False) and processed_sni:
-                processed_req_host = processed_sni
+        # Extract and format SNI, Path, Host header for the link generation classes
+        link_specific_details['sni'] = stream_settings.get("tlsSettings", {}).get("serverName") or \
+                                       stream_settings.get("realitySettings", {}).get("serverName", "")
+        if '*' in link_specific_details['sni']:
+            link_specific_details['sni'] = link_specific_details['sni'].replace("*", secrets.token_hex(8))
 
-            combined_inbound_details.update({
-                "port": host_config_dict.get("port") or global_inbound_config.get("port"),
-                "sni": processed_sni,
-                "host": processed_req_host,
-                "path": processed_path,
-                "tls": host_config_dict.get("security", global_inbound_config.get("tls")),
-                "alpn": host_config_dict.get("alpn") if host_config_dict.get("alpn") is not None else global_inbound_config.get("alpn"),
-                "fp": host_config_dict.get("fingerprint") or global_inbound_config.get("fp", ""),
-                "pbk": host_config_dict.get("pbk") or global_inbound_config.get("pbk", ""),
-                "sid": host_config_dict.get("sid") or global_inbound_config.get("sid", ""),
-                "spx": host_config_dict.get("spx") or global_inbound_config.get("spx", ""),
-                "allowinsecure": host_config_dict.get("allowinsecure", False) or global_inbound_config.get("allowinsecure", False),
-                "mux_enable": host_config_dict.get("mux_enable", False),
-                "fragment_setting": host_config_dict.get("fragment_setting"),
-                "noise_setting": host_config_dict.get("noise_setting"),
-                "random_user_agent": host_config_dict.get("random_user_agent", False),
-                "header_type": host_config_dict.get("header_type") or global_inbound_config.get("header_type", "none"),
-                "scMaxEachPostBytes": host_config_dict.get('scMaxEachPostBytes', global_inbound_config.get('scMaxEachPostBytes')),
-                "scMaxConcurrentPosts": host_config_dict.get('scMaxConcurrentPosts', global_inbound_config.get('scMaxConcurrentPosts')),
-                "scMinPostsIntervalMs": host_config_dict.get('scMinPostsIntervalMs', global_inbound_config.get('scMinPostsIntervalMs')),
-                "xPaddingBytes": host_config_dict.get('xPaddingBytes', global_inbound_config.get('xPaddingBytes')),
-                "noGRPCHeader": host_config_dict.get('noGRPCHeader', global_inbound_config.get('noGRPCHeader', False)),
-                "heartbeatPeriod": host_config_dict.get('heartbeatPeriod', global_inbound_config.get('heartbeatPeriod', 0)),
-                "keepAlivePeriod": host_config_dict.get('keepAlivePeriod', global_inbound_config.get('keepAlivePeriod', 0)),
-                "xmux": host_config_dict.get('xmux', global_inbound_config.get('xmux', {})),
-                "mode": host_config_dict.get('mode', global_inbound_config.get('mode', "auto")),
-                "multiMode": host_config_dict.get('multiMode', global_inbound_config.get('multiMode', False)),
-            })
+        link_specific_details['host'] = stream_settings.get("wsSettings", {}).get("headers", {}).get("Host") or \
+                                        stream_settings.get("httpSettings", {}).get("headers", {}).get("Host", "") # For HTTP/2 upg.
 
-            user_protocol_settings_pydantic = proxy_specific_settings
+        # Extract network type from stream settings
+        network_type = stream_settings.get("network", "tcp")
+        link_specific_details['network'] = network_type
+        _logger.debug(f"      Network type: {network_type}")
 
-            try:
-                # Ensure settings are properly converted to dict with string values
-                settings_dict = user_protocol_settings_pydantic.model_dump(exclude_none=True)
-                if isinstance(user_protocol_settings_pydantic, ShadowsocksSettings):
-                    # Handle method value - it could be an enum or already a string
-                    if 'method' in settings_dict:
-                        method_value = settings_dict['method']
-                        if hasattr(method_value, 'value'):  # If it's an enum
-                            settings_dict['method'] = method_value.value
-                        # If it's already a string, leave it as is
+        # Set header_type based on network type and stream settings
+        if network_type == "ws":
+            link_specific_details['header_type'] = "none"
+        elif network_type == "tcp":
+            link_specific_details['header_type'] = stream_settings.get("tcpSettings", {}).get("header", {}).get("type", "none")
+        elif network_type == "grpc":
+            link_specific_details['header_type'] = "grpc"
+        else:
+            link_specific_details['header_type'] = "none"
+        _logger.debug(f"      Header type: {link_specific_details['header_type']}")
 
-                conf.add( # type: ignore
-                    remark=host_config_dict.get("remark", "N/A").format_map(current_format_variables),
-                    address=processed_address.format_map(current_format_variables),
-                    inbound=combined_inbound_details,
-                    settings=settings_dict
-                )
-            except Exception as e:
-                logger.error(f"Error adding config for remark {host_config_dict.get('remark', 'N/A')}: {e}", exc_info=True)
+        # Add TLS settings
+        link_specific_details['tls'] = stream_settings.get("security", "") # 'tls', 'reality', or empty
+        link_specific_details['fp'] = stream_settings.get("tlsSettings", {}).get("fingerprint") or \
+                                      stream_settings.get("realitySettings", {}).get("fingerprint", "")
+        link_specific_details['alpn'] = stream_settings.get("tlsSettings", {}).get("alpn", []) # Default to empty list if not present
 
-    return conf.render(reverse=reverse) # type: ignore
+        path_val = ""
+        if network_type == "ws" and stream_settings.get("wsSettings"):
+            path_val = stream_settings["wsSettings"].get("path", "")
+        elif network_type == "grpc" and stream_settings.get("grpcSettings"):
+            path_val = stream_settings["grpcSettings"].get("serviceName", "")
+        # Apply formatting to path if it uses variables (less common for direct XRay config values)
+        link_specific_details['path'] = path_val.format_map(format_variables) if path_val else ""
+        _logger.debug(f"      Path: {link_specific_details['path']}")
+
+        _logger.debug(f"      Final link_specific_details: {json.dumps(link_specific_details, default=str, indent=2)}")
+
+        remark_str = f"{node_name_for_remark} - {protocol_enum.value.upper()}"
+        if format_variables.get("ACCOUNT_NUMBER"): # Add user identifier to remark
+            remark_str = f"{format_variables['ACCOUNT_NUMBER']}@{node_name_for_remark} - {protocol_enum.value.upper()}"
+        remark_str = remark_str.format_map(format_variables) # Apply any other remark formatting
+
+
+        user_protocol_settings_dict = user_protocol_settings.model_dump(exclude_none=True)
+        if isinstance(user_protocol_settings, ShadowsocksSettings): # Ensure enum values are strings
+            if 'method' in user_protocol_settings_dict and hasattr(user_protocol_settings_dict['method'], 'value'):
+                user_protocol_settings_dict['method'] = user_protocol_settings_dict['method'].value
+
+        _logger.debug(f"    Final components for conf.add for tag '{service_tag_name}':")
+        _logger.debug(f"      Remark: '{remark_str}'")
+        _logger.debug(f"      Address: '{final_link_address}'")
+        _logger.debug(f"      Port: {final_link_port}") # Port is part of link_specific_details from XRay config
+        _logger.debug(f"      User Protocol Settings (passed as 'settings'): {user_protocol_settings_dict}")
+        _logger.debug(f"      Link Specific Details (passed as 'inbound'): {json.dumps(link_specific_details, default=str, indent=2)}")
+
+
+        try:
+            conf.add( # type: ignore
+                remark=remark_str,
+                address=final_link_address, # Public FQDN or IP of the node
+                # The `inbound` dict here should contain all XRay inbound params like port, protocol, streamSettings, sni, path, host etc.
+                # The `settings` dict should contain user-specific params like VLESS id, SS password.
+                inbound=link_specific_details,   # This now carries port, sni, path, host, tls, fp etc from actual_xray_inbound_config
+                settings=user_protocol_settings_dict # User's VLESS id, SS pass/method etc.
+            )
+            _logger.info(f"    Successfully added configuration for tag '{service_tag_name}' to subscription builder.")
+        except Exception as e_add:
+            _logger.error(f"    Error adding config for tag '{service_tag_name}', remark '{remark_str}': {e_add}", exc_info=True)
+
+    rendered_config = conf.render(reverse=reverse) # type: ignore
+    if isinstance(rendered_config, list) and not rendered_config:
+        _logger.warning(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: conf.render() produced an empty list. No links were successfully added.")
+    elif isinstance(rendered_config, str) and not rendered_config.strip():
+         _logger.warning(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: conf.render() produced an empty string. No config generated.")
+    else:
+        _logger.info(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: Successfully rendered subscription content.")
+
+    return rendered_config
 
 
 def encode_title(text: str) -> str:

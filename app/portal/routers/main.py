@@ -19,6 +19,8 @@ from app.portal.auth import get_current_user, get_current_user_optional # Assumi
 from app.models.user import UserResponse, UserStatus, UserModify, UserStatusModify # UserStatusCreate removed as not used
 from app.models.node import NodeStatus # Import NodeStatus for filtering
 # from app.models.node import NodeResponse # Not strictly needed if template uses ORM node attributes
+from app.models.plan import PlanResponse
+from app.portal.plans import get_plan_by_id
 
 from config import MOCK_STRIPE_PAYMENT as APP_MOCK_STRIPE_PAYMENT
 
@@ -99,20 +101,36 @@ templates.env.filters["timestamp_to_datetime_str"] = timestamp_to_datetime_str_f
 templates.env.filters["time_until_expiry"] = time_until_expiry_filter
 
 # --- Helper function to activate user plan ---
-async def activate_user_plan(
+async def _activate_user_plan(
     db: Session,
     user_account_number: str,
     plan_id: str,
     background_tasks: BackgroundTasks
 ):
+    """
+    Core business logic for activating a user's plan.
+    This function handles the actual plan activation process including:
+    - Updating user status and limits
+    - Configuring proxies
+    - Scheduling background tasks
+
+    Args:
+        db: Database session
+        user_account_number: The user's account number
+        plan_id: The ID of the plan to activate
+        background_tasks: FastAPI background tasks for async operations
+
+    Returns:
+        bool: True if activation was successful, False otherwise
+    """
     db_user_orm = crud.get_user(db, account_number=user_account_number)
     if not db_user_orm:
-        logger.error(f"activate_user_plan: User {user_account_number} not found.")
+        logger.error(f"_activate_user_plan: User {user_account_number} not found.")
         return False
 
     plan = get_plan_by_id(plan_id)
     if not plan:
-        logger.error(f"activate_user_plan: Plan {plan_id} not found for user {user_account_number}.")
+        logger.error(f"_activate_user_plan: Plan {plan_id} not found for user {user_account_number}.")
         return False
 
     new_data_limit = db_user_orm.data_limit
@@ -150,7 +168,7 @@ async def activate_user_plan(
     try:
         user_modify_payload = UserModify(**filtered_payload_dict)
     except Exception as e:
-        logger.error(f"activate_user_plan: Pydantic validation error for UserModify for user {user_account_number}: {e}. Payload: {filtered_payload_dict}", exc_info=True)
+        logger.error(f"_activate_user_plan: Pydantic validation error for UserModify for user {user_account_number}: {e}. Payload: {filtered_payload_dict}", exc_info=True)
         return False
 
     try:
@@ -159,24 +177,24 @@ async def activate_user_plan(
         # If traffic reset is desired upon plan activation (e.g., new data limit applied)
         # and the plan implies it, you might call it here.
         if plan.data_limit is not None: # Or some other condition indicating traffic reset
-            logger.info(f"activate_user_plan: Plan includes data limit, resetting traffic for user {user_account_number}.")
+            logger.info(f"_activate_user_plan: Plan includes data limit, resetting traffic for user {user_account_number}.")
             updated_user_orm = crud.reset_user_data_usage(db=db, dbuser=updated_user_orm) # Returns the updated user
 
         # Ensure user has all default proxy types
-        logger.info(f"activate_user_plan: Ensuring default proxy types for user {user_account_number}")
+        logger.info(f"_activate_user_plan: Ensuring default proxy types for user {user_account_number}")
         crud.ensure_all_default_proxies_for_user(db=db, user_id=updated_user_orm.id)
 
         # Refresh the user object to get the updated proxies
         db.refresh(updated_user_orm)
-        user_response_for_xray = UserResponse.model_validate(updated_user_orm)
+        user_response_for_xray = UserResponse.model_validate(updated_user_orm, context={'db': db})
 
         background_tasks.add_task(xray.operations.update_user, user_id=updated_user_orm.id)
 
-        logger.info(f"activate_user_plan: User {user_account_number} processed for plan {plan_id}. Xray update task scheduled.")
+        logger.info(f"_activate_user_plan: User {user_account_number} processed for plan {plan_id}. Xray update task scheduled.")
         return True
     except Exception as e:
         db.rollback()
-        logger.error(f"activate_user_plan: Error updating user {user_account_number} or scheduling Xray: {e}", exc_info=True)
+        logger.error(f"_activate_user_plan: Error updating user {user_account_number} or scheduling Xray: {e}", exc_info=True)
         return False
 
 
@@ -197,7 +215,7 @@ async def portal_home(
 
 
     # If user is authenticated, convert to Pydantic for template if needed, or pass ORM
-    user_for_template = UserResponse.model_validate(current_user) if current_user else None
+    user_for_template = UserResponse.model_validate(current_user, context={'db': db}) if current_user else None
 
     if user_for_template and user_for_template.status == UserStatus.disabled:
         return RedirectResponse(url=request.url_for("portal_account_page"), status_code=303) # Use named route
@@ -214,87 +232,68 @@ async def portal_home(
     )
 
 @router.get("/account", response_class=HTMLResponse, name="portal_account_page")
-async def portal_account_page( # Renamed route function
+async def portal_account_page(
     request: Request,
-    db: Session = Depends(get_db),
-    current_user_orm: DBUser = Depends(get_current_user) # Ensure this returns ORM user
+    current_user_orm: DBUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    # current_user_orm is already fetched by dependency, includes eager loads like active_node
-    user_info_for_template = UserResponse.model_validate(current_user_orm)
+    # Get available plans for the template
+    plans_data = [
+        get_plan_by_id("basic"),
+        get_plan_by_id("premium"),
+        get_plan_by_id("unlimited")
+    ]
+    plans_data = [p for p in plans_data if p]
 
-    plans_data = [p for p in [get_plan_by_id("basic"), get_plan_by_id("premium"), get_plan_by_id("unlimited")] if p]
+    # Get available nodes for the template
+    nodes_for_display = crud.get_nodes(db, status=[NodeStatus.connected, NodeStatus.connecting, NodeStatus.error])
 
-    # Nodes data for potential display (e.g. dropdown for manual activation if we add it later)
-    # For now, active node is managed on servers page.
-    # nodes_data = [NodeResponse.model_validate(n) for n in crud.get_nodes(db, status=NodeStatus.connected)]
+    # Convert user to Pydantic model for template
+    user_response = UserResponse.model_validate(current_user_orm, context={'db': db})
 
-    subscription_token = ""
-    # Logic to extract token from subscription_url more robustly
-    if user_info_for_template.subscription_url:
-        try:
-            # Example: /sub/00000000-0000-0000-0000-000000000000
-            #          /sub/00000000-0000-0000-0000-000000000000/
-            #          /sub/00000000-0000-0000-0000-000000000000/clash
-            match = re.search(r"/sub/([a-fA-F0-9-]+)", user_info_for_template.subscription_url)
-            if match:
-                subscription_token = match.group(1)
-        except Exception as e:
-            logger.warning(f"Error parsing subscription token from URL '{user_info_for_template.subscription_url}': {e}")
-
-
-    subscription_url_base = ""
-    if subscription_token:
-        try:
-            # Ensure the 'user_subscription' route name is correct as defined in app.routers.subscription
-            subscription_url_base = str(request.url_for('user_subscription', token=subscription_token))
-        except Exception as e: # Catch runtime error if route not found by that name
-            logger.error(f"Could not generate subscription_url_base for token '{subscription_token}': {e}. Route 'user_subscription' might be missing or misnamed.")
-            # Fallback to manual construction if url_for fails (less ideal)
-            if "/sub/" in user_info_for_template.subscription_url:
-                 parts = user_info_for_template.subscription_url.split('/sub/')
-                 if len(parts) > 1:
-                     base_part = request.base_url # Use request's base URL
-                     # Correctly join parts to form the base URL for subscription
-                     subscription_url_base = f"{str(base_part).rstrip('/')}/{XRAY_SUBSCRIPTION_PATH.strip('/')}/{subscription_token}"
-
+    # Get subscription URL base
+    subscription_url_base = f"{FRONTEND_URL}/sub/{user_response.subscription_url.split('/')[-1]}"
 
     return templates.TemplateResponse(
         "account.html",
         {
             "request": request,
-            "current_user": user_info_for_template, # Pydantic UserResponse
+            "current_user": user_response,
             "plans": plans_data,
-            # "nodes": nodes_data, # Not passing nodes here, handled by /servers page
+            "nodes": nodes_for_display,
+            "subscription_url_base": subscription_url_base,
             "STRIPE_PUBLIC_KEY": STRIPE_PUBLIC_KEY,
-            "subscription_url_base": subscription_url_base.rstrip('/'),
-            "MOCK_STRIPE_PAYMENT": MOCK_STRIPE_PAYMENT,
+            "MOCK_STRIPE_PAYMENT": MOCK_STRIPE_PAYMENT
         }
     )
 
 @router.get("/servers", response_class=HTMLResponse, name="portal_servers_page")
-async def portal_servers_page( # Renamed route function
+async def portal_servers_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user_orm: DBUser = Depends(get_current_user) # Use ORM from auth dependency
+    current_user_orm: DBUser = Depends(get_current_user)
 ):
-    # Fetch only nodes that users can potentially connect to.
-    # Admins might see all nodes in their dashboard, but users see connectable ones.
     nodes_for_display = crud.get_nodes(db, status=[NodeStatus.connected, NodeStatus.connecting, NodeStatus.error])
-    # NodeStatus.error might be included to show it's temporarily down.
-    # NodeStatus.connecting might also be shown.
-    # The template logic will disable "Activate" for non-connected nodes.
 
-    # Pass ORM current_user to template, which will have active_node_id and account_number.
-    # The template can then use current_user_orm.active_node_id directly.
-    return templates.TemplateResponse(
+    validation_context = {'db': db, 'request': request}
+    logger.info(f"portal_servers_page: Context for UserResponse.model_validate: {validation_context}")
+
+    logger.warning("portal_servers_page: === BEFORE UserResponse.model_validate ===")
+    user_response = UserResponse.model_validate(current_user_orm, context=validation_context)
+    logger.warning("portal_servers_page: === AFTER UserResponse.model_validate ===")
+    logger.warning(f"portal_servers_page: user_response type: {type(user_response)}, links: {getattr(user_response, 'links', 'N/A')}")
+
+    logger.warning("portal_servers_page: === BEFORE TemplateResponse initialization ===")
+    response = templates.TemplateResponse(
         "servers.html",
         {
             "request": request,
-            "nodes": nodes_for_display, # List of ORM Node objects
-            "current_user": current_user_orm, # Pass ORM User object
-            # "NodeStatus": NodeStatus # No longer needed if template uses node.status.value
+            "nodes": nodes_for_display,
+            "current_user": user_response,
         }
     )
+    logger.warning("portal_servers_page: === AFTER TemplateResponse initialization ===")
+    return response
 
 @router.post("/create-checkout-session", name="create_checkout_session")
 async def create_checkout_session(
@@ -316,8 +315,11 @@ async def create_checkout_session(
 
     if MOCK_STRIPE_PAYMENT:
         logger.info(f"Mock payment mode: Simulating payment for user {current_user_orm.account_number}, plan {plan_id}")
-        activation_success = await activate_user_plan(
-            db, current_user_orm.account_number, plan_id, background_tasks
+        activation_success = await _activate_user_plan(
+            db=db,
+            user_account_number=current_user_orm.account_number,
+            plan_id=plan_id,
+            background_tasks=background_tasks
         )
         # Use named route for redirect URL
         redirect_url_base = str(request.url_for("portal_account_page"))
@@ -408,7 +410,7 @@ async def stripe_webhook_handler(
                 return JSONResponse({"status": "error_missing_data_acknowledged"}, status_code=200)
 
             logger.info(f"Webhook: Payment successful for user {user_account_number}, plan {plan_id_from_meta}. Activating plan.")
-            activation_success = await activate_user_plan(db, user_account_number, plan_id_from_meta, background_tasks)
+            activation_success = await _activate_user_plan(db, user_account_number, plan_id_from_meta, background_tasks)
 
             if not activation_success:
                 logger.error(f"Webhook: Failed to activate plan {plan_id_from_meta} for user {user_account_number} after successful payment.")
@@ -453,3 +455,60 @@ try:
     from config import XRAY_SUBSCRIPTION_PATH
 except ImportError:
     XRAY_SUBSCRIPTION_PATH = "sub" # Default fallback
+
+@router.post("/account/activate", response_model=UserResponse, name="activate_plan_api")
+async def activate_plan_api_endpoint(
+    request: Request,
+    plan_id: str,
+    db: Session = Depends(get_db),
+    current_user_orm: DBUser = Depends(get_current_user),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """
+    API endpoint for directly activating a user's plan.
+    This is the HTTP interface for plan activation, which:
+    - Validates the request
+    - Calls the core activation logic
+    - Returns appropriate HTTP responses
+
+    Args:
+        request: The FastAPI request object
+        plan_id: The ID of the plan to activate
+        db: Database session (injected)
+        current_user_orm: Current user (injected)
+        background_tasks: Background tasks (injected)
+
+    Returns:
+        UserResponse: The updated user data
+        or
+        RedirectResponse: Redirect to servers page if no active node
+    """
+    success = await _activate_user_plan(
+        db=db,
+        user_account_number=current_user_orm.account_number,
+        plan_id=plan_id,
+        background_tasks=background_tasks
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to activate plan")
+
+    # Get the updated user
+    updated_user = UserResponse.model_validate(current_user_orm, context={'db': db})
+
+    # If user doesn't have an active node, redirect to servers page
+    if not updated_user.active_node_id:
+        return RedirectResponse(
+            url=request.url_for("portal_servers_page"),
+            status_code=303
+        )
+
+    return updated_user
+
+@router.get("/account/plans", response_model=List[PlanResponse])
+async def get_available_plans(
+    current_user: Optional[DBUser] = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    plans = [p for p in [get_plan_by_id("basic"), get_plan_by_id("premium"), get_plan_by_id("unlimited")] if p]
+    user_for_template = UserResponse.model_validate(current_user, context={'db': db}) if current_user else None
+    return plans

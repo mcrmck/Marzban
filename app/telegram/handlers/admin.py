@@ -332,7 +332,7 @@ def edit_command(call: types.CallbackQuery):
                 '❌ User not found.',
                 show_alert=True
             )
-        user = UserResponse.model_validate(db_user)
+        user = UserResponse.model_validate(db_user, context={'db': db})
     mem_store.set(f'{call.message.chat.id}:username', username)
     mem_store.set(f'{call.message.chat.id}:data_limit', db_user.data_limit)
 
@@ -620,7 +620,7 @@ def edit_note_step(message: types.Message):
         last_note = db_user.note
         modify = UserModify(note=note)
         db_user = crud.update_user(db, db_user, modify)
-        user = UserResponse.model_validate(db_user)
+        user = UserResponse.model_validate(db_user, context={'db': db})
         bot.reply_to(
             message, get_user_info_text(db_user), parse_mode="html",
             reply_markup=BotKeyboard.user_menu(user_info={'status': user.status, 'username': user.username}))
@@ -1655,10 +1655,10 @@ def confirm_user_command(call: types.CallbackQuery):
                     proxies=proxies,
                     inbounds=inbounds
                 )
-            last_user = UserResponse.model_validate(db_user)
+            last_user = UserResponse.model_validate(db_user, context={'db': db})
             db_user = crud.update_user(db, db_user, modify)
 
-            user = UserResponse.model_validate(db_user)
+            user = UserResponse.model_validate(db_user, context={'db': db})
 
             if user.status == UserStatus.active:
                 xray.operations.update_user(db_user)
@@ -1780,7 +1780,7 @@ def confirm_user_command(call: types.CallbackQuery):
                 with GetDB() as db:
                     db_user = crud.create_user(db, new_user)
                     proxies = db_user.proxies
-                    user = UserResponse.model_validate(db_user)
+                    user = UserResponse.model_validate(db_user, context={'db': db})
                     xray.operations.add_user(db_user)
                     if mem_store.get(f"{call.message.chat.id}:is_bulk", False):
                         schedule_delete_message(call.message.chat.id, call.message.id)
@@ -2080,7 +2080,7 @@ def search_user(message: types.Message):
             if not db_user:
                 bot.reply_to(message, f'❌ User «{username}» not found.')
                 continue
-            user = UserResponse.model_validate(db_user)
+            user = UserResponse.model_validate(db_user, context={'db': db})
             bot.reply_to(
                 message,
                 get_user_info_text(db_user),

@@ -2,6 +2,8 @@ import secrets
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Union
+from sqlalchemy.orm import Session
+import logging
 
 from pydantic import (
     BaseModel,
@@ -9,6 +11,7 @@ from pydantic import (
     Field,
     field_validator,
     model_validator,
+    ValidationInfo,
     # EmailStr, # Not used here anymore
 )
 
@@ -18,6 +21,7 @@ from app.models.proxy import ProxySettings, ProxyTypes
 from app.subscription.share import generate_v2ray_links # Check if this uses username
 from app.utils.jwt import create_subscription_token # Check if this uses username
 from config import XRAY_SUBSCRIPTION_PATH, XRAY_SUBSCRIPTION_URL_PREFIX
+from app.db import crud
 
 
 class ReminderType(str, Enum):
@@ -216,23 +220,117 @@ class UserResponse(User):
     model_config = ConfigDict(from_attributes=True) # Enables ORM mode
 
     @model_validator(mode="after")
-    def build_dynamic_fields(self) -> 'UserResponse':
+    def build_dynamic_fields(self, info: ValidationInfo) -> 'UserResponse':
+        logging.warning(
+            f"UserResponse.build_dynamic_fields: ENTERED. "
+            f"info.config: {info.config}, info.context: {info.context}, "
+            f"type(info.context): {type(info.context)}"
+        )
 
-        if not self.links and self.proxies and self.inbounds:
+        # Detect FastAPI's subsequent context-less validation call
+        is_problematic_fastapi_call = (info.context is None and info.config == {})
 
-            self.links = generate_v2ray_links(
-                proxies=self.proxies,
-                inbounds=self.inbounds,
-                extra_data=self.model_dump(),
-                reverse=False,
-                active_node_id=self.active_node_id
+        if is_problematic_fastapi_call:
+            logging.error(
+                "UserResponse.build_dynamic_fields: PROBLEMATIC FastAPI serialization call DETECTED "
+                "(empty config, no context)."
             )
+            # If dynamic fields were already populated by a previous, context-aware call,
+            # trust that and don't overwrite.
+            if hasattr(self, 'links') and self.links and \
+               hasattr(self, 'subscription_url') and self.subscription_url:
+                logging.warning(
+                    "UserResponse.build_dynamic_fields: Problematic call, but dynamic fields "
+                    "seem pre-populated. Returning self."
+                )
+                return self
+            else:
+                logging.error(
+                    "UserResponse.build_dynamic_fields: Problematic call AND dynamic fields "
+                    "NOT populated. This is unexpected. Proceeding with default/error values."
+                )
 
-        if not self.subscription_url:
-            salt = secrets.token_hex(8)
-            url_prefix = (XRAY_SUBSCRIPTION_URL_PREFIX).replace('*', salt)
-            token = create_subscription_token(self.account_number)
-            self.subscription_url = f"{url_prefix}/{XRAY_SUBSCRIPTION_PATH}/{token}"
+        # Attempt to get db and request from context
+        db = info.context.get('db') if info.context else None
+
+        # Initialize fields if they don't exist (e.g., first pass or problematic call recovery)
+        if not hasattr(self, 'links') or not self.links:
+            self.links = []
+        if not hasattr(self, 'subscription_url') or not self.subscription_url:
+            self.subscription_url = ""
+
+        # If db is not available (either original problematic call or a genuine miss),
+        # set error/default messages and return.
+        if not db:
+            log_message = "UserResponse.build_dynamic_fields: 'db' not available "
+            if info.context is None:
+                log_message += "(ValidationInfo.context is None). "
+            elif not info.context.get('db'):
+                log_message += f"(db not in ValidationInfo.context keys: {list(info.context.keys())}). "
+            log_message += "Links may not be fully generated."
+            logging.warning(log_message)
+
+            self.links = self.links or ["Configuration links require server context."]
+            self.subscription_url = self.subscription_url or "Subscription URL requires server context."
+            return self
+
+        # --- Normal Link and Subscription URL Generation Logic ---
+        user_account_number = self.account_number # Assuming self has account_number
+
+        # Generate subscription URL
+        if not self.subscription_url: # Only if not already set (e.g., by problematic call check)
+            try:
+                salt = secrets.token_hex(8)
+                url_prefix = (XRAY_SUBSCRIPTION_URL_PREFIX).replace('*', salt)
+                token = create_subscription_token(user_account_number)
+                self.subscription_url = f"{url_prefix}/{XRAY_SUBSCRIPTION_PATH}/{token}"
+            except Exception as e:
+                logging.error(f"Error generating subscription URL for user {user_account_number}: {e}", exc_info=True)
+                self.subscription_url = "ErrorGeneratingSubURL"
+
+        # Generate V2Ray links if node is active and proxies exist
+        if self.active_node_id and self.proxies:
+            try:
+                node_services = crud.get_services_for_node(db, self.active_node_id)
+                active_node_specific_inbounds = {}
+
+                for proxy_type_enum, user_proxy_settings in self.proxies.items():
+                    active_node_specific_inbounds[proxy_type_enum] = []
+                    for service_config in node_services:
+                        if (service_config.enabled and
+                            hasattr(service_config, 'protocol_type') and # Check attribute existence
+                            service_config.protocol_type.value.lower() == proxy_type_enum.value.lower() and
+                            hasattr(service_config, 'xray_inbound_tag') and # Check attribute existence
+                            service_config.xray_inbound_tag):
+                            active_node_specific_inbounds[proxy_type_enum].append(service_config.xray_inbound_tag)
+
+                if not active_node_specific_inbounds or not any(active_node_specific_inbounds.values()):
+                    logging.warning(
+                        f"User {user_account_number} on active node {self.active_node_id}: No matching enabled "
+                        f"services with inbound tags found for any user proxy type."
+                    )
+                    self.links = [f"No server configurations for node {self.active_node_id}: No enabled services with required inbound tags match your protocols."]
+                else:
+                    self.links = generate_v2ray_links(
+                        proxies=self.proxies,
+                        inbounds=active_node_specific_inbounds,
+                        extra_data=self.model_dump(exclude_none=True), # Use exclude_none
+                        reverse=False,
+                        active_node_id=self.active_node_id
+                    )
+                    if not self.links:
+                         self.links = [f"No configurations generated for node {self.active_node_id}. Check services/protocols."]
+            except Exception as e:
+                logging.error(f"Error generating links for user {user_account_number} on node {self.active_node_id}: {e}", exc_info=True)
+                self.links = [f"Error generating configurations for node {self.active_node_id}."]
+        else: # No active node or no proxies
+            if not self.active_node_id:
+                self.links = ["Please activate a server node first to see configuration links."]
+            elif not self.proxies:
+                self.links = [f"No proxy protocols configured for your account to use with node {self.active_node_id or ''}."]
+            # If self.links was already set (e.g. by problematic call check), don't overwrite unless it's still empty
+            elif not self.links:
+                self.links = ["Configuration links are unavailable."]
 
         return self
 

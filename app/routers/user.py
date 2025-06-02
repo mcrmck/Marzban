@@ -106,20 +106,20 @@ def add_user(
 
     # User is created in DB. No XRay interaction here.
     # Activation on a node will be a separate step.
-    user_response = UserResponse.model_validate(db_user_orm)
+    user_response = UserResponse.model_validate(db_user_orm, context={'db': db})
     report.user_created(
-        user=user_response, # Use the Pydantic model for reporting
-        user_id=db_user_orm.id, # Pass id if needed by report
+        user=user_response,
+        user_id=db_user_orm.id,
         by=current_admin,
-        user_admin=db_user_orm.admin # Pass ORM admin if report expects it
+        user_admin=db_user_orm.admin
     )
     logger.info(f'New user with account number "{db_user_orm.account_number}" added to DB. No XRay activation yet.')
     return user_response
 
 
 @router.get("/user/{account_number}", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
-def get_user(db_user_orm: DBUser = Depends(get_validated_user)):
-    return UserResponse.model_validate(db_user_orm)
+def get_user(db_user_orm: DBUser = Depends(get_validated_user), db: Session = Depends(get_db)):
+    return UserResponse.model_validate(db_user_orm, context={'db': db})
 
 
 @router.put("/user/{account_number}", response_model=UserResponse, responses={400: responses._400, 403: responses._403, 404: responses._404})
@@ -141,7 +141,7 @@ def modify_user(
 
     old_status = db_user_orm.status
     dbuser_updated_orm = crud.update_user(db, db_user_orm, modified_user)
-    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_updated_orm)
+    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_updated_orm, context={'db': db})
 
     # xray.operations.update_user will handle logic based on new status and active_node_id
     bg.add_task(xray.operations.update_user, user_id=dbuser_updated_orm.id)
@@ -196,39 +196,36 @@ def remove_user_endpoint(
     return {"detail": "User successfully deleted"}
 
 
-@router.post("/user/{account_number}/node/activate", response_model=UserResponse, responses={403: responses._403, 404: responses._404, 400: responses._400})
-def activate_user_node(
+@router.post("/user/{account_number}/node/activate", response_model=UserResponse)
+async def activate_user_node(
     account_number: str,
     activation_request: NodeActivationRequest,
-    bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user_orm: DBUser = Depends(get_current_user), # Changed from admin to user auth
+    current_user_orm: DBUser = Depends(get_current_user),
+    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
-    # Ensure user can only activate their own account
-    if account_number != current_user_orm.account_number:
-        raise HTTPException(status_code=403, detail="You can only activate nodes for your own account")
+    """
+    Activate a user on a specific node.
+    This endpoint:
+    1. Validates the user and node
+    2. Initiates the activation process
+    3. Returns the current user state with database context
+    """
+    if current_user_orm.account_number != account_number:
+        raise HTTPException(status_code=403, detail="Not authorized to activate this user")
 
-    target_db_node = crud.get_node_by_id(db, activation_request.node_id)
-    if not target_db_node:
-        raise HTTPException(status_code=404, detail=f"Node with id {activation_request.node_id} not found.")
+    # Validate user response with database context before background task
+    user_response = UserResponse.model_validate(current_user_orm, context={'db': db})
 
-    if target_db_node.status == NodeStatus.disabled:
-        raise HTTPException(status_code=400, detail=f"Node {target_db_node.name} is disabled and cannot be activated by user.")
+    # Add background task - activate_user_on_node manages its own DB session
+    background_tasks.add_task(
+        xray.operations.activate_user_on_node,
+        account_number=current_user_orm.account_number,
+        node_id=activation_request.node_id
+    )
 
-    if current_user_orm.status not in [UserStatus.active, UserStatus.on_hold]:
-        raise HTTPException(status_code=400, detail=f"User status is '{current_user_orm.status.value}'. Cannot activate node.")
-
-    logger.info(f"User '{current_user_orm.account_number}' initiating activation of node {activation_request.node_id}.")
-
-    # The activate_user_on_node is threaded and will handle DB sessions for its XRay ops
-    # It will also update user.active_node_id in the DB.
-    bg.add_task(xray.operations.activate_user_on_node,
-                account_number=current_user_orm.account_number,
-                node_id=activation_request.node_id)
-
-    # Return current user state. Client should understand activation is async.
-    # A GET /user/{account_number} afterwards would show the new active_node_id once task completes.
-    return UserResponse.model_validate(current_user_orm)
+    # Return the pre-validated user response with database context
+    return user_response
 
 
 @router.post("/user/{account_number}/reset", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
@@ -241,7 +238,7 @@ def reset_user_data_usage(
     active_node_id_before_reset = db_user_orm.active_node_id
 
     dbuser_reset_orm = crud.reset_user_data_usage(db=db, dbuser=db_user_orm)
-    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_reset_orm)
+    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_reset_orm, context={'db': db})
 
     if active_node_id_before_reset is not None:
         if dbuser_reset_orm.status in [UserStatus.active, UserStatus.on_hold]:
@@ -273,7 +270,7 @@ def revoke_user_subscription(
     active_node_id_before_revoke = db_user_orm.active_node_id
 
     dbuser_revoked_orm = crud.revoke_user_sub(db=db, dbuser=db_user_orm) # This changes proxy UUIDs
-    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_revoked_orm)
+    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_revoked_orm, context={'db': db})
 
     if active_node_id_before_revoke is not None:
         if dbuser_revoked_orm.status in [UserStatus.active, UserStatus.on_hold]:
@@ -332,7 +329,7 @@ def get_users(
         admins=admin_usernames_to_filter, # Pass list of admin usernames
         return_with_count=True,
     )
-    users_response_list = [UserResponse.model_validate(u_orm) for u_orm in users_orm_list]
+    users_response_list = [UserResponse.model_validate(u_orm, context={'db': db}) for u_orm in users_orm_list]
     return {"users": users_response_list, "total": count}
 
 
@@ -360,7 +357,7 @@ def reset_all_users_data_usage( # Renamed to avoid conflict if another function 
             # Re-fetch the user to get post-reset status
             user_after_reset = crud.get_user_by_id(db, user_before_reset.id)
             if user_after_reset: # Should exist
-                user_payload_for_xray = UserResponse.model_validate(user_after_reset)
+                user_payload_for_xray = UserResponse.model_validate(user_after_reset, context={'db': db})
                 if user_after_reset.status in [UserStatus.active, UserStatus.on_hold]:
                     logger.debug(f"User {user_after_reset.account_number} active on node {user_after_reset.active_node_id} after global reset. Re-activating.")
                     bg.add_task(xray.operations.activate_user_on_node,
@@ -400,7 +397,7 @@ def active_next_plan(
     active_node_id_before_next_plan = db_user_orm.active_node_id
     dbuser_reset_orm = crud.reset_user_by_next(db=db, dbuser=db_user_orm)
 
-    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_reset_orm)
+    user_response_for_bg_and_report = UserResponse.model_validate(dbuser_reset_orm, context={'db': db})
 
     # Activating next plan usually makes user active. If they were on a node, re-activate.
     if active_node_id_before_next_plan is not None:
@@ -457,7 +454,7 @@ def set_owner(
 
     old_owner_username = db_user_orm.admin.username if db_user_orm.admin else "None"
     dbuser_updated_orm = crud.set_owner(db, db_user_orm, new_admin_orm)
-    user_response_for_report = UserResponse.model_validate(dbuser_updated_orm)
+    user_response_for_report = UserResponse.model_validate(dbuser_updated_orm, context={'db': db})
 
     report.user_owner_changed(
         user=user_response_for_report,

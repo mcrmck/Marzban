@@ -1,11 +1,14 @@
 import re
 from datetime import datetime as dt
+from typing import Optional
 
 from dateutil.relativedelta import relativedelta
+from sqlalchemy.orm import Session
 
 from app.models.user import User, UserResponse, UserStatus
 from app.models.user_template import UserTemplate
 from app.utils.system import readable_size
+from app.crud import crud
 
 statuses = {
     UserStatus.active: "✅",
@@ -46,8 +49,8 @@ def time_to_string(time: dt):
             return "very soon"
 
 
-def get_user_info_text(db_user: User) -> str:
-    user: UserResponse = UserResponse.model_validate(db_user)
+def get_user_info_text(db_user: User, db: Session) -> str:
+    user: UserResponse = UserResponse.model_validate(db_user, context={'db': db})
     data_limit = readable_size(user.data_limit) if user.data_limit else "Unlimited"
     used_traffic = readable_size(user.used_traffic) if user.used_traffic else "-"
     data_left = readable_size(user.data_limit - user.used_traffic) if user.data_limit else "-"
@@ -103,3 +106,10 @@ def get_number_at_end(username: str):
     n = re.search(r'(\d+)$', username)
     if n:
         return n.group(1)
+
+
+def get_user_by_telegram_id(db: Session, telegram_id: int) -> Optional[UserResponse]:
+    db_user = crud.get_user_by_telegram_id(db, telegram_id)
+    if not db_user:
+        return None
+    return UserResponse.model_validate(db_user, context={'db': db})

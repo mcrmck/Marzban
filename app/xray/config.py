@@ -91,6 +91,38 @@ class XRayConfig(dict):
 
         super().__init__(default_config)
         logger.debug(f"XRayConfig.__init__: Final config keys: {list(self.keys())}")
+        self._precompute_inbound_maps()
+        logger.debug(f"XRayConfig.__init__: Finished precomputing inbound maps. Final config keys: {list(self.keys())}")
+
+    def _precompute_inbound_maps(self):
+        logger.debug("XRayConfig._precompute_inbound_maps: Precomputing inbound protocol and tag maps.")
+        from collections import defaultdict
+        self.inbounds_by_protocol = defaultdict(list)
+        self.inbounds_by_tag = {}  # Simplified to a flat dict with tag as key
+
+        loaded_inbounds = self.get('inbounds', [])
+        if not isinstance(loaded_inbounds, list):
+            logger.error(f"XRayConfig._precompute_inbound_maps: 'inbounds' is not a list, it's {type(loaded_inbounds)}. Cannot precompute maps.")
+            return
+
+        for inbound_config in loaded_inbounds:
+            if not isinstance(inbound_config, dict):
+                logger.warning(f"XRayConfig._precompute_inbound_maps: Found non-dict item in inbounds list: {inbound_config}")
+                continue
+
+            protocol = inbound_config.get('protocol')
+            tag = inbound_config.get('tag')
+
+            if protocol:
+                self.inbounds_by_protocol[protocol].append(inbound_config)
+                if tag:
+                    self.inbounds_by_tag[tag] = inbound_config
+                else:
+                    logger.warning(f"XRayConfig._precompute_inbound_maps: Inbound with protocol '{protocol}' is missing a 'tag'.")
+            else:
+                logger.warning(f"XRayConfig._precompute_inbound_maps: Inbound is missing a 'protocol': {inbound_config}")
+
+        logger.debug(f"XRayConfig._precompute_inbound_maps: Populated {len(self.inbounds_by_tag)} inbound tags and {len(self.inbounds_by_protocol)} protocols")
 
     def _apply_node_api_and_policy(self):
         """Configure API, stats, and policy sections for node management."""
@@ -153,6 +185,7 @@ class XRayConfig(dict):
         self["routing"]["rules"].insert(0, api_rule)
 
         logger.debug("XRayConfig._apply_node_api_and_policy: Node API and policy configuration applied")
+        self._precompute_inbound_maps()
 
     def _generate_inbound_dict(self, service_db_model: "db_models.NodeServiceConfiguration",
                              users_for_service: List["db_models.User"]) -> dict:
@@ -191,27 +224,20 @@ class XRayConfig(dict):
 
         # Protocol settings
         inbound_proto_settings = {}
-        if service_db_model.protocol_type != ProxyTypes.Shadowsocks:
+        if clients:
             inbound_proto_settings["clients"] = clients
 
-        # Protocol-specific settings
+        # Add protocol-specific settings
         if service_db_model.protocol_type == ProxyTypes.VLESS:
             inbound_proto_settings["decryption"] = "none"
             if service_db_model.advanced_protocol_settings:
                 merge_dicts(inbound_proto_settings, service_db_model.advanced_protocol_settings)
-            if service_db_model.advanced_fallback_settings_json:
-                inbound_proto_settings["fallbacks"] = service_db_model.advanced_fallback_settings_json
-
         elif service_db_model.protocol_type == ProxyTypes.VMess:
             if service_db_model.advanced_protocol_settings:
                 merge_dicts(inbound_proto_settings, service_db_model.advanced_protocol_settings)
-
         elif service_db_model.protocol_type == ProxyTypes.Trojan:
             if service_db_model.advanced_protocol_settings:
                 merge_dicts(inbound_proto_settings, service_db_model.advanced_protocol_settings)
-            if service_db_model.advanced_fallback_settings_json:
-                inbound_proto_settings["fallbacks"] = service_db_model.advanced_fallback_settings_json
-
         elif service_db_model.protocol_type == ProxyTypes.Shadowsocks:
             inbound_proto_settings = deepcopy(service_db_model.advanced_protocol_settings or {})
             if not inbound_proto_settings:
@@ -273,7 +299,7 @@ class XRayConfig(dict):
             stream_settings["realitySettings"] = reality_settings
 
         # Sniffing settings
-        sniffing = service_db_model.advanced_sniffing_settings_json or {
+        sniffing = service_db_model.sniffing_settings or {
             "enabled": True,
             "destOverride": ["http", "tls", "quic", "fakedns"]
         }
@@ -308,6 +334,14 @@ class XRayConfig(dict):
         api_inbound = next((inb for inb in self["inbounds"] if inb["tag"] == "API_GRPC_INBOUND"), None)
         self["inbounds"] = [api_inbound] if api_inbound else []
 
+        # Clear the inbound maps since we're rebuilding
+        self.inbounds_by_protocol.clear()
+        self.inbounds_by_tag.clear()
+
+        # Add API inbound to maps if it exists
+        if api_inbound:
+            self._update_inbound_maps(api_inbound, 'add')
+
         # Process each service configuration
         for service in node_orm.service_configurations:
             if not service.enabled:
@@ -327,6 +361,7 @@ class XRayConfig(dict):
             # Generate inbound configuration
             inbound_dict = self._generate_inbound_dict(service, relevant_users)
             self["inbounds"].append(inbound_dict)
+            self._update_inbound_maps(inbound_dict, 'add')
 
         logger.info(f"XRayConfig.build_node_config: Built config for node {node_orm.name} with {len(self['inbounds'])} inbounds")
 
@@ -358,3 +393,52 @@ class XRayConfig(dict):
     def to_json(self, **json_kwargs):
         """Convert the configuration to a JSON string."""
         return json.dumps(dict(self), **json_kwargs)
+
+    def _update_inbound_maps(self, inbound_config: dict, action: str = 'add'):
+        """Update the inbound maps when an inbound is added, modified, or removed.
+
+        Args:
+            inbound_config: The inbound configuration dictionary
+            action: One of 'add', 'modify', or 'remove'
+        """
+        if not isinstance(inbound_config, dict):
+            logger.warning(f"XRayConfig._update_inbound_maps: Invalid inbound config type: {type(inbound_config)}")
+            return
+
+        protocol = inbound_config.get('protocol')
+        tag = inbound_config.get('tag')
+
+        if not protocol:
+            logger.warning(f"XRayConfig._update_inbound_maps: Inbound missing protocol: {inbound_config}")
+            return
+
+        if action in ('add', 'modify'):
+            # Update protocol map
+            if action == 'add':
+                self.inbounds_by_protocol[protocol].append(inbound_config)
+            else:  # modify
+                # Remove old entry if it exists
+                self.inbounds_by_protocol[protocol] = [inb for inb in self.inbounds_by_protocol[protocol]
+                                                     if inb.get('tag') != tag]
+                self.inbounds_by_protocol[protocol].append(inbound_config)
+
+            # Update tag map
+            if tag:
+                self.inbounds_by_tag[tag] = inbound_config
+            else:
+                logger.warning(f"XRayConfig._update_inbound_maps: Inbound missing tag: {inbound_config}")
+
+        elif action == 'remove':
+            # Remove from protocol map
+            if protocol in self.inbounds_by_protocol:
+                self.inbounds_by_protocol[protocol] = [inb for inb in self.inbounds_by_protocol[protocol]
+                                                     if inb.get('tag') != tag]
+                if not self.inbounds_by_protocol[protocol]:
+                    del self.inbounds_by_protocol[protocol]
+
+            # Remove from tag map
+            if tag and tag in self.inbounds_by_tag:
+                del self.inbounds_by_tag[tag]
+
+        logger.debug(f"XRayConfig._update_inbound_maps: Updated maps after {action} action. "
+                    f"Now have {len(self.inbounds_by_tag)} tags and {len(self.inbounds_by_protocol)} protocols")

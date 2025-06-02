@@ -109,6 +109,12 @@
         <div class="mb-8 bg-white shadow-md rounded px-8 pt-6 pb-8">
             <h3 class="text-xl font-semibold mb-4 text-gray-900">Your Subscription & Configs</h3>
 
+            {% if not current_user.active_node_id %}
+            <div class="p-4 mb-4 text-sm text-blue-700 bg-blue-100 rounded-lg" role="alert">
+                Your account is active! Please visit the <a href="{{ url_for('portal_servers_page') }}" class="font-medium underline">Servers</a> page to choose and activate a server to get your configuration links.
+            </div>
+            {% endif %}
+
             {# Client-specific profile download links #}
             <p class="mb-2 text-gray-700">Client-specific profile download links:</p>
             <ul class="list-disc pl-5 space-y-1 text-sm mb-6">
@@ -144,8 +150,8 @@
                 </div>
                 {% endfor %}
             </div>
-            {% else %}
-            <p class="text-gray-600 text-sm">No individual server configuration links available.</p>
+            {% elif current_user.active_node_id %}
+            <p class="text-gray-600 text-sm">No individual server configuration links available. Please contact support if this persists.</p>
             {% endif %}
         </div>
 

@@ -32,23 +32,19 @@ try:
             break
     # No need for an else here, api_port_to_use has a default
 finally:
-    # --- MODIFICATION START ---
-    # The path where your xray_config.json is confirmed to be inside the container
+    # Initialize the global XRayConfig instance
     actual_xray_config_path = XRAY_CONFIG_PATH
-
-    logger.info(f"Attempting to initialize XRayConfig. Determined API port: {api_port_to_use}")
+    logger.info(f"Initializing global XRayConfig instance. Using API port: {api_port_to_use}")
     logger.info(f"Target XRay config file path: {actual_xray_config_path}")
 
     if os.path.exists(actual_xray_config_path):
-        logger.info(f"XRayConfig file FOUND at {actual_xray_config_path}. Initializing XRayConfig with this path.")
-        # Pass the file path string to base_template_path, and also the determined api_port
+        logger.info(f"XRayConfig file FOUND at {actual_xray_config_path}. Initializing global XRayConfig with this path.")
         config = XRayConfig(base_template_path=actual_xray_config_path, node_api_port=api_port_to_use)
     else:
-        logger.error(f"CRITICAL: XRayConfig file NOT FOUND at {actual_xray_config_path}. Falling back to default config structure.")
+        logger.error(f"CRITICAL: XRayConfig file NOT FOUND at {actual_xray_config_path}. Using default config structure.")
         config = XRayConfig(base_template_path=None, node_api_port=api_port_to_use)
-    # --- MODIFICATION END ---
 
-    # Clean up variables from port search, ensure they exist before deleting
+    # Clean up variables from port search
     if 'port_candidate' in locals():
         del port_candidate
     # No need to delete api_port_found or api_port_to_use as they are not large or sensitive here
@@ -106,14 +102,31 @@ def hosts(storage: dict):
             logger.warning("hosts function: xray.config.inbounds_by_tag is not available or empty. No hosts loaded.")
 
 
+# Create a module-level object to hold all the exports
+class XRayModule:
+    def __init__(self):
+        self.config = config
+        self.nodes = nodes
+        self.hosts = hosts
+        self.operations = operations
+        self.exceptions = exceptions
+        self.exc = exc
+        self.types = types
+        self.XRayConfig = XRayConfig
+        self.XRayNode = XRayNode
+
+# Create and export the module instance
+xray = XRayModule()
+
 __all__ = [
-    "config",
+    "xray",  # Export the module instance
+    "config",  # The global XRayConfig instance
     "hosts",
     "nodes",
     "operations",
     "exceptions",
     "exc",
     "types",
-    "XRayConfig",
+    "XRayConfig",  # The class itself
     "XRayNode",
 ]

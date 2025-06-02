@@ -420,7 +420,7 @@ def revoke_user_sub(db: Session, dbuser: DBUser) -> DBUser:
     user_with_proxies = get_user_by_id(db, dbuser.id)
     if not user_with_proxies: return dbuser # Should not happen if dbuser is valid
 
-    user_pydantic = UserResponse.model_validate(user_with_proxies)
+    user_pydantic = UserResponse.model_validate(user_with_proxies, context={'db': db})
 
     new_proxy_settings_list = []
     if user_pydantic.proxies: # Check if proxies is not None
@@ -1070,20 +1070,24 @@ def create_with_node(
     node_id: int
 ) -> NodeServiceConfiguration:
     """Create a new service configuration for a specific node."""
-    # Generate xray_inbound_tag if not provided
-    if not obj_in.xray_inbound_tag:
-        obj_in.xray_inbound_tag = f"node{node_id}_proto{obj_in.protocol_type.value}_port{obj_in.listen_port}"
-
-    # Check for tag collisions on this node
-    existing = get_node_service_by_tag(db, obj_in.xray_inbound_tag)
-    if existing and existing.node_id == node_id:
-        raise ValueError(f"Service with tag {obj_in.xray_inbound_tag} already exists on this node")
-
+    # Create the service first to get its ID
     db_obj = NodeServiceConfiguration(
         node_id=node_id,
         **obj_in.model_dump()
     )
     db.add(db_obj)
+    db.flush()  # Get the ID without committing
+
+    # Generate xray_inbound_tag if not provided
+    if not db_obj.xray_inbound_tag:
+        db_obj.xray_inbound_tag = f"marzban_service_{db_obj.id}"
+
+    # Check for tag collisions on this node
+    existing = get_node_service_by_tag(db, db_obj.xray_inbound_tag)
+    if existing and existing.node_id == node_id:
+        db.rollback()  # Rollback the transaction since we haven't committed yet
+        raise ValueError(f"Service with tag {db_obj.xray_inbound_tag} already exists on this node")
+
     db.commit()
     db.refresh(db_obj)
     return db_obj

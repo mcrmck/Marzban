@@ -72,7 +72,7 @@ async def get_current_user( # Renamed parameter for clarity
 
     # --- VALIDATE WITH PYDANTIC ---
     try:
-        user = UserResponse.model_validate(db_user_orm)
+        user = UserResponse.model_validate(db_user_orm, context={'db': db})
         return user
     except ValidationError as e:
         raise credentials_exception
@@ -110,7 +110,7 @@ async def get_current_user_optional(
         if not db_user_orm:
             return None
 
-        user = UserResponse.model_validate(db_user_orm)
+        user = UserResponse.model_validate(db_user_orm, context={'db': db})
         return user
     except (JWTError, ValidationError): # Catch both JWT and Pydantic validation errors
         return None

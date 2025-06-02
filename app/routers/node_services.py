@@ -10,7 +10,14 @@ from app.models.node_service import (
 )
 from app.db import get_db
 from app.db.models import NodeServiceConfiguration
+from app.xray import xray  # This import should now work correctly
+from app.xray.node import XRayNode
+from app.xray import operations
+import logging
+from config import XRAY_CONFIG_PATH
 # from app.dependencies import get_current_active_admin_user # Authentication
+
+logger = logging.getLogger("marzban.node_services")
 
 router = APIRouter(
     prefix="/api",
@@ -35,20 +42,30 @@ def create_service_for_node(
     if not db_node:
         raise HTTPException(status_code=404, detail="Node not found")
 
-    # Create new service configuration
-    db_service = NodeServiceConfiguration(
-        node_id=node_id,
-        **service_in.model_dump()
-    )
-    db.add(db_service)
-    db.commit()
-    db.refresh(db_service)
+    # Create new service configuration using CRUD function
+    try:
+        db_service = crud.create_with_node(db, obj_in=service_in, node_id=node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    # TODO: Trigger node reconfiguration logic (e.g., call a method on the node object or a service)
-    # This might involve:
-    # 1. Generating the new Xray config for db_node with all its services.
-    # 2. Pushing this config to the remote Xray instance via ReSTXRayNode.start() or restart().
-    # Example: xray_operations.reconfigure_node(db, node_id=node_id)
+    # Trigger node reconfiguration
+    try:
+        # Use the global config instance
+        xray.config.node_api_port = db_node.api_port
+        users_on_node = crud.get_users_by_active_node_id(db, node_id)
+        node_specific_xray_config_obj = xray.config.build_node_config(db_node, users_on_node)
+
+        # Get node instance and restart with new config
+        node_instance = operations.connect_node(node_id)
+        if node_instance and node_instance.connected:
+            node_instance.restart(node_specific_xray_config_obj)
+            logger.info(f"Successfully reconfigured node {db_node.name} after service creation")
+        else:
+            logger.warning(f"Node {db_node.name} not connected, skipping reconfiguration")
+    except Exception as e:
+        logger.error(f"Failed to reconfigure node {db_node.name} after service creation: {e}", exc_info=True)
+        # Don't raise an error here, as the service was created successfully
+        # Just log the error and continue
 
     return db_service
 
