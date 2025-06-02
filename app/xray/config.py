@@ -321,11 +321,10 @@ class XRayConfig(dict):
     def build_node_config(self, node_orm: "db_models.Node",
                          users_on_node: List["db_models.User"]) -> "XRayConfig":
         """Build a complete XRay configuration for a specific node."""
-        logger.info(f"XRayConfig.build_node_config: Building config for node {node_orm.name}")
+        logger.info(f"Building XRay config for node {node_orm.name}")
 
         # Update API port from node
         self.node_api_port = node_orm.api_port
-        logger.debug(f"XRayConfig.build_node_config: Using node API port: {self.node_api_port}")
 
         # Apply node API and policy configuration
         self._apply_node_api_and_policy()
@@ -345,7 +344,6 @@ class XRayConfig(dict):
         # Process each service configuration
         for service in node_orm.service_configurations:
             if not service.enabled:
-                logger.debug(f"Skipping disabled service {service.id} on node {node_orm.name}")
                 continue
 
             # Filter users for this service
@@ -355,7 +353,6 @@ class XRayConfig(dict):
             ]
 
             if not relevant_users and service.protocol_type not in (ProxyTypes.HTTP, ProxyTypes.SOCKS):
-                logger.warning(f"No relevant users found for service {service.id} on node {node_orm.name}")
                 continue
 
             # Generate inbound configuration
@@ -363,12 +360,11 @@ class XRayConfig(dict):
             self["inbounds"].append(inbound_dict)
             self._update_inbound_maps(inbound_dict, 'add')
 
-        logger.info(f"XRayConfig.build_node_config: Built config for node {node_orm.name} with {len(self['inbounds'])} inbounds")
+        logger.info(f"Built XRay config for node {node_orm.name} with {len(self['inbounds'])} inbounds")
 
         if DEBUG:
             try:
                 debug_file = f'generated_config_node_{node_orm.id}-debug.json'
-                logger.debug(f"Writing debug config to {debug_file}")
                 with open(debug_file, 'w') as f:
                     f.write(self.to_json(indent=4))
             except Exception as e:

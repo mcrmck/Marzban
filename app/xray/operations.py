@@ -138,25 +138,22 @@ def update_user(user_id: int):
     Updates a user's configuration on their active node.
     Creates and manages its own database session.
     """
-    logger.info(f"Starting update_user operation for user ID {user_id}")
+    logger.info(f"Updating user ID {user_id}")
     with GetDB() as db:
         db_user = crud.get_user_by_id(db, user_id)
         if not db_user:
             logger.error(f"User {user_id} not found in database")
             return None
 
-        logger.debug(f"Found user {db_user.account_number} (ID: {user_id})")
         if not db_user.active_node_id:
             logger.info(f"User ID {user_id} has no active node. No update needed.")
             return UserResponse.model_validate(db_user, context={'db': db})
 
-        logger.debug(f"User {db_user.account_number} has active node ID {db_user.active_node_id}")
         node = crud.get_node_by_id(db, db_user.active_node_id)
         if not node:
-            logger.error(f"update_user: Node ID {db_user.active_node_id} not found in database.")
+            logger.error(f"Node ID {db_user.active_node_id} not found in database.")
             return UserResponse.model_validate(db_user, context={'db': db})
 
-        logger.debug(f"Found node {node.name} (ID: {node.id})")
         if node.status != NodeStatus.connected:
             logger.warning(f"Node ID {db_user.active_node_id} is not connected. Attempting to connect first.")
             connect_node(db_user.active_node_id)
@@ -164,25 +161,17 @@ def update_user(user_id: int):
 
         node_instance = xray.nodes.get(db_user.active_node_id)
         if not node_instance:
-            logger.error(f"update_user: Node ID {db_user.active_node_id} not found in xray.nodes.")
+            logger.error(f"Node ID {db_user.active_node_id} not found in xray.nodes.")
             return UserResponse.model_validate(db_user, context={'db': db})
 
         try:
-            logger.debug(f"Building node-specific config for node {node.name}")
-            # Use the global config instance instead of creating a new one
             users_on_node = crud.get_users_by_active_node_id(db, db_user.active_node_id)
-            logger.debug(f"Found {len(users_on_node)} users on node {node.name}")
-
-            # Update the global config instance with node-specific settings
             xray.config.node_api_port = node.api_port
             node_specific_xray_config_obj = xray.config.build_node_config(node, users_on_node)
 
-            # Restart node with updated config
-            logger.debug(f"Restarting node {node.name} with updated config")
             node_instance.restart(node_specific_xray_config_obj)
             logger.info(f"Successfully updated user ID {user_id} on node ID {db_user.active_node_id}")
 
-            # Return updated user with proper context
             return UserResponse.model_validate(db_user, context={'db': db})
 
         except Exception as e:
@@ -190,72 +179,63 @@ def update_user(user_id: int):
             _change_node_status(db_user.active_node_id, NodeStatus.error, message=str(e))
             return UserResponse.model_validate(db_user, context={'db': db})
 
-@threaded_function
-def activate_user_on_node(account_number: str, node_id: int):
-    """Activate a user on a specific node."""
-    logger.info(f"Starting activate_user_on_node operation for user {account_number} on node {node_id}")
+def _activate_user_on_xray_node_only(account_number: str, node_id: int):
+    """Activate a user on an Xray node without updating the database."""
+    logger.info(f"Activating user {account_number} on Xray node {node_id}")
     with GetDB() as db:
-        db_user = crud.get_user(db, account_number)
-        if not db_user:
-            logger.error(f"User {account_number} not found in database")
-            return None
-
-        logger.debug(f"Found user {account_number}")
         db_node_orm = crud.get_node_by_id(db, node_id)
         if not db_node_orm:
             logger.error(f"Node ID {node_id} not found in database")
-            return UserResponse.model_validate(db_user, context={'db': db})
+            return
 
-        logger.debug(f"Found node {db_node_orm.name} (ID: {node_id})")
         if db_node_orm.status != NodeStatus.connected:
             logger.warning(f"Node ID {node_id} is not connected. Attempting to connect first.")
             connect_node(node_id)
-            return UserResponse.model_validate(db_user, context={'db': db})
+            return
 
         target_xray_node_instance = xray.nodes.get(node_id)
-        if not target_xray_node_instance or not target_xray_node_instance.connected:
-            logger.warning(f"Target node {node_id} ({db_node_orm.name}) for user {account_number} not connected. Attempting to connect.")
-            connect_node(node_id)
-            time.sleep(1)
-            target_xray_node_instance = xray.nodes.get(node_id)
+        if not target_xray_node_instance:
+            logger.error(f"XRay Node {node_id} not found in xray.nodes")
+            return
 
         if target_xray_node_instance and target_xray_node_instance.connected:
             try:
-                logger.debug(f"Building node-specific config for node {db_node_orm.name}")
-                # Use the global config instance
                 xray.config.node_api_port = db_node_orm.api_port
                 users_on_node = crud.get_users_by_active_node_id(db, node_id)
-
-                # Ensure the user being activated is included in the users list
-                if db_user not in users_on_node:
-                    logger.debug(f"Adding user {account_number} to the list of users for node {db_node_orm.name}")
+                db_user = crud.get_user(db, account_number)
+                if db_user and db_user not in users_on_node:
                     users_on_node.append(db_user)
 
-                logger.debug(f"Found {len(users_on_node)} users on node {db_node_orm.name}")
                 node_specific_xray_config_obj = xray.config.build_node_config(db_node_orm, users_on_node)
-
-                # Restart node with updated config
-                logger.debug(f"Restarting node {db_node_orm.name} with updated config")
                 target_xray_node_instance.restart(node_specific_xray_config_obj)
                 logger.info(f"Successfully activated user {account_number} on node {node_id}")
 
             except Exception as e:
                 logger.error(f"Failed to activate user {account_number} on node {node_id}: {e}", exc_info=True)
                 _change_node_status(node_id, NodeStatus.error, message=str(e))
-                return UserResponse.model_validate(db_user, context={'db': db})
         else:
-            logger.error(f"XRay Node {node_id} ({db_node_orm.name}) not found or API not available for user {account_number}. XRay add skipped.")
-            return UserResponse.model_validate(db_user, context={'db': db})
+            logger.error(f"XRay Node {node_id} ({db_node_orm.name}) not found or API not available for user {account_number}")
 
-        # 3. Update DB
-        if db_user.active_node_id != node_id:
-            logger.debug(f"Updating user {account_number} active_node_id from {db_user.active_node_id} to {node_id}")
-            db_user.active_node_id = node_id
-            db_user.last_status_change = datetime.utcnow()
+
+@threaded_function
+def activate_user_on_node(account_number: str, node_id: int):
+    """Activate a user on a specific node."""
+    logger.info(f"Activating user {account_number} on node {node_id}")
+    with GetDB() as db:
+        db_user = crud.get_user(db, account_number)
+        if not db_user:
+            logger.error(f"User {account_number} not found")
+            return None
+
+        # Update user's active node
+        db_user.active_node_id = node_id
+        db_user.last_status_change = datetime.utcnow()
         crud.update_user_instance(db, db_user)
-        logger.info(f"User {account_number} DB record updated, active_node_id set to {node_id}.")
 
-        # 4. Return updated user with proper context
+        # Activate user on Xray node
+        _activate_user_on_xray_node_only(account_number, node_id)
+
+        # Return updated user with proper context
         return UserResponse.model_validate(db_user, context={'db': db})
 
 
@@ -442,7 +422,7 @@ def connect_node(node_id: int):
 __all__ = [
     "add_user",
     "remove_user",
-    "update_user", # Added update_user to __all__
+    "update_user",
     "add_node",
     "remove_node",
     "connect_node",

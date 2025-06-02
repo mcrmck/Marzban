@@ -1,0 +1,17 @@
+# This Dockerfile is specifically for running the Vite dev server
+FROM node:20-slim
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm install
+
+# The rest of the source code will be mounted via docker-compose volume
+# So, no need to COPY . . here for development
+
+# Expose both admin and portal ports
+EXPOSE 3000 3001
+
+# The command will be overridden by docker-compose
+CMD ["npm", "run", "dev:admin"]

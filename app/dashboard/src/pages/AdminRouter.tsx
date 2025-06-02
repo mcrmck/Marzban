@@ -3,6 +3,7 @@ import { fetch } from "../service/http";
 import { getAuthToken } from "../utils/authStorage";
 import { Dashboard } from "./Dashboard";
 import { Login } from "./Login";
+
 const fetchAdminLoader = () => {
     return fetch("/admin", {
         headers: {
@@ -10,7 +11,8 @@ const fetchAdminLoader = () => {
         },
     });
 };
-export const router = createHashRouter([
+
+export const adminRouter = createHashRouter([
     {
         path: "/",
         element: <Dashboard />,
@@ -18,7 +20,7 @@ export const router = createHashRouter([
         loader: fetchAdminLoader,
     },
     {
-        path: "/login/",
+        path: "/login",
         element: <Login />,
     },
 ]);

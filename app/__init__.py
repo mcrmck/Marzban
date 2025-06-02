@@ -1,5 +1,6 @@
 # Marzban/app/__init__.py
 import logging
+import os
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -10,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from .version import __version__
-from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH, DEBUG
+from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH, DEBUG, HOME_PAGE_TEMPLATE
 
 # Configure logging
 if not logging.getLogger().hasHandlers():
@@ -51,28 +52,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Include API Routers ---
 try:
-    static_portal_path = "app/portal/static"
-    app.mount("/client-portal/static", StaticFiles(directory=str(static_portal_path)), name="portal_static")
-except Exception as e:
-    logger.error(f"APP_INIT: Could not mount portal static files from '{static_portal_path}': {e}", exc_info=True)
-
-try:
-    from . import dashboard
+    from .routers import api_router as main_api_aggregator_router
+    # All routes from main_api_aggregator_router will now be prefixed with /api
+    app.include_router(main_api_aggregator_router, prefix="/api")
+    logger.info("APP_INIT: Successfully included main_api_aggregator_router under /api prefix.")
 except ImportError as e:
-    logger.error(f"APP_INIT: FAILED to import .dashboard: {e}", exc_info=True)
+    logger.error(f"APP_INIT: FAILED to import or include main_api_aggregator_router: {e}", exc_info=True)
 
+# --- Include Root/Homepage Router ---
 try:
-    from .routers import api_router
-    app.include_router(api_router)
+    from .routers.core.home import router as home_page_router
+    app.include_router(home_page_router, tags=["Homepage"])
+    logger.info("APP_INIT: Successfully included home_page_router.")
 except ImportError as e:
-    logger.error(f"APP_INIT: FAILED to import or include api_router: {e}", exc_info=True)
+    logger.error(f"APP_INIT: FAILED to import or include home_page_router: {e}", exc_info=True)
 
-try:
-    from .portal import mount_portal_routers
-    mount_portal_routers(app)
-except ImportError as e:
-    logger.error(f"APP_INIT: FAILED to import or mount portal routers: {e}", exc_info=True)
+# --- Serve Admin Panel SPA ---
+admin_spa_build_dir = os.path.join(os.path.dirname(__file__), "dashboard", "dist_admin")
+if os.path.exists(admin_spa_build_dir) and os.path.isfile(os.path.join(admin_spa_build_dir, "index.html")):
+    app.mount("/admin", StaticFiles(directory=admin_spa_build_dir, html=True), name="admin-spa")
+    logger.info(f"Admin Panel SPA mounted at /admin from {admin_spa_build_dir}")
+else:
+    logger.warning(
+        f"Admin Panel SPA build directory ({admin_spa_build_dir}) or its index.html not found. "
+        f"Admin panel will not be served. Searched for index.html at: {os.path.join(admin_spa_build_dir, 'index.html')}"
+    )
+
+# --- Serve Client Portal SPA ---
+portal_spa_build_dir = os.path.join(os.path.dirname(__file__), "dashboard", "dist_portal")
+if os.path.exists(portal_spa_build_dir) and os.path.isfile(os.path.join(portal_spa_build_dir, "index.html")):
+    app.mount("/portal", StaticFiles(directory=portal_spa_build_dir, html=True), name="portal-spa")
+    logger.info(f"Client Portal SPA mounted at /portal from {portal_spa_build_dir}")
+else:
+    logger.warning(
+        f"Client Portal SPA build directory ({portal_spa_build_dir}) or its index.html not found. "
+        f"Client portal will not be served. Searched for index.html at: {os.path.join(portal_spa_build_dir, 'index.html')}"
+    )
 
 def use_route_names_as_operation_ids(current_app: FastAPI):
     for route in current_app.routes:

@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  marzban-panel: # This service now ONLY runs your backend
+    build:
+      context: .
+      dockerfile: Dockerfile.backend # Use the backend-only Dockerfile
+    restart: always
+    env_file: .env
+    ports:
+      - "8000:8000" # Backend panel API
+    volumes:
+      - marzban_data:/var/lib/marzban
+      - ./MyMarzbanCA.pem:/etc/marzban/MyMarzbanCA.pem:ro
+      - ./panel-certs:/etc/marzban/panel-client-certs:ro
+      - ./xray_config/config.json:/etc/marzban/xray_config/config.json:ro
+    environment:
+      - UVICORN_SSL_CA_TYPE=private
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=8000
+      - DATABASE_URL=sqlite:////var/lib/marzban/db.sqlite3
+    command: ["sh", "-c", "echo 'Starting Marzban backend...' && /entrypoint.sh"]
+    networks:
+      - marzban_network
+
+  marzban-dashboard-admin: # Admin panel development service
+    build:
+      context: ./app/dashboard
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000" # Admin panel dev server (matches package.json)
+    volumes:
+      - ./app/dashboard:/app
+      - /app/node_modules
+    working_dir: /app
+    command: npm run dev:admin
+    environment:
+      - UVICORN_PORT=8000
+      - VITE_API_TARGET_HOST=marzban-panel
+      - VITE_BASE_API=/api/admin
+      - XRAY_SUBSCRIPTION_PATH=sub
+    networks:
+      - marzban_network
+    depends_on:
+      - marzban-panel
+
+  marzban-dashboard-portal: # Client portal development service
+      build:
+        context: ./app/dashboard
+        dockerfile: Dockerfile.dev
+      ports:
+        - "3001:3001" # Client portal dev server (matches package.json)
+      volumes:
+        - ./app/dashboard:/app
+        - /app/node_modules
+      working_dir: /app
+      command: npm run dev:portal
+      environment:
+        - UVICORN_PORT=8000
+        - VITE_API_TARGET_HOST=marzban-panel
+        - VITE_BASE_API=/api/portal
+        - XRAY_SUBSCRIPTION_PATH=sub
+      networks:
+        - marzban_network
+      depends_on:
+        - marzban-panel
+
+networks:
+  marzban_network:
+    driver: bridge
+
+volumes:
+  marzban_data:

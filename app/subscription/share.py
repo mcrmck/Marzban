@@ -105,6 +105,11 @@ def generate_subscription(
     # This assumes user.active_node_id is correctly populated by UserResponse.build_dynamic_fields
     current_active_node_id = active_node_id_override if active_node_id_override is not None else user.active_node_id
 
+    # Convert SQLAlchemy User to UserResponse if needed
+    if not isinstance(user, UserResponse):
+        from app.models.user import UserResponse
+        user = UserResponse.model_validate(user)
+
     kwargs = {
         "proxies": user.proxies,
         "inbounds": user.inbounds, # This is Dict[ProxyTypes, List[str_tags]]

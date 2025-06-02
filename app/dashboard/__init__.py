@@ -25,7 +25,7 @@ logger.setLevel(logging.DEBUG) # Ensure visibility
 
 base_dir = Path(__file__).parent
 build_dir = base_dir / 'build' # This is where `npm run build` places assets
-statics_dir = build_dir / 'statics' # As defined by your vite.config.ts `assetsDir`
+statics_dir = build_dir / 'statics'
 
 # The run_dev function can remain if you want to call it manually for other purposes,
 # but it won't be called by the dashboard's startup sequence anymore.
@@ -72,32 +72,13 @@ def mount_static_files():
             logger.error(f"mount_static_files: index.html not found in {build_dir}.")
             return False
 
-        # Mount the main dashboard application
-        # This expects that vite.config.js `base` is set to DASHBOARD_PATH (e.g., '/dashboard/')
-        # and assets are linked relative to that base, e.g., /dashboard/statics/main.js
+        # Mount the main dashboard application - this will serve both index.html and statics
         app.mount(
             DASHBOARD_PATH,
             StaticFiles(directory=str(build_dir), html=True), # html=True serves index.html for subpaths
             name="dashboard"
         )
         logger.info(f"mount_static_files: Mounted dashboard at {DASHBOARD_PATH} from {build_dir}")
-
-        # Regarding the separate '/statics/' mount:
-        # If your Vite build correctly places assets into `build_dir/statics` AND
-        # your `index.html` (in `build_dir`) links to them like `/dashboard/statics/asset.js` (due to `base: '/dashboard/'`),
-        # then the single mount above for DASHBOARD_PATH should be sufficient.
-        # A separate mount for '/statics/' would only be needed if index.html tried to load assets from '/statics/asset.js' (absolute from root).
-        # Based on your vite.config.ts (base: '/dashboard/', assetsDir: 'statics'), the main mount should handle it.
-        # You can comment out or remove the second mount if it's not needed or causes issues.
-        # if statics_dir.is_dir():
-        #     app.mount(
-        #         '/statics/', # This path might need to be /dashboard/statics if vite generates links like that
-        #         StaticFiles(directory=str(statics_dir)),
-        #         name="dashboard_assets"
-        #     )
-        #     logger.info(f"mount_static_files: Mounted /statics/ from {statics_dir}")
-        # else:
-        #     logger.warning(f"mount_static_files: Statics directory {statics_dir} not found, skipping separate /statics/ mount.")
 
         return True
     except Exception as e:

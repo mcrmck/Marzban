@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.portal.auth import create_access_token
+from .auth_utils import create_access_token
 from app.db import get_db, crud
 from app.models.user import UserCreate, UserStatusCreate, UserStatus, UserResponse # Make sure UserStatus is imported if used directly
 from app import xray

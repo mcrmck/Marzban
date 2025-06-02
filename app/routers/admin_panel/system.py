@@ -13,7 +13,7 @@ from app.models.user import UserStatus
 from app.utils import responses
 from app.utils.system import cpu_usage, memory_usage, realtime_bandwidth
 
-router = APIRouter(tags=["System"], prefix="/api", responses={401: responses._401})
+router = APIRouter(tags=["System"], responses={401: responses._401})
 
 
 @router.get("/system", response_model=SystemStats)
@@ -52,16 +52,16 @@ def get_system_stats(
         cpu_cores=cpu.cores,
         cpu_usage=cpu.percent,
         total_user=total_user,
-        online_users=online_users,
         users_active=users_active,
         users_disabled=users_disabled,
+        users_on_hold=users_on_hold,
         users_expired=users_expired,
         users_limited=users_limited,
-        users_on_hold=users_on_hold,
-        incoming_bandwidth=system.uplink,
-        outgoing_bandwidth=system.downlink,
+        online_users=online_users,
+        incoming_bandwidth=system.downlink,
+        outgoing_bandwidth=system.uplink,
         incoming_bandwidth_speed=realtime_bandwidth_stats.incoming_bytes,
-        outgoing_bandwidth_speed=realtime_bandwidth_stats.outgoing_bytes,
+        outgoing_bandwidth_speed=realtime_bandwidth_stats.outgoing_bytes
     )
 
 

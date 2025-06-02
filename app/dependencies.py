@@ -75,7 +75,7 @@ def get_user_template(template_id: int, db: Session = Depends(get_db)):
 def get_validated_sub(
         token: str,
         db: Session = Depends(get_db)
-) -> "DBUser": # Return ORM model
+) -> "UserResponse": # Return Pydantic model
     logger.info(f"get_validated_sub: Attempting to validate token: {token[:20]}...")
 
     payload = get_subscription_payload(token)
@@ -101,7 +101,7 @@ def get_validated_sub(
 
     logger.info(f"get_validated_sub: User {db_orm_user.account_number} found in DB. Created at: {db_orm_user.created_at}, Sub revoked at: {db_orm_user.sub_revoked_at}")
 
-    token_created_at_val = payload.get('created_at') # This could be 'iat' (issued at) or your custom 'created_at'
+    token_created_at_val = payload.get('created_at')
     if token_created_at_val is None:
         token_created_at_val = payload.get('iat')
         if token_created_at_val is None:
@@ -121,7 +121,6 @@ def get_validated_sub(
 
     logger.info(f"get_validated_sub: Processed token_created_at_ts: {token_created_at_ts}")
 
-
     db_user_created_at_ts = db_orm_user.created_at.timestamp() if isinstance(db_orm_user.created_at, datetime) else float(db_orm_user.created_at or 0)
     logger.info(f"get_validated_sub: DB user created_at_ts: {db_user_created_at_ts}, Token created_at_ts: {token_created_at_ts}")
 
@@ -137,7 +136,9 @@ def get_validated_sub(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription revoked after token issuance")
 
     logger.info(f"get_validated_sub: Token validated successfully for user {db_orm_user.account_number}")
-    return db_orm_user
+
+    # Convert SQLAlchemy User to UserResponse
+    return UserResponse.model_validate(db_orm_user, context={'db': db})
 
 
 def get_validated_user( # This function should return the ORM User model for consistency with CRUD operations

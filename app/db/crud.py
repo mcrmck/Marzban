@@ -12,6 +12,7 @@ from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
 
 from app import logger  # Add logger import
+from app.models.plan import Plan  # Add Plan model import
 
 from app.db.models import (
     JWT,
@@ -47,6 +48,7 @@ from app.models.user_template import UserTemplateCreate, UserTemplateModify
 from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
 from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODELETE_DAYS
 import logging
+import os
 
 
 # Set logging level to DEBUG
@@ -687,43 +689,49 @@ def reset_admin_usage(db: Session, dbadmin: Admin) -> Admin:
     return dbadmin
 
 # --- User Template --- (Largely unchanged)
-def create_user_template(db: Session, user_template_data: UserTemplateCreate) -> UserTemplate: # Renamed param
-    inbound_tags_list: List[str] = [] # Renamed param
+def create_user_template(db: Session, user_template_data: UserTemplateCreate) -> UserTemplate:
+    inbound_tags_list: List[str] = []
     if user_template_data.inbounds:
-        for _, tag_list_val in user_template_data.inbounds.items(): # Renamed param
+        for _, tag_list_val in user_template_data.inbounds.items():
             inbound_tags_list.extend(tag_list_val)
 
-    db_inbounds_for_template_list = [] # Renamed param
+    # Get service configurations instead of ProxyInbound
+    db_inbounds_for_template_list = []
     if inbound_tags_list:
-        db_inbounds_for_template_list = db.query(ProxyInbound).filter(ProxyInbound.tag.in_(inbound_tags_list)).all()
+        db_inbounds_for_template_list = db.query(NodeServiceConfiguration).filter(
+            NodeServiceConfiguration.xray_inbound_tag.in_(inbound_tags_list)
+        ).all()
 
-    dbuser_template_obj = UserTemplate( # Renamed param
+    dbuser_template_obj = UserTemplate(
         name=user_template_data.name,
         data_limit=user_template_data.data_limit if user_template_data.data_limit is not None else 0,
         expire_duration=user_template_data.expire_duration if user_template_data.expire_duration is not None else 0,
         username_prefix=user_template_data.username_prefix,
         username_suffix=user_template_data.username_suffix,
-        inbounds=db_inbounds_for_template_list
+        service_configurations=db_inbounds_for_template_list  # Updated to use service_configurations
     )
     db.add(dbuser_template_obj)
     db.commit()
     db.refresh(dbuser_template_obj)
     return dbuser_template_obj
 
-def update_user_template(db: Session, dbuser_template_obj: UserTemplate, modified_user_template_data: UserTemplateModify) -> UserTemplate: # Renamed params
+def update_user_template(db: Session, dbuser_template_obj: UserTemplate, modified_user_template_data: UserTemplateModify) -> UserTemplate:
     update_data = modified_user_template_data.model_dump(exclude_unset=True, exclude={'inbounds'})
     for key, value in update_data.items():
         if hasattr(dbuser_template_obj, key): setattr(dbuser_template_obj, key, value)
 
     if modified_user_template_data.inbounds is not None:
-        inbound_tags_list: List[str] = [] # Renamed
-        for _, tag_list_val in modified_user_template_data.inbounds.items(): # Renamed
+        inbound_tags_list: List[str] = []
+        for _, tag_list_val in modified_user_template_data.inbounds.items():
             inbound_tags_list.extend(tag_list_val)
 
-        db_inbounds_for_template_list = [] # Renamed
+        # Get service configurations instead of ProxyInbound
+        db_inbounds_for_template_list = []
         if inbound_tags_list:
-            db_inbounds_for_template_list = db.query(ProxyInbound).filter(ProxyInbound.tag.in_(inbound_tags_list)).all()
-        dbuser_template_obj.inbounds = db_inbounds_for_template_list
+            db_inbounds_for_template_list = db.query(NodeServiceConfiguration).filter(
+                NodeServiceConfiguration.xray_inbound_tag.in_(inbound_tags_list)
+            ).all()
+        dbuser_template_obj.service_configurations = db_inbounds_for_template_list  # Updated to use service_configurations
 
     db.commit()
     db.refresh(dbuser_template_obj)
@@ -1207,3 +1215,26 @@ def update_service_configurations(
             db.merge(config)
 
     db.commit()
+
+def get_plans(db: Session) -> List[Plan]:
+    """Get a list of all available plans."""
+    # This should ideally fetch from a database or a more dynamic config source.
+    # For now, using the hardcoded dict:
+    plans_config = {
+        "basic": Plan(
+            id="basic", name="Basic Plan", description="Perfect for individual users", price=9.99, duration_days=30,
+            data_limit=100 * 1024 * 1024 * 1024, stripe_price_id=os.getenv("STRIPE_PRICE_ID_BASIC"),
+            features=["1 Device", "100GB Data", "30 Days"]
+        ),
+        "premium": Plan(
+            id="premium", name="Premium Plan", description="For power users and small families", price=19.99, duration_days=30,
+            data_limit=500 * 1024 * 1024 * 1024, stripe_price_id=os.getenv("STRIPE_PRICE_ID_PREMIUM"),
+            features=["3 Devices", "500GB Data", "30 Days"]
+        ),
+        "unlimited": Plan(
+            id="unlimited", name="Unlimited Plan", description="Unlimited data for heavy users", price=29.99, duration_days=30,
+            data_limit=None, stripe_price_id=os.getenv("STRIPE_PRICE_ID_UNLIMITED"),
+            features=["5 Devices", "Unlimited Data", "30 Days"]
+        )
+    }
+    return list(plans_config.values())

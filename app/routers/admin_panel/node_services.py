@@ -20,7 +20,6 @@ from config import XRAY_CONFIG_PATH
 logger = logging.getLogger("marzban.node_services")
 
 router = APIRouter(
-    prefix="/api",
     tags=["Node Services"]
 )
 

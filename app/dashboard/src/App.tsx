@@ -1,12 +1,12 @@
 import "react-datepicker/dist/react-datepicker.css";
 import "react-loading-skeleton/dist/skeleton.css";
 import { RouterProvider } from "react-router-dom";
-import { router } from "./pages/Router";
+import { adminRouter } from "./pages/AdminRouter";
 
 function App() {
     return (
         <main className="p-8">
-            <RouterProvider router={router} />
+            <RouterProvider router={adminRouter} />
         </main>
     );
 }

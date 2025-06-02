@@ -26,7 +26,7 @@ from app.utils import responses
 LOG_BATCH_INTERVAL = 0.5  # Seconds between log batch sends
 
 router = APIRouter(
-    tags=["Node"], prefix="/api", responses={401: responses._401, 403: responses._403}
+    tags=["Node"], responses={401: responses._401, 403: responses._403}
 )
 
 

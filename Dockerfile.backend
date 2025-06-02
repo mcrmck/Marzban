@@ -1,0 +1,39 @@
+ARG PYTHON_VERSION=3.12
+
+# Build Python environment and install XRay
+FROM python:${PYTHON_VERSION}-slim AS python-build-env
+ENV PYTHONUNBUFFERED=1
+WORKDIR /code
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl unzip gcc python3-dev libpq-dev \
+    && curl -L https://github.com/Gozargah/Marzban-scripts/raw/master/install_latest_xray.sh | bash \
+    && rm -rf /var/lib/apt/lists/*
+COPY ./requirements.txt /code/
+RUN python3 -m pip install --upgrade pip setuptools \
+    && pip install --no-cache-dir --upgrade -r /code/requirements.txt
+
+# Final application image
+FROM python:${PYTHON_VERSION}-slim
+ENV PYTHONUNBUFFERED=1
+ENV PYTHON_LIB_PATH=/usr/local/lib/python${PYTHON_VERSION%.*}/site-packages
+WORKDIR /code
+
+# Copy pre-built Python environment and ensure all binaries are available
+COPY --from=python-build-env $PYTHON_LIB_PATH $PYTHON_LIB_PATH
+COPY --from=python-build-env /usr/local/bin/ /usr/local/bin/
+COPY --from=python-build-env /usr/local/bin/xray /usr/local/bin/xray
+COPY --from=python-build-env /usr/local/share/xray /usr/local/share/xray
+
+# Copy all application source code (Python files, config, etc.)
+COPY . /code
+
+# Setup marzban-cli
+RUN ln -s /code/marzban-cli.py /usr/bin/marzban-cli \
+    && chmod +x /usr/bin/marzban-cli \
+    && marzban-cli completion install --shell bash
+
+# Add the entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

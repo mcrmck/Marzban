@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, TYPE_CHECKING
 from sqlalchemy.orm import Session
 import logging
 
@@ -18,10 +18,12 @@ from pydantic import (
 from app import xray
 from app.models.admin import Admin # Assuming Admin model doesn't need username changes reflected here for User model
 from app.models.proxy import ProxySettings, ProxyTypes
-from app.subscription.share import generate_v2ray_links # Check if this uses username
 from app.utils.jwt import create_subscription_token # Check if this uses username
 from config import XRAY_SUBSCRIPTION_PATH, XRAY_SUBSCRIPTION_URL_PREFIX
 from app.db import crud
+
+if TYPE_CHECKING:
+    from app.subscription.share import generate_v2ray_links
 
 
 class ReminderType(str, Enum):
@@ -221,28 +223,14 @@ class UserResponse(User):
 
     @model_validator(mode="after")
     def build_dynamic_fields(self, info: ValidationInfo) -> 'UserResponse':
-        logging.warning(
-            f"UserResponse.build_dynamic_fields: ENTERED. "
-            f"info.config: {info.config}, info.context: {info.context}, "
-            f"type(info.context): {type(info.context)}"
-        )
-
         # Detect FastAPI's subsequent context-less validation call
         is_problematic_fastapi_call = (info.context is None and info.config == {})
 
         if is_problematic_fastapi_call:
-            logging.error(
-                "UserResponse.build_dynamic_fields: PROBLEMATIC FastAPI serialization call DETECTED "
-                "(empty config, no context)."
-            )
             # If dynamic fields were already populated by a previous, context-aware call,
             # trust that and don't overwrite.
             if hasattr(self, 'links') and self.links and \
                hasattr(self, 'subscription_url') and self.subscription_url:
-                logging.warning(
-                    "UserResponse.build_dynamic_fields: Problematic call, but dynamic fields "
-                    "seem pre-populated. Returning self."
-                )
                 return self
             else:
                 logging.error(
@@ -262,14 +250,6 @@ class UserResponse(User):
         # If db is not available (either original problematic call or a genuine miss),
         # set error/default messages and return.
         if not db:
-            log_message = "UserResponse.build_dynamic_fields: 'db' not available "
-            if info.context is None:
-                log_message += "(ValidationInfo.context is None). "
-            elif not info.context.get('db'):
-                log_message += f"(db not in ValidationInfo.context keys: {list(info.context.keys())}). "
-            log_message += "Links may not be fully generated."
-            logging.warning(log_message)
-
             self.links = self.links or ["Configuration links require server context."]
             self.subscription_url = self.subscription_url or "Subscription URL requires server context."
             return self
@@ -291,6 +271,7 @@ class UserResponse(User):
         # Generate V2Ray links if node is active and proxies exist
         if self.active_node_id and self.proxies:
             try:
+                from app.subscription.share import generate_v2ray_links  # Local import
                 node_services = crud.get_services_for_node(db, self.active_node_id)
                 active_node_specific_inbounds = {}
 
@@ -305,10 +286,6 @@ class UserResponse(User):
                             active_node_specific_inbounds[proxy_type_enum].append(service_config.xray_inbound_tag)
 
                 if not active_node_specific_inbounds or not any(active_node_specific_inbounds.values()):
-                    logging.warning(
-                        f"User {user_account_number} on active node {self.active_node_id}: No matching enabled "
-                        f"services with inbound tags found for any user proxy type."
-                    )
                     self.links = [f"No server configurations for node {self.active_node_id}: No enabled services with required inbound tags match your protocols."]
                 else:
                     self.links = generate_v2ray_links(

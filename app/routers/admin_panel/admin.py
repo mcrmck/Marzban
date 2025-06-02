@@ -12,7 +12,7 @@ from app.utils import report, responses
 from app.utils.jwt import create_admin_token
 from config import LOGIN_NOTIFY_WHITE_LIST
 
-router = APIRouter(tags=["Admin"], prefix="/api", responses={401: responses._401})
+router = APIRouter(tags=["Admin"], responses={401: responses._401})
 
 
 def get_client_ip(request: Request) -> str:
@@ -25,7 +25,7 @@ def get_client_ip(request: Request) -> str:
     return "Unknown"
 
 
-@router.post("/admin/token", response_model=Token)
+@router.post("/token", response_model=Token)
 def admin_token(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),

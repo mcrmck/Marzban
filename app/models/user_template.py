@@ -4,6 +4,29 @@ from pydantic import field_validator, ConfigDict, BaseModel, Field
 
 from app import xray
 from app.models.proxy import ProxyTypes
+from app.db.models import NodeServiceConfiguration
+
+
+class ServiceConfigurationResponse(BaseModel):
+    id: int
+    node_id: int
+    service_name: str
+    enabled: bool
+    protocol_type: str
+    listen_address: Optional[str] = None
+    listen_port: int
+    network_type: Optional[str] = None
+    security_type: str
+    ws_path: Optional[str] = None
+    grpc_service_name: Optional[str] = None
+    http_upgrade_path: Optional[str] = None
+    sni: Optional[str] = None
+    fingerprint: Optional[str] = None
+    reality_short_id: Optional[str] = None
+    reality_public_key: Optional[str] = None
+    xray_inbound_tag: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserTemplate(BaseModel):
@@ -18,6 +41,9 @@ class UserTemplate(BaseModel):
     username_suffix: Optional[str] = Field(max_length=20, min_length=1, default=None)
 
     inbounds: Dict[ProxyTypes, List[str]] = {}
+    service_configurations: List[ServiceConfigurationResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserTemplateCreate(UserTemplate):
@@ -53,7 +79,11 @@ class UserTemplateResponse(UserTemplate):
     @classmethod
     def validate_inbounds(cls, v):
         final = {}
-        inbound_tags = [i.tag for i in v]
+        if isinstance(v, list) and all(isinstance(i, NodeServiceConfiguration) for i in v):
+            inbound_tags = [i.xray_inbound_tag for i in v if i.xray_inbound_tag]
+        else:
+            inbound_tags = [i.tag for i in v] if isinstance(v, list) else []
+
         for protocol, inbounds in xray.config.inbounds_by_protocol.items():
             for inbound in inbounds:
                 if inbound["tag"] in inbound_tags:

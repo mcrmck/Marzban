@@ -1,13 +1,39 @@
 ARG PYTHON_VERSION=3.12
 
-# Stage 1: Build frontend assets for production (THIS STAGE IS ESSENTIAL)
+# Stage 1: Build frontend assets for production
 FROM node:20-slim AS node-build
 WORKDIR /app
+
+# Copy package files
 COPY app/dashboard/package*.json ./
-RUN npm install
+
+# Install dependencies including @types/node
+RUN npm install && \
+    npm install --save-dev @types/node
+
+# Copy source code
 COPY app/dashboard/ ./
-# This creates the production build in /app/build
-RUN npm run build -- --outDir build --assetsDir statics
+
+# Create environment files with correct API base URL
+RUN echo "VITE_API_BASE_URL=/api\nVITE_BASE_API=/api\nUVICORN_PORT=8000\nXRAY_SUBSCRIPTION_PATH=sub" > .env && \
+    echo "VITE_APP_TYPE=admin\nVITE_BASE_API=/api/admin" > .env.admin && \
+    echo "VITE_APP_TYPE=portal\nVITE_BASE_API=/api/portal" > .env.portal
+
+# Build admin panel with error checking
+RUN npm run build:admin || (echo "Admin panel build failed" && exit 1)
+
+# Build client portal with error checking
+RUN npm run build:portal || (echo "Portal build failed" && exit 1)
+
+# Rename HTML files to index.html
+RUN mv dist_admin/admin.html dist_admin/index.html && \
+    mv dist_portal/portal.html dist_portal/index.html
+
+# Verify builds exist
+RUN ls -la dist_admin/ && \
+    ls -la dist_portal/ && \
+    test -f dist_admin/index.html && \
+    test -f dist_portal/index.html
 
 # Stage 2: Build Python environment and install XRay
 FROM python:${PYTHON_VERSION}-slim AS python-build-env
@@ -33,15 +59,18 @@ COPY --from=python-build-env /usr/local/bin/ /usr/local/bin/
 COPY --from=python-build-env /usr/local/bin/xray /usr/local/bin/xray
 COPY --from=python-build-env /usr/local/share/xray /usr/local/share/xray
 
-# Copy production-built dashboard assets from the node-build stage
-# This is critical for mount_static_files() to work.
-COPY --from=node-build /app/build /code/app/dashboard/build
+# Copy production-built frontend assets from the node-build stage
+COPY --from=node-build /app/dist_admin /code/app/dashboard/dist_admin
+COPY --from=node-build /app/dist_portal /code/app/dashboard/dist_portal
+
+# Verify frontend assets exist in final image
+RUN ls -la /code/app/dashboard/dist_admin/ && \
+    ls -la /code/app/dashboard/dist_portal/ && \
+    test -f /code/app/dashboard/dist_admin/index.html && \
+    test -f /code/app/dashboard/dist_portal/index.html
 
 # Copy all application source code (Python files, config, etc.)
 COPY . /code
-
-# Node.js, npm, and dashboard dev dependencies (npm install in final stage) are NO LONGER NEEDED
-# as we are always serving the pre-built assets.
 
 # Setup marzban-cli
 RUN ln -s /code/marzban-cli.py /usr/bin/marzban-cli \

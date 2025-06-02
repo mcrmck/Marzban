@@ -72,15 +72,13 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    logger.info(f"Request received: {request.method} {request.url}")
-    logger.info(f"Client host: {request.client.host}")
-    logger.info(f"Headers: {request.headers}")
+    logger.info(f"HTTP {request.method} {request.url.path} from {request.client.host}")
     try:
         response = await call_next(request)
-        logger.info(f"Response status: {response.status_code}")
+        logger.info(f"HTTP {request.method} {request.url.path} -> {response.status_code}")
         return response
     except Exception as e:
-        logger.error(f"Request failed: {e}")
+        logger.error(f"HTTP {request.method} {request.url.path} failed: {e}")
         logger.error("Stack trace:", exc_info=True)
         raise
 
