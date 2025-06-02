@@ -1,43 +1,61 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig, splitVendorChunkPlugin } from "vite";
+import { defineConfig, splitVendorChunkPlugin, type Plugin } from "vite"; // Make sure to import 'Plugin' type
 import svgr from "vite-plugin-svgr";
 import { visualizer } from "rollup-plugin-visualizer";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { loadEnv } from 'vite';
 import type { ConfigEnv } from 'vite';
 
+// Define the custom plugin to fix the admin root serving in dev mode
+function devServerAdminRootFix(): Plugin {
+  return {
+    name: 'dev-server-admin-root-fix',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        // If the request is for the bare '/admin/' path,
+        // rewrite it to '/admin/admin.html' to serve the correct entry file.
+        if (req.url === '/admin/') {
+          req.url = '/admin/admin.html';
+        }
+        next();
+      });
+    }
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }: ConfigEnv) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const isDev = mode === 'development';
+  const isDev = mode === 'development' || mode === 'admin' || mode === 'portal';
 
-  // Use mode directly to determine if this is an admin or portal build
   const isAdminBuild = mode === 'admin';
   const base = isAdminBuild ? '/admin/' : '/';
   const outDir = isAdminBuild ? 'dist_admin' : 'dist_portal';
 
-  // Get API base URL from environment or use default
-  // In development, use the Docker service name if available, otherwise fallback to localhost
   const apiBaseUrl = isDev
     ? `http://${env.VITE_API_TARGET_HOST || 'marzban-panel'}:${env.UVICORN_PORT || 8000}`
     : '';
-
-  // Ensure apiBaseUrl is always defined for proxy configuration
   const proxyTarget = apiBaseUrl || 'http://marzban-panel:8000';
-
-  // Get API base path from environment
   const apiBasePath = env.VITE_BASE_API || '/api';
 
+  // Initialize plugins array
+  const pluginsToUse: Plugin[] = [
+    tsconfigPaths(),
+    react({
+      include: "**/*.tsx",
+    }),
+    svgr(),
+    visualizer(),
+    splitVendorChunkPlugin(),
+  ];
+
+  // Conditionally add the dev server fix plugin only for admin mode
+  if (isAdminBuild) {
+    pluginsToUse.push(devServerAdminRootFix());
+  }
+
   return {
-    plugins: [
-      tsconfigPaths(),
-      react({
-        include: "**/*.tsx",
-      }),
-      svgr(),
-      visualizer(),
-      splitVendorChunkPlugin(),
-    ],
+    plugins: pluginsToUse, // Use the constructed plugins array
     base: base,
     build: {
       outDir: outDir,
@@ -45,7 +63,13 @@ export default defineConfig(({ mode }: ConfigEnv) => {
       minify: !isDev,
       sourcemap: isDev,
       rollupOptions: {
-        input: isAdminBuild ? 'admin.html' : 'index.html',
+        input: isAdminBuild ? {
+          main: 'admin.html',
+          admin: 'src/admin.tsx'
+        } : {
+          main: 'index.html',
+          portal: 'src/main.portal.tsx'
+        },
         output: {
           manualChunks: undefined,
           assetFileNames: 'statics/[name].[hash][extname]',

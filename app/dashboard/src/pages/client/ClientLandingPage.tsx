@@ -24,7 +24,7 @@ const Feature = ({ icon, title, text }: { icon: any; title: string; text: string
         justify="center"
         color="white"
         rounded="full"
-        bg={useColorModeValue("blue.500", "blue.300")}
+        bg="brand.500"
         mb={1}
       >
         <Icon as={icon} w={8} h={8} />
@@ -37,46 +37,17 @@ const Feature = ({ icon, title, text }: { icon: any; title: string; text: string
 
 export const ClientLandingPage = () => {
   const navigate = useNavigate();
-  const bgColor = useColorModeValue("white", "gray.800");
   const textColor = useColorModeValue("gray.600", "gray.400");
 
   return (
     <Box>
-      {/* Navigation Bar */}
-      <Box
-        position="fixed"
-        top={0}
-        left={0}
-        right={0}
-        bg={bgColor}
-        boxShadow="sm"
-        zIndex={1000}
-      >
-        <Container maxW="container.xl">
-          <Flex h={16} alignItems="center" justifyContent="space-between">
-            <Heading size="md">Marzban VPN</Heading>
-            <HStack spacing={4}>
-              <Button variant="ghost" onClick={() => navigate("/login")}>
-                Login
-              </Button>
-              <Button variant="ghost" onClick={() => navigate("/register")}>
-                Register
-              </Button>
-              <Button colorScheme="blue" onClick={() => navigate("/plans")}>
-                Get Started
-              </Button>
-            </HStack>
-          </Flex>
-        </Container>
-      </Box>
-
       {/* Hero Section */}
       <Box pt={24} pb={20}>
         <Container maxW="container.xl">
           <Stack spacing={8} align="center" textAlign="center">
             <Heading
               fontSize={{ base: "3xl", md: "4xl", lg: "5xl" }}
-              bgGradient="linear(to-r, blue.400, blue.600)"
+              bgGradient="linear(to-r, brand.400, brand.600)"
               bgClip="text"
             >
               Secure, Fast, and Private VPN Service
@@ -87,7 +58,7 @@ export const ClientLandingPage = () => {
             </Text>
             <Button
               size="lg"
-              colorScheme="blue"
+              colorScheme="brand"
               onClick={() => navigate("/plans")}
             >
               View Plans

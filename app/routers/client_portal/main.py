@@ -502,7 +502,7 @@ async def get_available_plans(
 ):
     """Get a list of available plans."""
     plans = crud.get_plans(db)
-    return [PlanResponse.model_validate(plan) for plan in plans]
+    return plans  # PlanResponse inherits from Plan, so we can return plans directly
 
 # Ensure get_plan_by_id is robust
 def get_plan_by_id(plan_id: str) -> Optional[Plan]:

@@ -30,7 +30,7 @@ export const ClientLoginPage = () => {
     useEffect(() => {
         if (isAuthenticated) {
             // Get the location they were trying to go to, or default to account page
-            const from = (location.state as LocationState)?.from?.pathname || "/portal/account";
+            const from = (location.state as LocationState)?.from?.pathname || "/account";
             navigate(from, { replace: true });
         }
     }, [isAuthenticated, navigate, location]);
@@ -74,7 +74,7 @@ export const ClientLoginPage = () => {
 
                         <Button
                             type="submit"
-                            colorScheme="blue"
+                            colorScheme="brand"
                             size="lg"
                             width="full"
                             isLoading={isLoadingAuth}

@@ -59,3 +59,7 @@ export const relativeExpiryDate = (expiryDate: number | null | undefined) => {
   }
   return dateInfo;
 };
+
+export const formatDate = (timestamp: number) => {
+    return new Date(timestamp * 1000).toLocaleDateString();
+};

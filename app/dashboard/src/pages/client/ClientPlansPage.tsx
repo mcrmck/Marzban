@@ -43,7 +43,7 @@ const PlanCard = ({ plan, onSelect, isLoading }: PlanCardProps) => (
                 ))}
             </VStack>
             <Button
-                colorScheme="blue"
+                colorScheme="brand"
                 onClick={() => onSelect(plan.id)}
                 isLoading={isLoading}
                 loadingText="Processing..."
@@ -89,7 +89,7 @@ export const ClientPlansPage = () => {
                     duration: 5000,
                     isClosable: true,
                 });
-                navigate("/portal/account");
+                navigate("/account");
             }
         } catch (error) {
             toast({

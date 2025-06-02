@@ -62,7 +62,7 @@ export const ClientStripeSuccessPage = () => {
                 <Button
                     colorScheme="blue"
                     size="lg"
-                    onClick={() => navigate("/portal/account")}
+                    onClick={() => navigate("/account")}
                 >
                     Go to Account
                 </Button>

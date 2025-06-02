@@ -8,27 +8,32 @@ import { ClientStripeCancelPage } from "./client/ClientStripeCancelPage";
 import { ClientProtectedRoute } from "./client/ClientProtectedRoute";
 import { ClientLandingPage } from "./client/ClientLandingPage";
 import { ClientRegisterPage } from "./client/ClientRegisterPage";
+import { ClientLayout } from "../components/client/ClientLayout";
+
+const wrapWithLayout = (element: JSX.Element) => (
+  <ClientLayout>{element}</ClientLayout>
+);
 
 export const portalRouter = createHashRouter([
     {
         path: "/",
-        element: <ClientLandingPage />,
+        element: wrapWithLayout(<ClientLandingPage />),
     },
     {
         path: "/login",
-        element: <ClientLoginPage />,
+        element: wrapWithLayout(<ClientLoginPage />),
     },
     {
         path: "/register",
-        element: <ClientRegisterPage />,
+        element: wrapWithLayout(<ClientRegisterPage />),
     },
     {
         path: "/plans",
-        element: <ClientPlansPage />,
+        element: wrapWithLayout(<ClientPlansPage />),
     },
     {
         path: "/account",
-        element: (
+        element: wrapWithLayout(
             <ClientProtectedRoute>
                 <ClientAccountPage />
             </ClientProtectedRoute>
@@ -36,7 +41,7 @@ export const portalRouter = createHashRouter([
     },
     {
         path: "/servers",
-        element: (
+        element: wrapWithLayout(
             <ClientProtectedRoute>
                 <ClientServersPage />
             </ClientProtectedRoute>
@@ -44,7 +49,7 @@ export const portalRouter = createHashRouter([
     },
     {
         path: "/checkout/success",
-        element: (
+        element: wrapWithLayout(
             <ClientProtectedRoute>
                 <ClientStripeSuccessPage />
             </ClientProtectedRoute>
@@ -52,6 +57,6 @@ export const portalRouter = createHashRouter([
     },
     {
         path: "/checkout/cancel",
-        element: <ClientStripeCancelPage />,
+        element: wrapWithLayout(<ClientStripeCancelPage />),
     },
 ]);

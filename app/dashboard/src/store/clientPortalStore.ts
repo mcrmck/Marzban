@@ -93,6 +93,7 @@ export const useClientPortalStore = create<ClientPortalState>((set, get) => ({
             const response = await loginClientApi(accountNumber);
             saveClientAuthToken(response.access_token);
             set({ isAuthenticated: true });
+            await get().fetchClientDetails();
         } catch (error) {
             set({ error: "Invalid account number" });
             throw error;

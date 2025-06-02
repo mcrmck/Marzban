@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
     Box,
@@ -25,13 +25,23 @@ import {
 } from "@chakra-ui/react";
 import { useClientPortalStore } from "../../store/clientPortalStore";
 import { QRCodeSVG } from "qrcode.react";
-import type { ClientNode } from "../../types/clientPortal";
-import { CheckIcon, CopyIcon } from "@chakra-ui/icons";
+import type { ClientPortalUser, ClientNode } from "../../types/clientPortal";
+import { CheckIcon, ClipboardIcon } from "@heroicons/react/24/outline";
+import { chakra } from "@chakra-ui/react";
+import { formatBytes } from "../../utils/formatByte";
+import { formatDate } from "../../utils/dateFormatter";
+
+const CopyIcon = chakra(ClipboardIcon, {
+    baseStyle: {
+        w: 4,
+        h: 4,
+    },
+});
 
 const AccountContent = ({ user, active_node, available_nodes = [] }: {
-    user: any,
-    active_node: any,
-    available_nodes: ClientNode[]
+    user: ClientPortalUser;
+    active_node?: ClientNode | null;
+    available_nodes: ClientNode[];
 }) => {
     const navigate = useNavigate();
     const toast = useToast();
@@ -68,10 +78,10 @@ const AccountContent = ({ user, active_node, available_nodes = [] }: {
                 </HStack>
 
                 <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6}>
-                    {/* Account Status Card */}
+                    {/* Account Info Card */}
                     <Card>
                         <CardHeader>
-                            <Heading size="md">Account Status</Heading>
+                            <Heading size="md">Account Information</Heading>
                         </CardHeader>
                         <CardBody>
                             <VStack spacing={4} align="stretch">
@@ -104,11 +114,15 @@ const AccountContent = ({ user, active_node, available_nodes = [] }: {
                                 </Stat>
                                 <Stat>
                                     <StatLabel>Data Limit</StatLabel>
-                                    <StatNumber>{user.data_limit || "Unlimited"}</StatNumber>
+                                    <StatNumber>
+                                        {user.data_limit ? formatBytes(user.data_limit) : "Unlimited"}
+                                    </StatNumber>
                                 </Stat>
                                 <Stat>
                                     <StatLabel>Expiry Date</StatLabel>
-                                    <StatNumber>{user.expire}</StatNumber>
+                                    <StatNumber>
+                                        {user.expire ? formatDate(Number(user.expire)) : "Never"}
+                                    </StatNumber>
                                 </Stat>
                             </VStack>
                         </CardBody>

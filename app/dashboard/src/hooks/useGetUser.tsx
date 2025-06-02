@@ -1,33 +1,39 @@
 import { fetch } from "service/http";
-import { UserApi, UseGetUserReturn } from "types/User"; // UserApi is the revised one
+import { UserApi, UseGetUserReturn } from "types/User";
 import { useQuery } from "react-query";
+import { useClientPortalStore } from "store/clientPortalStore";
 
 export const useGetUser = (): UseGetUserReturn => {
+    const { clientDetails } = useClientPortalStore();
+
     const {
         data: userData,
         isLoading: getUserIsPending,
         isSuccess: getUserIsSuccess,
         isError: getUserIsError,
-        error: queryError, // queryError will be 'Error | null'
-    } = useQuery<UserApi, Error>(["user"], async () => { // TData is UserApi, TError is Error
-        const data = await fetch("/admin"); // fetch returns parsed JSON
+        error: queryError,
+    } = useQuery<UserApi, Error>(["user"], async () => {
+        if (!clientDetails) {
+            throw new Error("No client details available");
+        }
 
-        // Map to the revised UserApi structure
         return {
-            username: data.username,
-            is_sudo: data.is_sudo !== undefined ? data.is_sudo : false,
-            users_usage: data.users_usage,
-            telegram_id: data.telegram_id ?? null, // Handle undefined from fetch if API omits optional fields
-            discord_webhook: data.discord_webhook ?? null, // Handle undefined
+            username: clientDetails.user.username,
+            is_sudo: false,
+            users_usage: clientDetails.user.xray_user?.used_traffic || 0,
+            telegram_id: null,
+            discord_webhook: null,
         };
+    }, {
+        enabled: !!clientDetails,
     });
 
     return {
-        userData, // userData is now UserApi | undefined
+        userData,
         getUserIsPending,
         getUserIsSuccess,
         getUserIsError,
-        getUserError: queryError || null, // Ensures Error | null
+        getUserError: queryError || null,
     };
 };
 

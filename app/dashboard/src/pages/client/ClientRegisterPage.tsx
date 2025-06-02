@@ -59,7 +59,7 @@ export const ClientRegisterPage = () => {
                     <VStack spacing={4}>
                         <Button
                             type="submit"
-                            colorScheme="blue"
+                            colorScheme="brand"
                             size="lg"
                             width="full"
                             isLoading={isLoadingAuth}
@@ -72,7 +72,7 @@ export const ClientRegisterPage = () => {
                             Already have an account?{" "}
                             <Button
                                 variant="link"
-                                color="blue.500"
+                                color="brand.500"
                                 onClick={() => navigate("/login")}
                             >
                                 Login here
