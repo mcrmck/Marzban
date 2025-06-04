@@ -17,16 +17,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Drop the proxy_hosts table first since it has foreign keys to proxy_inbounds
-    op.drop_table('hosts')
-    # Drop the proxy_inbounds table
-    op.drop_table('inbounds')
-    # Drop the template_inbounds_association table
-    op.drop_table('template_inbounds_association')
+    # Drop tables if they exist
+    for table in ['hosts', 'inbounds', 'template_inbounds_association']:
+        op.execute(f"DROP TABLE IF EXISTS {table}")
+
+    # Create template_inbounds_association with correct foreign key
+    op.create_table(
+        'template_inbounds_association',
+        sa.Column('user_template_id', sa.Integer(), nullable=True),
+        sa.Column('inbound_tag', sa.String(length=256), nullable=True),
+        sa.ForeignKeyConstraint(['inbound_tag'], ['node_service_configurations.xray_inbound_tag'], ),
+        sa.ForeignKeyConstraint(['user_template_id'], ['user_templates.id'], )
+    )
 
 
 def downgrade() -> None:
-    # Recreate the tables in reverse order
+    # Drop the new table if it exists
+    op.execute("DROP TABLE IF EXISTS template_inbounds_association")
+
+    # Recreate the old tables
     op.create_table(
         'template_inbounds_association',
         sa.Column('user_template_id', sa.Integer(), nullable=True),

@@ -65,43 +65,76 @@ def get_system_stats(
     )
 
 
-@router.get(
-    "/hosts", response_model=Dict[str, List[NodeServiceConfigurationResponse]], responses={403: responses._403}
-)
-def get_hosts(
-    db: Session = Depends(get_db), admin: Admin = Depends(Admin.check_sudo_admin)
-):
-    """Get a list of service configurations grouped by inbound tag."""
-    hosts = {tag: crud.get_service_configurations(db, tag) for tag in xray.config.inbounds_by_tag}
-    return hosts
+@router.post("/system/nodes/restart-all", responses={403: responses._403})
+def restart_all_nodes(admin: Admin = Depends(Admin.check_sudo_admin)):
+    """Restart all connected Xray nodes."""
+    config_for_nodes = xray.config.include_db_users()
+
+    restarted_nodes = []
+    failed_nodes = []
+
+    for node_id, node in list(xray.nodes.items()):
+        if node.connected:
+            try:
+                print(f"Attempting to restart node ID: {node_id}")
+                xray.operations.restart_node(node_id, config_for_nodes)
+                restarted_nodes.append(node_id)
+            except Exception as e:
+                print(f"Failed to restart node ID {node_id}: {e}")
+                failed_nodes.append({"node_id": node_id, "error": str(e)})
+        else:
+            print(f"Skipping restart for disconnected node ID: {node_id}")
+
+    return {"detail": "Restart command issued to all connected nodes.", "restarted": restarted_nodes, "failed": failed_nodes}
 
 
-@router.put(
-    "/hosts", response_model=Dict[str, List[NodeServiceConfigurationResponse]], responses={403: responses._403}
-)
-def modify_hosts(
-    modified_hosts: Dict[str, List[NodeServiceConfigurationResponse]],
-    db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
-):
-    """Modify service configurations and update the configuration."""
-    for inbound_tag in modified_hosts:
-        if inbound_tag not in xray.config.inbounds_by_tag:
-            raise HTTPException(
-                status_code=400, detail=f"Inbound {inbound_tag} doesn't exist"
-            )
+@router.get("/system/xray-template-config", responses={403: responses._403})
+def get_default_template_config(admin: Admin = Depends(Admin.check_sudo_admin)) -> dict:
+    """Get the current default/template Xray configuration for nodes."""
+    return dict(xray.config)
 
-    # Convert Pydantic models to SQLAlchemy models
-    db_hosts = {}
-    for inbound_tag, hosts in modified_hosts.items():
-        db_hosts[inbound_tag] = [
-            NodeServiceConfiguration(**host.model_dump(exclude={'id', 'node_id'}))
-            for host in hosts
-        ]
 
-    for inbound_tag, hosts in db_hosts.items():
-        crud.update_service_configurations(db, inbound_tag, hosts)
+@router.put("/system/xray-template-config", responses={403: responses._403})
+def modify_default_template_config(
+    payload: dict, admin: Admin = Depends(Admin.check_sudo_admin)
+) -> dict:
+    """Modify the in-memory default/template Xray configuration and restart all connected nodes."""
+    try:
+        # Update the global config instance with the new template
+        xray.config.update(payload)
+        # Ensure API port is preserved
+        xray.config["api"] = xray.config.get("api", {})
+        xray.config["api"]["port"] = xray.config.api_port
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
 
-    xray.hosts.update()
+    # Generate a full config with users based on the updated template
+    config_for_nodes = xray.config.include_db_users()
 
-    return {tag: crud.get_service_configurations(db, tag) for tag in xray.config.inbounds_by_tag}
+    # Restart all connected nodes to apply the new template-based config
+    restarted_nodes = []
+    failed_nodes = []
+    for node_id, node in list(xray.nodes.items()):
+        if node.connected:
+            try:
+                print(f"Attempting to restart node ID {node_id} with new template-based config.")
+                xray.operations.restart_node(node_id, config_for_nodes)
+                restarted_nodes.append(node_id)
+            except Exception as e:
+                print(f"Failed to restart node ID {node_id} with new template: {e}")
+                failed_nodes.append({"node_id": node_id, "error": str(e)})
+        else:
+            print(f"Skipping restart for disconnected node ID: {node_id}")
+
+    # Update hosts based on the new xray.config template's inbounds
+    if hasattr(xray, 'hosts') and callable(getattr(xray.hosts, 'update', None)):
+        xray.hosts.update()
+    else:
+        print("Warning: xray.hosts.update() not found or not callable. Host list may be stale.")
+
+    return {
+        "detail": "Default template config updated. Restart command issued to all connected nodes.",
+        "new_template_preview": dict(xray.config),
+        "restarted_nodes": restarted_nodes,
+        "failed_nodes": failed_nodes
+    }

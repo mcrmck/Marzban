@@ -144,23 +144,7 @@ export const Header: FC<HeaderProps> = () => {
             {theme === "light" ? <DarkIcon /> : <LightIcon />}
           </IconButton>
 
-          {/* GitHub star button ------------------------------------------ */}
-          <Box
-            display="flex"
-            alignItems="center"
-            pr="2"
-            css={{ "& span": { display: "inline-flex" } }}
-          >
-            <GitHubButton
-              href={REPO_URL}
-              data-color-scheme={`no-preference: ${gBtnColor}; light: ${gBtnColor}; dark: ${gBtnColor};`}
-              data-size="large"
-              data-show-count="true"
-              aria-label="Star Marzban on GitHub"
-            >
-              Star
-            </GitHubButton>
-          </Box>
+
         </HStack>
       </Box>
     </HStack>

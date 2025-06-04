@@ -141,25 +141,17 @@ def get_validated_sub(
     return UserResponse.model_validate(db_orm_user, context={'db': db})
 
 
-def get_validated_user( # This function should return the ORM User model for consistency with CRUD operations
+def get_validated_user(
         account_number: str,
-        admin: Admin = Depends(Admin.get_current), # Admin model from app.models.admin
+        admin: Admin = Depends(Admin.get_current),
         db: Session = Depends(get_db)
-): # Return type should be the ORM User model from app.db.models.User
-    db_orm_user = crud.get_user(db, account_number) # crud.get_user returns ORM model
+):
+    db_orm_user = crud.get_user(db, account_number)
     if not db_orm_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Ensure admin comparison logic is correct
-    # db_orm_user.admin is the ORM Admin object associated with the user
-    if not admin.is_sudo:
-        # Check if the user has an admin and if that admin's username matches the current admin's username
-        if not db_orm_user.admin or db_orm_user.admin.username != admin.username:
-            raise HTTPException(status_code=403, detail="You're not allowed to access this user")
-
     # Return the ORM model for use in routers that call CRUD functions
     return db_orm_user
-    # If the router absolutely needs UserResponse, it can convert it: UserResponse.model_validate(db_orm_user)
 
 
 def get_expired_users_list(db: Session, admin: Admin, expired_after: Optional[datetime] = None, # Admin model from app.models.admin

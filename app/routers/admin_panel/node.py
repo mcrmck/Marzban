@@ -32,7 +32,8 @@ router = APIRouter(
 
 @router.get("/node/settings", response_model=NodeSettings)
 def get_node_settings(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current)
 ):
     """Retrieve the current node settings, including TLS certificate. Public endpoint."""
     tls = crud.get_tls_certificate(db)
@@ -154,9 +155,10 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
 
 @router.get("/nodes", response_model=List[NodeResponse])
 def get_nodes(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin)
 ):
-    """Retrieve a list of all nodes. Public endpoint."""
+    """Retrieve a list of all nodes. Requires sudo admin privileges."""
     return crud.get_nodes(db)
 
 

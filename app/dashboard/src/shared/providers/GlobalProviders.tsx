@@ -6,8 +6,6 @@
 import { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChakraProvider } from "@chakra-ui/react";
-import { ThemeProvider } from "next-themes";
-import { Toaster } from "../../components/ui/toaster";
 
 // Theme imports
 import adminTheme from "../../theme/adminTheme";
@@ -33,13 +31,10 @@ export const GlobalProviders = ({ children, mode = "admin" }: GlobalProvidersPro
   const theme = mode === "admin" ? adminTheme : clientTheme;
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-      <ChakraProvider value={theme}>
-        <QueryClientProvider client={queryClient}>
-          {children}
-          <Toaster />
-        </QueryClientProvider>
-      </ChakraProvider>
-    </ThemeProvider>
+    <ChakraProvider value={theme}>
+      <QueryClientProvider client={queryClient}>
+        {children}
+      </QueryClientProvider>
+    </ChakraProvider>
   );
 };

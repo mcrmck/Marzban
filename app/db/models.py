@@ -35,7 +35,6 @@ class Admin(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String(34), unique=True, index=True)
     hashed_password = Column(String(128))
-    users = relationship("User", back_populates="admin")
     created_at = Column(DateTime, default=datetime.utcnow)
     is_sudo = Column(Boolean, default=False)
     password_reset_at = Column(DateTime, nullable=True)
@@ -74,8 +73,6 @@ class User(Base):
     )
     usage_logs = relationship("UserUsageResetLogs", back_populates="user")
     expire = Column(Integer, nullable=True)
-    admin_id = Column(Integer, ForeignKey("admins.id"))
-    admin = relationship("Admin", back_populates="users")
     sub_revoked_at = Column(DateTime, nullable=True, default=None)
     sub_updated_at = Column(DateTime, nullable=True, default=None)
     sub_last_user_agent = Column(String(512), nullable=True, default=None)
@@ -166,7 +163,7 @@ template_inbounds_association = Table(
     "template_inbounds_association",
     Base.metadata,
     Column("user_template_id", ForeignKey("user_templates.id")),
-    Column("inbound_tag", ForeignKey("inbounds.tag")),
+    Column("inbound_tag", ForeignKey("node_service_configurations.xray_inbound_tag")),
 )
 
 
@@ -363,3 +360,18 @@ class NodeServiceConfiguration(Base):
 
     def __repr__(self):
         return f"<NodeServiceConfiguration(id={self.id}, name='{self.service_name}', node_id={self.node_id})>"
+
+
+class Plan(Base):
+    __tablename__ = "plans"
+
+    id = Column(String(36), primary_key=True)
+    name = Column(String(256), nullable=False)
+    description = Column(String(1024), nullable=False)
+    price = Column(Float, nullable=False)
+    duration_days = Column(Integer, nullable=False)
+    data_limit = Column(BigInteger, nullable=True)  # None means unlimited
+    stripe_price_id = Column(String(256), nullable=True)
+    features = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

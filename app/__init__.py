@@ -61,13 +61,8 @@ try:
 except ImportError as e:
     logger.error(f"APP_INIT: FAILED to import or include main_api_aggregator_router: {e}", exc_info=True)
 
-# --- Include Root/Homepage Router ---
-try:
-    from .routers.core.home import router as home_page_router
-    app.include_router(home_page_router, tags=["Homepage"])
-    logger.info("APP_INIT: Successfully included home_page_router.")
-except ImportError as e:
-    logger.error(f"APP_INIT: FAILED to import or include home_page_router: {e}", exc_info=True)
+# --- Include Root/Homepage Route
+
 
 # --- Serve Admin Panel SPA ---
 admin_spa_build_dir = os.path.join(os.path.dirname(__file__), "dashboard", "dist_admin")

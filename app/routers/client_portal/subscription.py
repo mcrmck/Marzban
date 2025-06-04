@@ -34,7 +34,7 @@ client_config = {
     "v2ray-json": {"config_format": "v2ray-json", "media_type": "application/json", "as_base64": False, "reverse": False}
 }
 
-router = APIRouter(tags=['Subscription'], prefix=f'/{XRAY_SUBSCRIPTION_PATH}')
+router = APIRouter(tags=['Subscription'])
 
 
 def get_subscription_user_info(user: UserResponse) -> dict:
@@ -161,26 +161,7 @@ async def user_get_usage(
             detail="Failed to get usage data"
         )
 
-@router.get("/{token}/usage") # This endpoint might not be directly used by clients but is available
-def user_get_usage(
-    db_user_response: UserResponse = Depends(get_validated_sub), # Pydantic UserResponse
-    start: str = "",
-    end: str = "",
-    db: Session = Depends(get_db) # For fetching ORM user for crud.get_user_usages
-):
-    start_dt, end_dt = validate_dates(start, end)
-
-    # crud.get_user_usages expects an ORM User. Fetch it.
-    orm_user = crud.get_user_by_sub_token(db, db_user_response.account_number)
-    if not orm_user: # Should not happen if get_validated_sub passed
-        raise HTTPException(status_code=404, detail="User not found for usage query.")
-
-    usages_data = crud.get_user_usages(db, orm_user, start_dt, end_dt)
-    # Assuming db_user_response.username exists. If account_number is preferred:
-    return {"usages": usages_data, "account_number": db_user_response.account_number}
-
-
-@router.get("/{token}/{client_type}")
+@router.get("/sub/{token}/{client_type}", name="user_subscription_with_client_type")
 def user_subscription_with_client_type(
     request: Request,
     db_user_response: UserResponse = Depends(get_validated_sub), # Pydantic UserResponse

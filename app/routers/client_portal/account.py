@@ -9,6 +9,7 @@ import re
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 import uuid
+from pydantic import BaseModel
 
 from app import logger, xray
 from app.db import get_db, crud
@@ -22,6 +23,7 @@ from app.models.node import NodeStatus, NodeResponse  # Added NodeResponse impor
 from app.models.plan import PlanResponse
 from app.portal.plans import get_plan_by_id
 from app.portal.models.api import PortalAccountDetailsResponse, ClientLoginRequest, TokenResponse
+from app.utils import responses
 
 from config import MOCK_STRIPE_PAYMENT as APP_MOCK_STRIPE_PAYMENT
 
@@ -42,7 +44,7 @@ elif not MOCK_STRIPE_PAYMENT and not STRIPE_SECRET_KEY:
     logger.warning("Stripe secret key not found and not in mock payment mode. Real payments will fail.")
 
 
-router = APIRouter(tags=["Client Portal API"])
+router = APIRouter(prefix="/api/portal/account", tags=["Client Portal API"])
 templates = Jinja2Templates(directory="app/portal/templates")
 templates.env.globals['datetime'] = datetime
 templates.env.globals['UserStatus'] = UserStatus # For using UserStatus.value in templates
@@ -127,7 +129,7 @@ async def _activate_user_plan(
         logger.error(f"_activate_user_plan: User {user_account_number} not found.")
         return False
 
-    plan = get_plan_by_id(plan_id)
+    plan = get_plan_by_id(db, plan_id)
     if not plan:
         logger.error(f"_activate_user_plan: Plan {plan_id} not found for user {user_account_number}.")
         return False
@@ -198,7 +200,7 @@ async def _activate_user_plan(
 
 
 # --- Route Handlers ---
-@router.get("/account", response_model=PortalAccountDetailsResponse)
+@router.get("/", response_model=PortalAccountDetailsResponse)
 async def get_account_details(
     request: Request,
     db: Session = Depends(get_db),
@@ -261,80 +263,7 @@ async def get_servers(
 
     return nodes
 
-@router.post("/login", response_model=TokenResponse)
-async def login(
-    login_data: ClientLoginRequest,
-    db: Session = Depends(get_db)
-):
-    logger.info(f"[LOGIN] Endpoint called with account_number: {login_data.account_number}")
-    try:
-        logger.debug(f"[LOGIN] Querying user from DB for account_number: {login_data.account_number}")
-        user = crud.get_user(db, account_number=login_data.account_number.lower())
-        if not user:
-            logger.warning(f"[LOGIN] No user found for account_number: {login_data.account_number}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid account number"
-            )
-        logger.info(f"[LOGIN] User found: {user}")
-        logger.debug(f"[LOGIN] User details: account_number={user.account_number}, status={getattr(user, 'status', 'unknown')}, id={getattr(user, 'id', 'unknown')}")
-        access_token = create_access_token(data={"sub": user.account_number})
-        logger.info(f"[LOGIN] Login successful for account_number: {user.account_number}")
-        return TokenResponse(access_token=access_token)
-    except Exception as e:
-        logger.error(f"[LOGIN] Exception occurred: {e}", exc_info=True)
-        raise
-
-@router.post("/register", response_model=TokenResponse)
-async def register(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    logger.info("[REGISTER] Endpoint called")
-    generated_account_number = str(uuid.uuid4())
-    logger.info(f"[REGISTER] Generated account_number: {generated_account_number}")
-    default_proxies_for_new_user = {}
-    try:
-        logger.debug("[REGISTER] Attempting to populate default proxies for new user")
-        if hasattr(xray, 'config') and hasattr(xray.config, 'inbounds_by_protocol'):
-            for pt_enum_member in ProxyTypes:
-                if xray.config.inbounds_by_protocol.get(pt_enum_member.value):
-                    settings_model_class = pt_enum_member.settings_model
-                    if settings_model_class:
-                        default_proxies_for_new_user[pt_enum_member] = settings_model_class()
-        logger.debug(f"[REGISTER] Default proxies: {default_proxies_for_new_user}")
-    except Exception as e:
-        logger.error(f"[REGISTER] Error populating default proxies for {generated_account_number}: {str(e)}", exc_info=True)
-    try:
-        logger.debug("[REGISTER] Creating UserCreate payload")
-        user_payload = UserCreate(
-            account_number=generated_account_number,
-            proxies=default_proxies_for_new_user,
-            status=UserStatusCreate.disabled,
-            data_limit=None,
-            expire=None,
-            data_limit_reset_strategy="no_reset",
-            note="Registered via Client Portal",
-            on_hold_expire_duration=None,
-            on_hold_timeout=None,
-            auto_delete_in_days=None,
-            next_plan=None
-        )
-        logger.info(f"[REGISTER] Attempting to create user in DB: account_number={generated_account_number}, status={user_payload.status}")
-        new_db_user = crud.create_user(db=db, account_number=generated_account_number, user=user_payload, admin=None)
-        logger.info(f"[REGISTER] User created successfully: {new_db_user}")
-        logger.debug(f"[REGISTER] User DB object: account_number={new_db_user.account_number}, status={getattr(new_db_user, 'status', 'unknown')}, id={getattr(new_db_user, 'id', 'unknown')}")
-        access_token = create_access_token(data={"sub": new_db_user.account_number})
-        logger.info(f"[REGISTER] Registration successful, token generated for account_number: {new_db_user.account_number}")
-        return TokenResponse(access_token=access_token)
-    except Exception as e:
-        logger.error(f"[REGISTER] Exception occurred: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to register user"
-        )
-
-@router.post("/create-checkout-session", name="create_checkout_session")
+@router.post("/checkout", name="create_checkout_session")
 async def create_checkout_session(
     request: Request,
     plan_id_data: dict,
@@ -393,7 +322,7 @@ async def create_checkout_session(
             detail="Failed to create checkout session"
         )
 
-@router.post("/stripe-webhook", include_in_schema=False, name="stripe_webhook")
+@router.post("/webhook", include_in_schema=False, name="stripe_webhook")
 async def stripe_webhook_handler(
     request: Request,
     db: Session = Depends(get_db),
@@ -458,7 +387,7 @@ async def stripe_webhook_handler(
 
     return {"status": "success"}
 
-@router.post("/account/activate", response_model=UserResponse, name="activate_plan_api")
+@router.post("/activate", response_model=UserResponse, name="activate_plan_api")
 async def activate_plan_api_endpoint(
     request: Request,
     plan_data: dict,
@@ -495,7 +424,7 @@ async def activate_plan_api_endpoint(
 
     return UserResponse.model_validate(current_user_orm, context={'db': db})
 
-@router.get("/account/plans", response_model=List[PlanResponse])
+@router.get("/plans", response_model=List[PlanResponse])
 async def get_available_plans(
     current_user: Optional[DBUser] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
@@ -504,34 +433,36 @@ async def get_available_plans(
     plans = crud.get_plans(db)
     return plans  # PlanResponse inherits from Plan, so we can return plans directly
 
-# Ensure get_plan_by_id is robust
-def get_plan_by_id(plan_id: str) -> Optional[Plan]:
-    """Get a plan by its ID."""
-    # This should ideally fetch from a database or a more dynamic config source.
-    # For now, using the hardcoded dict:
-    plans_config = {
-        "basic": Plan(
-            id="basic", name="Basic Plan", description="Perfect for individual users", price=9.99, duration_days=30,
-            data_limit=100 * 1024 * 1024 * 1024, stripe_price_id=os.getenv("STRIPE_PRICE_ID_BASIC"), # Get from env
-            features=["1 Device", "100GB Data", "30 Days"]
-        ),
-        "premium": Plan(
-            id="premium", name="Premium Plan", description="For power users and small families", price=19.99, duration_days=30,
-            data_limit=500 * 1024 * 1024 * 1024, stripe_price_id=os.getenv("STRIPE_PRICE_ID_PREMIUM"),
-            features=["3 Devices", "500GB Data", "30 Days"]
-        ),
-        "unlimited": Plan(
-            id="unlimited", name="Unlimited Plan", description="Unlimited data for heavy users", price=29.99, duration_days=30,
-            data_limit=None, stripe_price_id=os.getenv("STRIPE_PRICE_ID_UNLIMITED"), # data_limit=None for unlimited
-            features=["5 Devices", "Unlimited Data", "30 Days"]
-        )
-    }
-    found_plan = plans_config.get(plan_id)
-
-    return found_plan
-
 # Example of XRAY_SUBSCRIPTION_PATH from config, if needed for url_for fallback in account_page
 try:
     from config import XRAY_SUBSCRIPTION_PATH
 except ImportError:
     XRAY_SUBSCRIPTION_PATH = "sub" # Default fallback
+
+router = APIRouter(tags=["Account"], responses={401: responses._401})
+
+
+class NodeActivationRequest(BaseModel):
+    node_id: int
+
+
+@router.post("/account/nodes/activate", response_model=UserResponse)
+async def activate_user_node(
+    activation_request: NodeActivationRequest,
+    db: Session = Depends(get_db),
+    current_user_orm: DBUser = Depends(get_current_user),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """Activate a node for the authenticated user."""
+    # Validate user response with database context before background task
+    user_response = UserResponse.model_validate(current_user_orm, context={'db': db})
+
+    # Add background task - activate_user_on_node manages its own DB session
+    background_tasks.add_task(
+        xray.operations.activate_user_on_node,
+        account_number=current_user_orm.account_number,
+        node_id=activation_request.node_id
+    )
+
+    # Return the pre-validated user response with database context
+    return user_response

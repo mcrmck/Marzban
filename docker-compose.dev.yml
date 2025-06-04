@@ -64,7 +64,7 @@ services:
     environment:
       - UVICORN_PORT=8000
       - VITE_API_TARGET_HOST=marzban-panel
-      - VITE_BASE_API=/api/portal
+      - VITE_BASE_API=/api/
       - XRAY_SUBSCRIPTION_PATH=sub
     networks:
       - marzban_network

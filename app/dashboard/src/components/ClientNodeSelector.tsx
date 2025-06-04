@@ -67,7 +67,7 @@ export const ClientNodeSelector: React.FC<ClientNodeSelectorProps> = ({
     queryKey: ["nodes"],
     queryFn: () =>
       fetcher
-        .get<ApiResponse<Node[]>>("/api/nodes")
+        .get<ApiResponse<Node[]>>("/api/core/api/nodes")
         .then((res) => res.data.data),
   });
 

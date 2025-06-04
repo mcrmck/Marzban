@@ -12,7 +12,7 @@ export const activateNodeForClient = (
   nodeId: number,
   serviceId: number
 ): Promise<ClientNodeActivationResponse> => {
-  return fetcher.post(`/client/${accountNumber}/nodes/${nodeId}/services/${serviceId}/activate`);
+  return fetcher.post(`/api/core/api/user/${accountNumber}/node/activate`);
 };
 
 export const getClientActiveNode = (
@@ -22,5 +22,5 @@ export const getClientActiveNode = (
   service_id: number;
   service: NodeServiceConfigurationResponse;
 }> => {
-  return fetcher.get(`/client/${accountNumber}/active-node`);
+  return fetcher.get(`/api/core/api/user/${accountNumber}`);
 };

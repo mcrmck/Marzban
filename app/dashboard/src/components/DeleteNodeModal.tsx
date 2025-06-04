@@ -23,16 +23,16 @@ export const DeleteNodeModal: FC<DeleteNodeModalOwnProps> = () => {
 
   const onClose = () => setDeletingNode(null);
 
-  const { mutate: deleteNodeMutation, isPending } = useMutation({
-    mutationFn: (id: number) => fetch.delete(`/api/nodes/${id}`),
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => fetch.delete(`/api/core/api/node/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["nodes"] });
+      queryClient.invalidateQueries({ queryKey: ['nodes'] });
       onClose();
     },
   });
 
   const handleDelete = () => {
-    if (deletingNode && deletingNode.id != null) deleteNodeMutation(deletingNode.id);
+    if (deletingNode && deletingNode.id != null) deleteMutation.mutate(deletingNode.id);
   };
 
   return (
@@ -77,10 +77,10 @@ export const DeleteNodeModal: FC<DeleteNodeModalOwnProps> = () => {
               size="sm"
               w="full"
               colorPalette="red"
-              loading={isPending}
+              loading={deleteMutation.isPending}
               onClick={handleDelete}
             >
-              {isPending && <Spinner size="xs" mr={2} />}
+              {deleteMutation.isPending && <Spinner size="xs" mr={2} />}
               {t("delete")}
             </Button>
           </Dialog.Footer>

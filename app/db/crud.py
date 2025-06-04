@@ -585,13 +585,6 @@ def update_user_status(db: Session, dbuser: DBUser, status: UserStatus) -> DBUse
     return dbuser
 
 
-def set_owner(db: Session, dbuser: DBUser, admin: Admin) -> DBUser:
-    dbuser.admin_id = admin.id
-    db.commit()
-    db.refresh(dbuser)
-    return get_user_by_id(db, dbuser.id) or dbuser
-
-
 def start_user_expire(db: Session, dbuser: DBUser) -> DBUser:
     if dbuser.on_hold_expire_duration is not None:
         expire_timestamp = int(datetime.utcnow().timestamp()) + dbuser.on_hold_expire_duration
@@ -1217,24 +1210,39 @@ def update_service_configurations(
     db.commit()
 
 def get_plans(db: Session) -> List[Plan]:
-    """Get a list of all available plans."""
-    # This should ideally fetch from a database or a more dynamic config source.
-    # For now, using the hardcoded dict:
-    plans_config = {
-        "basic": Plan(
-            id="basic", name="Basic Plan", description="Perfect for individual users", price=9.99, duration_days=30,
-            data_limit=100 * 1024 * 1024 * 1024, stripe_price_id=os.getenv("STRIPE_PRICE_ID_BASIC"),
-            features=["1 Device", "100GB Data", "30 Days"]
-        ),
-        "premium": Plan(
-            id="premium", name="Premium Plan", description="For power users and small families", price=19.99, duration_days=30,
-            data_limit=500 * 1024 * 1024 * 1024, stripe_price_id=os.getenv("STRIPE_PRICE_ID_PREMIUM"),
-            features=["3 Devices", "500GB Data", "30 Days"]
-        ),
-        "unlimited": Plan(
-            id="unlimited", name="Unlimited Plan", description="Unlimited data for heavy users", price=29.99, duration_days=30,
-            data_limit=None, stripe_price_id=os.getenv("STRIPE_PRICE_ID_UNLIMITED"),
-            features=["5 Devices", "Unlimited Data", "30 Days"]
-        )
-    }
-    return list(plans_config.values())
+    """Get all available plans from the database."""
+    return db.query(Plan).all()
+
+def get_plan_by_id(db: Session, plan_id: str) -> Optional[Plan]:
+    """Get a plan by its ID from the database."""
+    return db.query(Plan).filter(Plan.id == plan_id).first()
+
+def create_plan(db: Session, plan: Plan) -> Plan:
+    """Create a new plan in the database."""
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+def update_plan(db: Session, plan_id: str, plan_data: dict) -> Optional[Plan]:
+    """Update a plan in the database."""
+    plan = get_plan_by_id(db, plan_id)
+    if not plan:
+        return None
+
+    for key, value in plan_data.items():
+        setattr(plan, key, value)
+
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+def delete_plan(db: Session, plan_id: str) -> bool:
+    """Delete a plan from the database."""
+    plan = get_plan_by_id(db, plan_id)
+    if not plan:
+        return False
+
+    db.delete(plan)
+    db.commit()
+    return True

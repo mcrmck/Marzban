@@ -21,9 +21,9 @@ export const NodeSelection: React.FC<NodeSelectionProps> = ({ accountNumber }) =
   // createToast is now imported directly
   const queryClient = useQueryClient();
 
-  const { data: nodes, isLoading } = useQuery<Node[]>({
+  const { data: nodes, isLoading } = useQuery({
     queryKey: ['nodes'],
-    queryFn: () => fetch.get<Node[]>('/api/nodes'),
+    queryFn: () => fetch.get<Node[]>('/api/core/api/nodes'),
   });
 
   const userNodesQueryKey = ['user-nodes', accountNumber];
