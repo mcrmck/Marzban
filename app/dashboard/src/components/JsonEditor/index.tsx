@@ -1,4 +1,5 @@
-import { Box, useColorMode } from "@chakra-ui/react";
+import { Box } from "@chakra-ui/react";
+import { useTheme } from "next-themes";
 import JSONEditor, { JSONEditorMode, JSONEditorOptions } from "jsoneditor";
 import "jsoneditor/dist/jsoneditor.css";
 import { forwardRef, useEffect, useRef } from "react";
@@ -12,13 +13,13 @@ export type JSONEditorProps = {
 };
 export const JsonEditor = forwardRef<HTMLDivElement, JSONEditorProps>(
   ({ json, onChange, mode = "code" }, ref) => {
-    const { colorMode } = useColorMode();
+    const { theme } = useTheme();
     const options: JSONEditorOptions = {
       mode,
       onChangeText: onChange,
       statusBar: false,
       mainMenuBar: false,
-      theme: colorMode === "dark" ? "ace/theme/nord_dark" : "ace/theme/dawn",
+      theme: theme === "dark" ? "ace/theme/nord_dark" : "ace/theme/dawn",
     };
 
     const jsonEditorContainer = useRef<HTMLDivElement>(null);

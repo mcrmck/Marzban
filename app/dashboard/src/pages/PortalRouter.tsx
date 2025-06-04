@@ -1,4 +1,4 @@
-import { createHashRouter } from "react-router-dom";
+import { createBrowserRouter } from 'react-router-dom';
 import { ClientLoginPage } from "./client/ClientLoginPage";
 import { ClientPlansPage } from "./client/ClientPlansPage";
 import { ClientAccountPage } from "./client/ClientAccountPage";
@@ -7,14 +7,16 @@ import { ClientStripeSuccessPage } from "./client/ClientStripeSuccessPage";
 import { ClientStripeCancelPage } from "./client/ClientStripeCancelPage";
 import { ClientProtectedRoute } from "./client/ClientProtectedRoute";
 import { ClientLandingPage } from "./client/ClientLandingPage";
-import { ClientRegisterPage } from "./client/ClientRegisterPage";
+import ClientRegisterPage from "./client/ClientRegisterPage";
 import { ClientLayout } from "../components/client/ClientLayout";
+import { ClientNodeSelector } from '../components/ClientNodeSelector';
+import { ReactElement } from 'react';
 
-const wrapWithLayout = (element: JSX.Element) => (
+const wrapWithLayout = (element: ReactElement) => (
   <ClientLayout>{element}</ClientLayout>
 );
 
-export const portalRouter = createHashRouter([
+export const portalRouter = createBrowserRouter([
     {
         path: "/",
         element: wrapWithLayout(<ClientLandingPage />),
@@ -26,6 +28,10 @@ export const portalRouter = createHashRouter([
     {
         path: "/register",
         element: wrapWithLayout(<ClientRegisterPage />),
+    },
+    {
+        path: "/nodes",
+        element: wrapWithLayout(<ClientNodeSelector accountNumber="test" />), // TODO: Get actual account number from auth
     },
     {
         path: "/plans",

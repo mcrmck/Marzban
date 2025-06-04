@@ -2,24 +2,14 @@ import {
   Badge,
   Box,
   Button,
-  chakra,
-  CircularProgress,
-  FormControl,
-  FormLabel,
   HStack,
   IconButton,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
-  Select,
+  Dialog,
+  DialogBody,
+  DialogFooter,
   Text,
-  Tooltip,
-  useToast,
-  useColorMode
+  Icon,
+  CloseButton,
 } from "@chakra-ui/react";
 import {
   ArrowPathIcon,
@@ -27,50 +17,28 @@ import {
   ArrowsPointingOutIcon,
   Cog6ToothIcon,
 } from "@heroicons/react/24/outline";
-import { joinPaths } from "@remix-run/router";
 import classNames from "classnames";
-import { useCoreSettings } from "contexts/CoreSettingsContext";
-import { useDashboard } from "contexts/DashboardContext";
+import { useCoreSettings } from "../lib/stores/CoreSettingsContext";
+import { useDashboard } from "../lib/stores/DashboardContext";
 import debounce from "lodash.debounce";
 import { FC, useCallback, useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { useMutation } from "react-query";
+import { useMutation } from "@tanstack/react-query";
 import { ReadyState } from "react-use-websocket";
 import { useWebSocket } from "react-use-websocket/dist/lib/use-websocket";
-import { getAuthToken } from "utils/authStorage";
-import { Icon } from "./Icon";
+import { getAuthToken } from "../lib/utils/authStorage";
 import { JsonEditor } from "./JsonEditor";
 import "./JsonEditor/themes.js";
-import { useNodesQuery } from "contexts/NodesContext";
+import { useNodesQuery } from "../lib/stores/NodesContext";
+import { toaster } from "@/components/ui/toaster";
 
 export const MAX_NUMBER_OF_LOGS = 500;
 
-const UsageIcon = chakra(Cog6ToothIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
-export const ReloadIcon = chakra(ArrowPathIcon, {
-  baseStyle: {
-    w: 4,
-    h: 4,
-  },
-});
-
-export const FullScreenIcon = chakra(ArrowsPointingOutIcon, {
-  baseStyle: {
-    w: 4,
-    h: 4,
-  },
-});
-export const ExitFullScreenIcon = chakra(ArrowsPointingInIcon, {
-  baseStyle: {
-    w: 3,
-    h: 3,
-  },
-});
+const UsageIcon = Cog6ToothIcon;
+const ReloadIcon = ArrowPathIcon;
+const FullScreenIcon = ArrowsPointingOutIcon;
+const ExitFullScreenIcon = ArrowsPointingInIcon;
 
 const getStatus = (status: string) => {
   return {
@@ -92,12 +60,10 @@ const getWebsocketUrl = (nodeID: string | null) => {
         : import.meta.env.VITE_BASE_API
     );
 
+    const path = `${baseURL.pathname}/node/${nodeID}/logs`.replace(/\/+/g, '/');
     return (
       (baseURL.protocol === "https:" ? "wss://" : "ws://") +
-      joinPaths([
-        baseURL.host + baseURL.pathname,
-        `/node/${nodeID}/logs`,
-      ]) +
+      baseURL.host + path +
       "?interval=1&token=" +
       getAuthToken()
     );
@@ -110,17 +76,12 @@ const getWebsocketUrl = (nodeID: string | null) => {
 
 let logsTmp: string[] = [];
 const CoreSettingModalContent: FC = () => {
-  const { colorMode } = useColorMode();
   const { data: nodes } = useNodesQuery();
   const disabled = false;
   const [selectedNode, setNode] = useState<string | null>(null);
-
-  const handleLog = (id: string, title: string) => {
-    if (id === selectedNode) return;
-    setNode(id);
-    setLogs([]);
-    logsTmp = [];
-  };
+  const form = useForm({
+    defaultValues: { config: {} },
+  });
 
   const { isEditingCore } = useDashboard();
   const {
@@ -135,19 +96,7 @@ const CoreSettingModalContent: FC = () => {
   const logsDiv = useRef<HTMLDivElement | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const { t } = useTranslation();
-  const toast = useToast();
-  const form = useForm({
-    defaultValues: { config: config || {} },
-  });
 
-  useEffect(() => {
-    if (config) form.setValue("config", config);
-  }, [config]);
-
-  useEffect(() => {
-    if (isEditingCore) fetchCoreSettings();
-  }, [isEditingCore]);
-  "".startsWith;
   const scrollShouldStayOnEnd = useRef(true);
   const updateLogs = useCallback(
     debounce((logs: string[]) => {
@@ -190,17 +139,24 @@ const CoreSettingModalContent: FC = () => {
 
   const status = getStatus(readyState.toString());
 
-  const { mutate: handleRestartCore, isLoading: isRestarting } =
-    useMutation(restartCore);
+  const { mutate: handleRestartCore, isPending: isRestarting } =
+    useMutation({
+      mutationFn: restartCore
+    });
+
+  const handleLog = (id: string, title: string) => {
+    if (id === selectedNode) return;
+    setNode(id);
+    setLogs([]);
+    logsTmp = [];
+  };
 
   const handleOnSave = ({ config }: any) => {
     updateConfig(config)
       .then(() => {
-        toast({
+        toaster.create({
           title: t("core.successMessage"),
-          status: "success",
-          isClosable: true,
-          position: "top",
+          type: "success",
           duration: 3000,
         });
       })
@@ -212,11 +168,9 @@ const CoreSettingModalContent: FC = () => {
         if (typeof e.response._data.detail === "string")
           message = e.response._data.detail;
 
-        toast({
+        toaster.create({
           title: message,
-          status: "error",
-          isClosable: true,
-          position: "top",
+          type: "error",
           duration: 3000,
         });
       });
@@ -232,21 +186,30 @@ const CoreSettingModalContent: FC = () => {
       setFullScreen(true);
     }
   };
+
+  useEffect(() => {
+    if (config) form.setValue("config", config);
+  }, [config]);
+
+  useEffect(() => {
+    if (isEditingCore) fetchCoreSettings();
+  }, [isEditingCore]);
+
   return (
     <form onSubmit={form.handleSubmit(handleOnSave)}>
-      <ModalBody>
-        <FormControl>
+      <DialogBody>
+        <Box>
           <HStack justifyContent="space-between" alignItems="flex-start">
-            <FormLabel>
+            <Text as="label">
               {t("core.configuration")}{" "}
-              {isLoading && <CircularProgress isIndeterminate size="15px" />}
-            </FormLabel>
+              {isLoading && <Box as="span" display="inline-block" w="15px" h="15px" border="2px solid" borderColor="currentColor" borderRadius="full" borderTopColor="transparent" animation="spin 1s linear infinite" />}
+            </Text>
             <HStack gap={0}>
-              <Tooltip label="Panel Version" placement="top">
+              <Box as="div" role="tooltip" aria-label="Panel Version">
                 <Badge height="100%" textTransform="lowercase">
                   {version && `v${version}`}
                 </Badge>
-              </Tooltip>
+              </Box>
             </HStack>
           </HStack>
           <Box position="relative" ref={editorRef} minHeight="300px">
@@ -266,38 +229,34 @@ const CoreSettingModalContent: FC = () => {
               right="4"
               onClick={handleFullScreen}
             >
-              {!isFullScreen ? <FullScreenIcon /> : <ExitFullScreenIcon />}
+              {!isFullScreen ? <FullScreenIcon width={16} height={16} /> : <ExitFullScreenIcon width={12} height={12} />}
             </IconButton>
           </Box>
-        </FormControl>
-        <FormControl mt="4">
+        </Box>
+        <Box mt="4">
           <HStack
             justifyContent="space-between"
             style={{ paddingBottom: "1rem" }}
           >
             <HStack>
               {nodes?.[0] && (
-                <Select
-                  size="sm"
-                  style={{ width: "auto" }}
+                <select
+                  style={{
+                    width: "auto",
+                    backgroundColor: disabled ? "var(--chakra-colors-gray-100)" : "transparent",
+                    padding: "0.5rem",
+                    borderRadius: "0.375rem",
+                    border: "1px solid var(--chakra-colors-gray-200)"
+                  }}
                   disabled={disabled}
-                  bg={disabled ? "gray.100" : "transparent"}
-                  _dark={{
-                    bg: disabled ? "gray.600" : "transparent",
-                  }}
-                  sx={{
-                    option: {
-                      backgroundColor: colorMode === "dark" ? "#222C3B" : "white"
-                    }
-                  }}
-                  onChange={(v) =>
+                  onChange={(e) =>
                     handleLog(
-                      v.currentTarget.value,
-                      v.currentTarget.selectedOptions[0].text
+                      e.currentTarget.value,
+                      e.currentTarget.selectedOptions[0].text
                     )
                   }
-                  placeholder="Select a node to view logs"
                 >
+                  <option value="">Select a node to view logs</option>
                   {nodes &&
                     nodes.map((s) => {
                       return (
@@ -306,11 +265,11 @@ const CoreSettingModalContent: FC = () => {
                         </option>
                       );
                     })}
-                </Select>
+                </select>
               )}
-              <FormLabel className="w-au">{t("core.logs")}</FormLabel>
+              <Text as="label" className="w-au">{t("core.logs")}</Text>
             </HStack>
-            <Text as={FormLabel}>{t(`core.socket.${status}`)}</Text>
+            <Text as="label">{t(`core.socket.${status}`)}</Text>
           </HStack>
           <Box
             border="1px solid"
@@ -333,23 +292,23 @@ const CoreSettingModalContent: FC = () => {
               </Text>
             ))}
           </Box>
-        </FormControl>
-      </ModalBody>
-      <ModalFooter>
+        </Box>
+      </DialogBody>
+      <DialogFooter>
         <HStack w="full" justifyContent="space-between">
           <HStack>
             <Box>
               <Button
                 size="sm"
-                leftIcon={
-                  <ReloadIcon
-                    className={classNames({
-                      "animate-spin": isRestarting,
-                    })}
-                  />
-                }
                 onClick={() => handleRestartCore()}
               >
+                <ReloadIcon
+                  width={16}
+                  height={16}
+                  className={classNames({
+                    "animate-spin": isRestarting,
+                  })}
+                />
                 {t(isRestarting ? "core.restarting" : "core.restartCore")}
               </Button>
             </Box>
@@ -359,42 +318,42 @@ const CoreSettingModalContent: FC = () => {
             <Button
               size="sm"
               variant="solid"
-              colorScheme="primary"
+              colorPalette="primary"
               px="5"
               type="submit"
-              isDisabled={isLoading || isPostLoading}
-              isLoading={isPostLoading}
+              disabled={isLoading || isPostLoading}
+              loading={isPostLoading}
             >
               {t("core.save")}
             </Button>
           </HStack>
         </HStack>
-      </ModalFooter>
+      </DialogFooter>
     </form>
   );
 };
 export const CoreSettingsModal: FC = () => {
   const { isEditingCore } = useDashboard();
-  const onClose = useDashboard.setState.bind(null, { isEditingCore: false });
+  const onClose = () => useDashboard.setState({ isEditingCore: false } as any);
   const { t } = useTranslation();
 
   return (
-    <Modal isOpen={isEditingCore} onClose={onClose} size="3xl">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3" w="full">
-        <ModalHeader pt={6}>
+    <Dialog.Root open={isEditingCore} onOpenChange={(details) => details.open || onClose()}>
+      <Dialog.Backdrop bg="blackAlpha.300" backdropFilter="blur(10px)" />
+      <Dialog.Content mx="3" w="full">
+        <Dialog.Header pt={6}>
           <HStack gap={2}>
             <Icon color="primary">
-              <UsageIcon color="white" />
+              <UsageIcon width={20} height={20} color="white" />
             </Icon>
             <Text fontWeight="semibold" fontSize="lg">
               {t("core.title")}
             </Text>
           </HStack>
-        </ModalHeader>
-        <ModalCloseButton mt={3} />
+        </Dialog.Header>
+        <CloseButton position="absolute" right="8px" top="8px" onClick={onClose} />
         <CoreSettingModalContent />
-      </ModalContent>
-    </Modal>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 };

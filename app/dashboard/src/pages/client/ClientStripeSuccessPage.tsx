@@ -7,37 +7,36 @@ import {
     Heading,
     Text,
     VStack,
-    useToast,
     Spinner,
 } from "@chakra-ui/react";
-import { useClientPortalStore } from "../../store/clientPortalStore";
+import { useClientPortalStore } from "../../lib/stores";
+import { toaster } from "@/components/ui/toaster";
 
 export const ClientStripeSuccessPage = () => {
     const navigate = useNavigate();
-    const toast = useToast();
     const { fetchClientDetails, isLoadingDetails } = useClientPortalStore();
 
     useEffect(() => {
         fetchClientDetails()
             .then(() => {
-                toast({
+                toaster.create({
                     title: "Payment Successful",
                     description: "Your subscription has been activated.",
-                    status: "success",
+                    type: "success",
                     duration: 5000,
-                    isClosable: true,
+                    closable: true,
                 });
             })
-            .catch((error) => {
-                toast({
+            .catch(() => {
+                toaster.create({
                     title: "Error",
                     description: "Failed to update account details. Please try again.",
-                    status: "error",
+                    type: "error",
                     duration: 5000,
-                    isClosable: true,
+                    closable: true,
                 });
             });
-    }, [fetchClientDetails, toast]);
+    }, [fetchClientDetails]);
 
     if (isLoadingDetails) {
         return (
@@ -49,7 +48,7 @@ export const ClientStripeSuccessPage = () => {
 
     return (
         <Container maxW="container.sm" py={10}>
-            <VStack spacing={8} textAlign="center">
+            <VStack gap={8} textAlign="center">
                 <Box>
                     <Heading size="xl" color="green.500" mb={4}>
                         Payment Successful!

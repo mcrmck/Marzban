@@ -5,76 +5,90 @@ import {
   HStack,
   IconButton,
   Menu,
-  MenuButton,
-  MenuItem,
-  MenuList,
+  Portal,
   Text,
-  useColorMode,
 } from "@chakra-ui/react";
 import {
-  ArrowLeftOnRectangleIcon,
   MoonIcon,
   SunIcon,
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
-import { chakra } from "@chakra-ui/react";
 import { FC } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { updateThemeColor } from "utils/themeColor";
+import { updateThemeColor } from "../../lib/utils/themeColor";
 import { Language } from "../Language";
-import useGetUser from "hooks/useGetUser";
-import { User } from "../../types/User";
+import { useClientPortalStore } from "../../lib/stores";
+import { useTheme } from "next-themes";
 
-const iconProps = {
-  baseStyle: {
-    w: 4,
-    h: 4,
-  },
+const iconStyle = {
+  width: "1rem",
+  height: "1rem",
 };
 
-const DarkIcon = chakra(MoonIcon, iconProps);
-const LightIcon = chakra(SunIcon, iconProps);
-const LogoutIcon = chakra(ArrowLeftOnRectangleIcon, iconProps);
-const UserIcon = chakra(UserCircleIcon, iconProps);
-
 export const ClientHeader: FC = () => {
-  const { t } = useTranslation();
-  const { colorMode, toggleColorMode } = useColorMode();
-  const location = useLocation();
   const navigate = useNavigate();
-  const { userData, getUserIsSuccess } = useGetUser();
+  const { t } = useTranslation();
+  const { theme, setTheme } = useTheme();
+  const { clientDetails } = useClientPortalStore();
 
   const isActive = () => {
-    const user = userData as unknown as User;
-    return user?.status === "active";
+    return clientDetails?.user.status === "active";
   };
 
-  const navItems = [
-    { path: "/", label: t("home") },
-    { path: "/plans", label: t("plans") },
-    { path: "/servers", label: t("servers") },
-    { path: "/account", label: t("account") },
-  ];
-
   return (
-    <Box as="header" py={4} px={6} borderBottom="1px" borderColor="gray.200">
-      <Flex justify="space-between" align="center">
-        <HStack spacing={8}>
-          {navItems.map((item) => (
-            <Link key={item.path} to={item.path}>
-              <Text
-                fontWeight={location.pathname === item.path ? "bold" : "normal"}
-                color={location.pathname === item.path ? "brand.500" : "inherit"}
-              >
-                {item.label}
+    <Box
+      as="header"
+      position="fixed"
+      top={0}
+      left={0}
+      right={0}
+      zIndex="sticky"
+      borderBottom="1px"
+      borderColor={theme === "dark" ? "gray.700" : "gray.200"}
+      bg={theme === "dark" ? "gray.800" : "white"}
+      boxShadow="sm"
+    >
+      <Flex
+        h="16"
+        alignItems="center"
+        justifyContent="space-between"
+        px={4}
+        maxW="container.xl"
+        mx="auto"
+      >
+        <HStack gap={8}>
+          <Link to="/">
+            <Text fontSize="xl" fontWeight="bold" color="brand.500">
+              Jade
+            </Text>
+          </Link>
+          <HStack gap={4}>
+            <Link to="/servers">
+              <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
+                {t("servers")}
               </Text>
             </Link>
-          ))}
+            <Link to="/nodes">
+              <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
+                {t("nodes")}
+              </Text>
+            </Link>
+            <Link to="/plans">
+              <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
+                {t("plans")}
+              </Text>
+            </Link>
+            <Link to="/account">
+              <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
+                {t("account")}
+              </Text>
+            </Link>
+          </HStack>
         </HStack>
 
-        <HStack spacing={4}>
-          {!getUserIsSuccess ? (
+        <HStack gap={4}>
+          {!clientDetails ? (
             <>
               <Button
                 variant="ghost"
@@ -99,21 +113,25 @@ export const ClientHeader: FC = () => {
                   {t("activateAccount")}
                 </Button>
               )}
-              <Menu>
-                <MenuButton
-                  as={IconButton}
-                  icon={<UserIcon />}
-                  variant="ghost"
-                />
-                <MenuList>
-                  <MenuItem
-                    icon={<LogoutIcon />}
-                    onClick={() => navigate("/login")}
+              <Menu.Root>
+                <Menu.Trigger>
+                  <Box
+                    as="div"
+                    cursor="pointer"
+                    p={2}
+                    _hover={{ bg: theme === "dark" ? "gray.700" : "gray.100" }}
+                    borderRadius="md"
                   >
-                    {t("logout")}
-                  </MenuItem>
-                </MenuList>
-              </Menu>
+                    <UserCircleIcon style={iconStyle} />
+                  </Box>
+                </Menu.Trigger>
+                <Portal>
+                  <Menu.Positioner>
+                    <Menu.Content>
+                    </Menu.Content>
+                  </Menu.Positioner>
+                </Portal>
+              </Menu.Root>
             </>
           )}
 
@@ -124,11 +142,16 @@ export const ClientHeader: FC = () => {
             variant="ghost"
             aria-label="switch theme"
             onClick={() => {
-              updateThemeColor(colorMode === "dark" ? "light" : "dark");
-              toggleColorMode();
+              const newTheme = theme === "dark" ? "light" : "dark";
+              updateThemeColor(newTheme);
+              setTheme(newTheme);
             }}
           >
-            {colorMode === "light" ? <DarkIcon /> : <LightIcon />}
+            {theme === "light" ? (
+              <MoonIcon style={iconStyle} />
+            ) : (
+              <SunIcon style={iconStyle} />
+            )}
           </IconButton>
         </HStack>
       </Flex>

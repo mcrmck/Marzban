@@ -8,13 +8,12 @@ import {
     Heading,
     Text,
     VStack,
-    useToast,
     Spinner,
-    Alert,
-    AlertIcon,
+    Alert
 } from "@chakra-ui/react";
-import { useClientPortalStore } from "../../store/clientPortalStore";
-import { ClientPlan } from "../../types/clientPortal";
+import { useClientPortalStore } from "../../lib/stores";
+import { ClientPlan } from "../../lib/types";
+import { toaster } from "@/components/ui/toaster";
 
 interface PlanCardProps {
     plan: ClientPlan;
@@ -31,13 +30,13 @@ const PlanCard = ({ plan, onSelect, isLoading }: PlanCardProps) => (
         _hover={{ shadow: "lg" }}
         transition="all 0.2s"
     >
-        <VStack spacing={4} align="stretch">
+        <VStack gap={4} align="stretch">
             <Heading size="md">{plan.name}</Heading>
             <Text fontSize="2xl" fontWeight="bold">
                 ${plan.price}/month
             </Text>
             <Text color="gray.600">{plan.description}</Text>
-            <VStack align="stretch" spacing={2}>
+            <VStack align="stretch" gap={2}>
                 {plan.features.map((feature, index) => (
                     <Text key={index}>• {feature}</Text>
                 ))}
@@ -45,7 +44,7 @@ const PlanCard = ({ plan, onSelect, isLoading }: PlanCardProps) => (
             <Button
                 colorScheme="brand"
                 onClick={() => onSelect(plan.id)}
-                isLoading={isLoading}
+                loading={isLoading}
                 loadingText="Processing..."
             >
                 Select Plan
@@ -56,7 +55,6 @@ const PlanCard = ({ plan, onSelect, isLoading }: PlanCardProps) => (
 
 export const ClientPlansPage = () => {
     const navigate = useNavigate();
-    const toast = useToast();
     const {
         plans,
         fetchPlans,
@@ -82,22 +80,22 @@ export const ClientPlansPage = () => {
                 }
             } else {
                 await activatePlanDirectly(planId);
-                toast({
+                toaster.create({
                     title: "Plan Activated",
                     description: "Your plan has been successfully activated.",
-                    status: "success",
+                    type: "success",
                     duration: 5000,
-                    isClosable: true,
+                    closable: true,
                 });
                 navigate("/account");
             }
         } catch (error) {
-            toast({
+            toaster.create({
                 title: "Error",
                 description: "Failed to process plan selection. Please try again.",
-                status: "error",
+                type: "error",
                 duration: 5000,
-                isClosable: true,
+                closable: true,
             });
         }
     };
@@ -112,7 +110,7 @@ export const ClientPlansPage = () => {
 
     return (
         <Container maxW="container.xl" py={10}>
-            <VStack spacing={8}>
+            <VStack gap={8}>
                 <Box textAlign="center">
                     <Heading size="xl" mb={2}>Subscription Plans</Heading>
                     <Text color="gray.600">
@@ -121,10 +119,9 @@ export const ClientPlansPage = () => {
                 </Box>
 
                 {!isAuthenticated && (
-                    <Alert status="info">
-                        <AlertIcon />
+                    <Alert.Root status="info">
                         Please log in to subscribe to a plan
-                    </Alert>
+                    </Alert.Root>
                 )}
 
                 <Grid

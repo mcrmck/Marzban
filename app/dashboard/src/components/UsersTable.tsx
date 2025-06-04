@@ -1,99 +1,69 @@
 import {
   Accordion,
-  AccordionButton,
-  AccordionItem,
-  AccordionPanel,
   Box,
   Button,
   chakra,
-  ExpandedIndex,
   HStack,
   IconButton,
-  Select,
   Slider,
-  SliderFilledTrack,
-  SliderProps,
-  SliderTrack,
   Table,
-  TableProps,
-  Tbody,
-  Td,
   Text,
-  Th,
-  Thead,
-  Tooltip,
-  Tr,
   useBreakpointValue,
   VStack,
+  // Removed: AccordionItem, AccordionPanel, ExpandedIndex, SliderProps, SliderTrack,
+  // Removed: TableProps, Tbody, Td, Th, Thead, Tr
 } from "@chakra-ui/react";
 import {
-  CheckIcon,
-  ChevronDownIcon,
-  ClipboardIcon,
-  LinkIcon,
-  PencilIcon,
-  QrCodeIcon,
+  CheckIcon as HeroCheckIcon, // Renamed to avoid conflict if any
+  ChevronDownIcon as HeroChevronDownIcon,
+  ClipboardIcon as HeroClipboardIcon,
+  LinkIcon as HeroLinkIcon,
+  PencilIcon as HeroPencilIcon,
+  QrCodeIcon as HeroQrCodeIcon,
 } from "@heroicons/react/24/outline";
-import { ReactComponent as AddFileIcon } from "assets/add_file.svg";
+
+// Ensure your SVGR setup (e.g., vite-plugin-svgr with ?react suffix or CRA's default)
+// provides AddFileIconSvg as a ReactComponent.
+import AddFileIconSvg from "assets/add_file.svg";
 import classNames from "classnames";
-import { resetStrategy, statusColors } from "constants/UserSettings";
-import { FilterType, useDashboard } from "contexts/DashboardContext"; // Import FilterType
-import { t } from "i18next";
-import { FC, Fragment, useEffect, useState } from "react";
-import CopyToClipboard from "react-copy-to-clipboard";
+import { resetStrategy, statusColors } from "constants/UserSettings"; // Assuming this file is also updated for Chakra v3 if needed
+import { FilterType, useDashboard } from "../lib/stores/DashboardContext";
+import { t } from "i18next"; // For the t function outside of hook
+import { FC, Fragment, useEffect, useState, ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
-import { User } from "types/User";
-import { formatBytes } from "utils/formatByte";
+import { User } from "../lib/types/User";
+import { formatBytes } from "../lib/utils/formatByte";
 import { OnlineBadge } from "./OnlineBadge";
 import { OnlineStatus } from "./OnlineStatus";
-import { Pagination } from "./Pagination";
+import  Pagination  from "./Pagination";
 import { StatusBadge } from "./StatusBadge";
 
-const EmptySectionIcon = chakra(AddFileIcon);
 
-const iconProps = {
-  baseStyle: {
-    w: {
-      base: 4,
-      md: 5,
-    },
-    h: {
-      base: 4,
-      md: 5,
-    },
-  },
-};
-const CopyIcon = chakra(ClipboardIcon, iconProps);
-const AccordionArrowIcon = chakra(ChevronDownIcon, iconProps);
-const CopiedIcon = chakra(CheckIcon, iconProps);
-const SubscriptionLinkIcon = chakra(LinkIcon, iconProps);
-const QRIcon = chakra(QrCodeIcon, iconProps);
-const EditIcon = chakra(PencilIcon, iconProps);
-const SortIcon = chakra(ChevronDownIcon, {
-  baseStyle: {
-    width: "15px",
-    height: "15px",
-  },
-});
+const CopyIcon = chakra(HeroClipboardIcon);
+const AccordionArrowIcon = chakra(HeroChevronDownIcon);
+const CopiedIcon = chakra(HeroCheckIcon);
+const SubscriptionLinkIcon = chakra(HeroLinkIcon);
+const QRIcon = chakra(HeroQrCodeIcon);
+const EditIcon = chakra(HeroPencilIcon);
+const SortIconElement = chakra(HeroChevronDownIcon);
+
+// Use ComponentProps for Slider.Root if specific SliderRootProps isn't directly available or known
 type UsageSliderProps = {
   used: number;
   total: number | null;
   dataLimitResetStrategy: string | null;
   totalUsedTraffic: number;
-} & SliderProps;
+} & ComponentProps<typeof Slider.Root>; // More generic way to get props of Slider.Root
 
-const getResetStrategy = (strategy: string): string => {
-  for (var i = 0; i < resetStrategy.length; i++) {
-    const entry = resetStrategy[i];
-    if (entry.value == strategy) {
-      return entry.title;
-    }
-  }
-  return "No";
+const getResetStrategyText = (strategyValue: string): string => {
+  const foundStrategy = resetStrategy.find(s => s.value === strategyValue);
+  return foundStrategy ? t(foundStrategy.title) : t("No"); // Ensure 't' is available or pass it
 };
+
 const UsageSliderCompact: FC<UsageSliderProps> = (props) => {
-  const { used, total } = props; // dataLimitResetStrategy, totalUsedTraffic not used
+  const { used, total } = props;
   const isUnlimited = total === 0 || total === null;
+
   return (
     <HStack
       justifyContent="space-between"
@@ -111,36 +81,38 @@ const UsageSliderCompact: FC<UsageSliderProps> = (props) => {
             ∞
           </Text>
         ) : (
-          formatBytes(total)
+          formatBytes(total as number) // Cast as total here is not null
         )}
       </Text>
     </HStack>
   );
 };
-const UsageSlider: FC<UsageSliderProps> = (props) => {
-  const {
-    used,
-    total,
-    dataLimitResetStrategy,
-    totalUsedTraffic,
-    ...restOfProps
-  } = props;
+
+const UsageSlider: FC<UsageSliderProps> = ({
+  used,
+  total,
+  dataLimitResetStrategy,
+  totalUsedTraffic,
+  colorScheme, // Ensure colorScheme is passed or default
+  ...restOfProps
+}) => {
+  const { t: translate } = useTranslation(); // Use 'translate' to avoid conflict if 't' is from i18next direct import
   const isUnlimited = total === 0 || total === null;
-  const value = isUnlimited ? 0 : total ? Math.min((used / total) * 100, 100) : 0;
+  const valuePercentage = isUnlimited || !total ? 0 : Math.min((used / total) * 100, 100);
   const isReached = !isUnlimited && total !== null && used >= total;
 
   return (
     <>
-      <Slider
-        orientation="horizontal"
-        value={value}
-        colorScheme={isReached ? "red" : "primary"}
-        {...restOfProps}
+      <Slider.Root
+        value={[valuePercentage]}
+        colorScheme={isReached ? "red" : colorScheme || "primary"}
+        {...restOfProps} // Spread remaining Slider.Root compatible props
       >
-        <SliderTrack h="6px" borderRadius="full">
-          <SliderFilledTrack borderRadius="full" />
-        </SliderTrack>
-      </Slider>
+        <Slider.Track h="6px" borderRadius="full">
+          <Slider.Range borderRadius="full" />
+        </Slider.Track>
+        <Slider.Thumb index={0} />
+      </Slider.Root>
       <HStack
         justifyContent="space-between"
         fontSize="xs"
@@ -157,56 +129,55 @@ const UsageSlider: FC<UsageSliderProps> = (props) => {
               ∞
             </Text>
           ) : (
-            formatBytes(total) +
+            formatBytes(total as number) + // Cast total as it's checked not null
             (dataLimitResetStrategy && dataLimitResetStrategy !== "no_reset"
               ? " " +
-                t(
-                  `userDialog.resetStrategy.${dataLimitResetStrategy}`, // Corrected i18n key usage
-                   getResetStrategy(dataLimitResetStrategy) // Fallback text
+                translate(
+                  `userDialog.resetStrategy.${dataLimitResetStrategy}`,
+                  getResetStrategyText(dataLimitResetStrategy)
                 )
               : "")
           )}
         </Text>
         <Text>
-          {t("usersTable.total")}: {formatBytes(totalUsedTraffic)}
+          {translate("usersTable.total")}: {formatBytes(totalUsedTraffic)}
         </Text>
       </HStack>
     </>
   );
 };
+
 export type SortType = {
   sort: string;
   column: string;
 };
+
 export const Sort: FC<SortType> = ({ sort, column }) => {
   if (sort.includes(column))
     return (
-      <SortIcon
+      <SortIconElement // Use the styled component
         transform={sort.startsWith("-") ? undefined : "rotate(180deg)"}
       />
     );
   return null;
 };
-type UsersTableProps = {} & TableProps;
+
+// Use ComponentProps for Table.Root if specific TableRootProps isn't directly available or known
+type UsersTableProps = {} & ComponentProps<typeof Table.Root>;
+
 export const UsersTable: FC<UsersTableProps> = (props) => {
   const {
     filters,
-    users: usersData, // Renamed to avoid conflict with users variable inside map
+    users: usersData,
     onEditingUser,
     onFilterChange,
   } = useDashboard();
 
-   // --- ADD THIS LOG ---
-   console.error("UsersTable received usersData:", JSON.stringify(usersData, null, 2));
-   // --- END LOG ---
+  console.error("UsersTable received usersData:", JSON.stringify(usersData, null, 2));
 
-
-  const { users, total: totalUsersCount } = usersData; // Destructure from usersData
-
-  const { t } = useTranslation();
-  const [selectedRow, setSelectedRow] = useState<ExpandedIndex | undefined>(
-    undefined
-  );
+  const { users, total: totalUsersCount } = usersData;
+  const { t: translate } = useTranslation();
+  const [selectedRow, setSelectedRow] = useState<string | undefined>(undefined); // Accordion value is string
   const [top, setTop] = useState<string>("72px");
   const useTable = useBreakpointValue({ base: false, md: true });
 
@@ -221,7 +192,7 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
     window.addEventListener("resize", calcTop);
     return () => {
       window.removeEventListener("resize", calcTop);
-    }
+    };
   }, []);
 
   const isFiltered = users.length !== totalUsersCount;
@@ -229,27 +200,30 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
   const handleSort = (column: string) => {
     let newSort = filters.sort;
     if (newSort.includes(column)) {
-      if (newSort.startsWith("-")) {
-        newSort = "-created_at";
-      } else {
-        newSort = "-" + column;
-      }
+      newSort = newSort.startsWith("-") ? column : `-${column}`; // Simpler toggle
     } else {
       newSort = column;
     }
+     if (newSort === column && filters.sort === column) { // If clicking same column and it's already sorted ascending
+      newSort = `-${column}`;
+    } else if (newSort === `-${column}` && filters.sort === `-${column}`) { // If clicking same column and it's already sorted descending
+       newSort = "-created_at"; // Default sort or clear sort for this column
+    } else if (!filters.sort.includes(column)) { // New column
+        newSort = column;
+    }
+
+
     onFilterChange({
       sort: newSort,
       offset: 0,
     });
   };
 
-  const handleStatusFilter = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedValue = e.target.value;
-    // The values from the <select> options are known to be these specific strings or an empty string.
-    // These are assignable to FilterType['status'] where an empty string becomes undefined.
+  const handleStatusFilterChange = (details: { value: string[] }) => {
+    const selectedValue = details.value.length > 0 ? details.value[0] : "";
     const newStatusValue = selectedValue === ""
       ? undefined
-      : selectedValue as FilterType['status']; // Correctly cast to the expected type
+      : selectedValue as FilterType['status'];
 
     onFilterChange({
       status: newStatusValue,
@@ -257,381 +231,324 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
     });
   };
 
-  const toggleAccordion = (index: number) => {
-    setSelectedRow(index === selectedRow ? undefined : index);
-  };
+  const currentAccordionValue = selectedRow !== undefined ? [selectedRow] : [];
 
   return (
     <Box>
       {!useTable ? (
-        <Accordion
-          allowMultiple
+        <Accordion.Root
+          collapsible
+          value={currentAccordionValue}
+          onValueChange={(details) => {
+            setSelectedRow(details.value.length > 0 ? details.value[0] : undefined);
+          }}
           display={{ base: "block", md: "none" }}
-          index={selectedRow}
         >
-          <Table orientation="vertical" zIndex="docked" {...props}>
-            <Thead zIndex="docked" position="relative">
-              <Tr>
-                <Th
+          <Table.Root zIndex="docked" {...props}>
+            <Table.Header zIndex="docked" position="relative">
+              <Table.Row>
+                <Table.ColumnHeader
                   position="sticky"
                   top={top}
                   minW="120px"
                   pl={4}
                   pr={4}
-                  cursor={"pointer"}
-                  onClick={handleSort.bind(null, "account_number")}
+                  cursor="pointer"
+                  onClick={() => handleSort("account_number")}
                 >
-                  <HStack>
-                    <span>{t("accountNumber")}</span>
+                  <HStack gap={1}> {/* Changed spacing to gap */}
+                    <span>{translate("accountNumber")}</span>
                     <Sort sort={filters.sort} column="account_number" />
                   </HStack>
-                </Th>
-                <Th
+                </Table.ColumnHeader>
+                <Table.ColumnHeader
                   position="sticky"
                   top={top}
-                  minW="120px" // Increased minW for clarity
+                  minW="140px"
                   pl={0}
                   pr={0}
                   w="140px"
-                  cursor={"pointer"} // Make header clickable for sorting/filtering if desired
                 >
-                  <HStack spacing={0} position="relative">
+                  <HStack gap={0} position="relative"> {/* Changed spacing to gap */}
                     <Text
                       position="absolute"
-                      left={2} // Adjust for padding
+                      left={2}
                       top="50%"
                       transform="translateY(-50%)"
-                      _dark={{
-                        bg: "gray.750", // Use theme colors
-                      }}
-                      _light={{
-                        bg: "gray.50", // Use theme colors for light mode
-                      }}
+                      _dark={{ bg: "gray.750" }}
+                      _light={{ bg: "gray.50" }}
                       userSelect="none"
                       pointerEvents="none"
                       zIndex={1}
-                      // w="100%" // Let it size to content
                       fontSize="xs"
                       fontWeight="extrabold"
                       textTransform="uppercase"
                     >
-                      {t("usersTable.status")}
-                      {filters.status ? `: ${t(`status.${filters.status}`, filters.status)}` : ""}
+                      {translate("usersTable.status")}
+                      {filters.status ? `: ${translate(`status.${filters.status}`, filters.status as string)}` : ""}
                     </Text>
-                    <Select
+                    <select
                       value={filters.status || ""}
-                      fontSize="xs"
-                      fontWeight="extrabold"
-                      textTransform="uppercase"
-                      cursor="pointer"
-                      p={0} // Remove padding if text is hidden
-                      pl={2} pr={2} // Minimal padding for the select box itself
-                      border={0}
-                      h="auto"
-                      minH="38px" // Ensure it's clickable
-                      w="100%" // Full width of Th
-                      icon={<ChevronDownIcon style={{width: "16px", height: "16px", opacity: 0.7}}/>} // Visible icon
-                      iconSize="sm"
-                      _focusVisible={{
-                        border: "0 !important",
-                        boxShadow: "outline", // Add focus outline for accessibility
-                      }}
-                      onChange={handleStatusFilter}
-                      // color="transparent" // Keep text visible for accessibility if underlying text is complex
-                      // sx={{ caretColor: "transparent" }}
+                      onChange={e => handleStatusFilterChange({ value: [e.target.value] })}
+                      style={{ width: '100%', fontSize: '0.875rem', padding: '0.5rem' }}
                     >
-                      <option value="">{t("usersTable.allStatuses", "All")}</option>
-                      <option value="active">{t("status.active", "Active")}</option>
-                      <option value="on_hold">{t("status.on_hold", "On Hold")}</option>
-                      <option value="disabled">{t("status.disabled", "Disabled")}</option>
-                      <option value="limited">{t("status.limited", "Limited")}</option>
-                      <option value="expired">{t("status.expired", "Expired")}</option>
-                    </Select>
+                      <option value="">{translate("usersTable.allStatuses", "All")}</option>
+                      <option value="active">{translate("status.active", "Active")}</option>
+                      <option value="on_hold">{translate("status.on_hold", "On Hold")}</option>
+                      <option value="disabled">{translate("status.disabled", "Disabled")}</option>
+                      <option value="limited">{translate("status.limited", "Limited")}</option>
+                      <option value="expired">{translate("status.expired", "Expired")}</option>
+                    </select>
                   </HStack>
-                </Th>
-                <Th
+                </Table.ColumnHeader>
+                <Table.ColumnHeader
                   position="sticky"
                   top={top}
                   minW="100px"
-                  cursor={"pointer"}
+                  cursor="pointer"
                   pr={0}
-                  onClick={handleSort.bind(null, "used_traffic")}
+                  onClick={() => handleSort("used_traffic")}
                 >
-                  <HStack>
-                    <span>{t("usersTable.dataUsage")}</span>
+                  <HStack gap={1}> {/* Changed spacing to gap */}
+                    <span>{translate("usersTable.dataUsage")}</span>
                     <Sort sort={filters.sort} column="used_traffic" />
                   </HStack>
-                </Th>
-                <Th
+                </Table.ColumnHeader>
+                <Table.ColumnHeader
                   position="sticky"
                   top={top}
                   minW="32px"
                   w="32px"
                   p={0}
-                ></Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {!useTable &&
-                users?.map((user, i) => {
-                  return (
-                    <Fragment key={user.account_number}>
-                      <Tr
-                        onClick={() => toggleAccordion(i)}
+                />
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {users?.map((user, i) => {
+                const userIndexStr = i.toString();
+                return (
+                  <Fragment key={user.account_number}>
+                    <Accordion.Item value={userIndexStr} border="none"> {/* Accordion.Item wraps rows */}
+                      <Table.Row
+                        onClick={() => setSelectedRow(selectedRow === userIndexStr ? undefined : userIndexStr)}
                         cursor="pointer"
                       >
-                        <Td
-                          borderBottom={selectedRow === i ? 0 : "1px solid"} // Conditional border
+                        <Table.Cell
+                          borderBottom={selectedRow === userIndexStr ? 0 : "1px solid"}
                           borderColor="inherit"
                           minW="100px"
                           pl={4}
                           pr={4}
-                          maxW="calc(100vw - 140px - 100px - 32px - 32px)" // Adjusted for new status column width
+                          maxW="calc(100vw - 140px - 100px - 32px - 32px)"
                         >
-                          <HStack spacing={2}>
-                            <OnlineBadge lastOnline={user.online_at} />
-                            <Text isTruncated title={user.account_number}>{user.account_number}</Text>
-                          </HStack>
-                        </Td>
-                        <Td borderBottom={selectedRow === i ? 0 : "1px solid"} borderColor="inherit" minW="140px" pl={0} pr={0}>
+                           <Accordion.ItemTrigger asChild>
+                            <HStack gap={2} width="100%"> {/* Changed spacing to gap */}
+                              <OnlineBadge lastOnline={user.online_at} />
+                              <Text style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user.account_number}>{user.account_number}</Text>
+                            </HStack>
+                          </Accordion.ItemTrigger>
+                        </Table.Cell>
+                        <Table.Cell borderBottom={selectedRow === userIndexStr ? 0 : "1px solid"} borderColor="inherit" minW="140px" pl={0} pr={0}>
                           <StatusBadge
                             compact
                             showDetail={false}
                             expiryDate={user.expire}
                             status={user.status}
                           />
-                        </Td>
-                        <Td borderBottom={selectedRow === i ? 0 : "1px solid"} borderColor="inherit" minW="100px" pr={0}>
+                        </Table.Cell>
+                        <Table.Cell borderBottom={selectedRow === userIndexStr ? 0 : "1px solid"} borderColor="inherit" minW="100px" pr={0}>
                           <UsageSliderCompact
                             totalUsedTraffic={user.lifetime_used_traffic}
-                            dataLimitResetStrategy={
-                              user.data_limit_reset_strategy
-                            }
+                            dataLimitResetStrategy={user.data_limit_reset_strategy}
                             used={user.used_traffic}
                             total={user.data_limit}
                           />
-                        </Td>
-                        <Td p={0} borderBottom={selectedRow === i ? 0 : "1px solid"} borderColor="inherit" w="32px" minW="32px">
-                          <AccordionArrowIcon
-                            color="gray.600"
-                            _dark={{
-                              color: "gray.400",
-                            }}
-                            transition="transform .2s ease-out"
-                            transform={
-                              selectedRow === i ? "rotate(180deg)" : "rotate(0deg)"
-                            }
-                          />
-                        </Td>
-                      </Tr>
-                      {selectedRow === i && (
-                         <Tr className="collapsible expanded">
-                           <Td p={0} colSpan={4} borderBottomWidth="1px">
-                              <AccordionItem border={0} style={{display: 'block'}}>
-                                  <AccordionPanel
-                                    border={0}
-                                    cursor="default"
-                                    px={6}
-                                    py={3}
-                                  >
-                                    <VStack justifyContent="space-between" spacing="4">
-                                      <VStack
-                                        alignItems="flex-start"
-                                        w="full"
-                                        spacing={1}
+                        </Table.Cell>
+                        <Table.Cell p={0} borderBottom={selectedRow === userIndexStr ? 0 : "1px solid"} borderColor="inherit" w="32px" minW="32px">
+                           <Accordion.ItemTrigger asChild>
+                              <AccordionArrowIcon
+                                color="gray.600"
+                                _dark={{ color: "gray.400" }}
+                                transition="transform .2s ease-out"
+                                transform={selectedRow === userIndexStr ? "rotate(180deg)" : "rotate(0deg)"}
+                              />
+                           </Accordion.ItemTrigger>
+                        </Table.Cell>
+                      </Table.Row>
+                       <Accordion.ItemContent> {/* Panel content */}
+                        {selectedRow === userIndexStr && ( // Still need this conditional rendering for the row itself
+                           <Table.Row className="collapsible expanded">
+                            <Table.Cell p={0} colSpan={4} borderBottomWidth="1px">
+                                <Box px={6} py={3} cursor="default"> {/* Replaced AccordionPanel direct use */}
+                                  <VStack gap={4} justifyContent="space-between"> {/* Changed spacing to gap */}
+                                    <VStack gap={1} alignItems="flex-start" w="full"> {/* Changed spacing to gap */}
+                                      <Text
+                                        textTransform="capitalize"
+                                        fontSize="xs"
+                                        fontWeight="bold"
+                                        color="gray.600"
+                                        _dark={{ color: "gray.400" }}
                                       >
-                                        <Text
-                                          textTransform="capitalize"
-                                          fontSize="xs"
-                                          fontWeight="bold"
-                                          color="gray.600"
-                                          _dark={{
-                                            color: "gray.400",
-                                          }}
-                                        >
-                                          {t("usersTable.dataUsage")}
-                                        </Text>
-                                        <Box width="full" minW="230px">
-                                          <UsageSlider
-                                            totalUsedTraffic={
-                                              user.lifetime_used_traffic
-                                            }
-                                            dataLimitResetStrategy={
-                                              user.data_limit_reset_strategy
-                                            }
-                                            used={user.used_traffic}
-                                            total={user.data_limit}
-                                            colorScheme={
-                                              statusColors[user.status]?.bandWidthColor || "primary"
-                                            }
-                                          />
-                                        </Box>
-                                      </VStack>
-                                      <HStack w="full" justifyContent="space-between">
-                                        <Box width="full">
-                                          <StatusBadge
-                                            compact={false}
-                                            expiryDate={user.expire}
-                                            status={user.status}
-                                          />
-                                          <OnlineStatus lastOnline={user.online_at} />
-                                        </Box>
-                                        <HStack>
-                                          <ActionButtons user={user} />
-                                          {/* Edit button is now part of ActionButtons for mobile expanded view */}
-                                        </HStack>
-                                      </HStack>
+                                        {translate("usersTable.dataUsage")}
+                                      </Text>
+                                      <Box width="full" minW="230px">
+                                        <UsageSlider
+                                          totalUsedTraffic={user.lifetime_used_traffic}
+                                          dataLimitResetStrategy={user.data_limit_reset_strategy}
+                                          used={user.used_traffic}
+                                          total={user.data_limit}
+                                          colorScheme={statusColors[user.status]?.bandWidthColor || "primary"}
+                                        />
+                                      </Box>
                                     </VStack>
-                                  </AccordionPanel>
-                              </AccordionItem>
-                            </Td>
-                        </Tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-            </Tbody>
-          </Table>
-        </Accordion>
+                                    <HStack w="full" justifyContent="space-between">
+                                      <Box width="full">
+                                        <StatusBadge
+                                          compact={false}
+                                          expiryDate={user.expire}
+                                          status={user.status}
+                                        />
+                                        <OnlineStatus lastOnline={user.online_at} />
+                                      </Box>
+                                      <HStack>
+                                        <ActionButtons user={user} />
+                                      </HStack>
+                                    </HStack>
+                                  </VStack>
+                                </Box>
+                            </Table.Cell>
+                          </Table.Row>
+                        )}
+                      </Accordion.ItemContent>
+                    </Accordion.Item>
+                  </Fragment>
+                );
+              })}
+            </Table.Body>
+          </Table.Root>
+        </Accordion.Root>
       ) : (
-        <Table
-          variant="simple"
-          display={{ base: "none", md: "table" }}
-          {...props}
-        >
-          <Thead zIndex="docked" position="relative">
-            <Tr>
-              <Th
+        <Table.Root display={{ base: "none", md: "table" }} {...props}>
+          <Table.Header zIndex="docked" position="relative">
+            <Table.Row>
+              <Table.ColumnHeader
                 position="sticky"
                 top={{ base: "unset", md: top }}
                 minW="200px"
-                cursor={"pointer"}
-                onClick={handleSort.bind(null, "account_number")}
+                cursor="pointer"
+                onClick={() => handleSort("account_number")}
               >
-                <HStack>
-                  <span>{t("accountNumber")}</span>
+                <HStack gap={1}> {/* Changed spacing to gap */}
+                  <span>{translate("accountNumber")}</span>
                   <Sort sort={filters.sort} column="account_number" />
                 </HStack>
-              </Th>
-              <Th
+              </Table.ColumnHeader>
+              <Table.ColumnHeader
                 position="sticky"
                 top={{ base: "unset", md: top }}
                 width="250px"
-                minW="200px" // Increased minW
+                minW="200px"
               >
-                <HStack position="relative" justify="space-between" w="full">
-                   <HStack flexGrow={1} cursor="pointer" onClick={handleSort.bind(null, "status")}>
+                <HStack position="relative" justify="space-between" w="full" gap={0}> {/* Changed spacing to gap */}
+                   <HStack flexGrow={1} cursor="pointer" onClick={() => handleSort("status")} gap={1}> {/* Changed spacing to gap */}
                       <Text userSelect="none">
-                          {t("usersTable.status")}
-                          {filters.status ? `: ${t(`status.${filters.status}`, filters.status)}` : ""}
+                          {translate("usersTable.status")}
+                          {filters.status ? `: ${translate(`status.${filters.status}`, filters.status as string)}` : ""}
                       </Text>
                       <Sort sort={filters.sort} column="status" />
                    </HStack>
                    <Text userSelect="none" px={2}>/</Text>
-                   <HStack cursor="pointer" onClick={handleSort.bind(null, "expire")}>
-                      <Text userSelect="none">{t("usersTable.expireDate", "Expire Date")}</Text>
+                   <HStack cursor="pointer" onClick={() => handleSort("expire")} gap={1}> {/* Changed spacing to gap */}
+                      <Text userSelect="none">{translate("usersTable.expireDate", "Expire Date")}</Text>
                       <Sort sort={filters.sort} column="expire" />
                    </HStack>
-                   <Select
-                      aria-label={t("usersTable.filterByStatus", "Filter by status")}
+                   <select
                       value={filters.status || ""}
-                      fontSize="xs"
-                      fontWeight="extrabold"
-                      textTransform="uppercase"
-                      cursor="pointer"
-                      position={"absolute"}
-                      opacity={0}
-                      zIndex={2}
-                      top={0} left={0} w="full" h="full"
-                      onChange={handleStatusFilter}
-                      _focusVisible={{ outline: "none" }}
+                      onChange={e => handleStatusFilterChange({ value: [e.target.value] })}
+                      style={{ width: '100%', fontSize: '0.875rem', padding: '0.5rem' }}
                    >
-                      <option value="">{t("usersTable.allStatuses")}</option>
-                      <option value="active">{t("status.active", "Active")}</option>
-                      <option value="on_hold">{t("status.on_hold", "On Hold")}</option>
-                      <option value="disabled">{t("status.disabled", "Disabled")}</option>
-                      <option value="limited">{t("status.limited", "Limited")}</option>
-                      <option value="expired">{t("status.expired", "Expired")}</option>
-                   </Select>
+                      <option value="">{translate("usersTable.allStatuses", "All")}</option>
+                      <option value="active">{translate("status.active", "Active")}</option>
+                      <option value="on_hold">{translate("status.on_hold", "On Hold")}</option>
+                      <option value="disabled">{translate("status.disabled", "Disabled")}</option>
+                      <option value="limited">{translate("status.limited", "Limited")}</option>
+                      <option value="expired">{translate("status.expired", "Expired")}</option>
+                   </select>
                 </HStack>
-              </Th>
-              <Th
+              </Table.ColumnHeader>
+              <Table.ColumnHeader
                 position="sticky"
                 top={{ base: "unset", md: top }}
                 width="350px"
                 minW="230px"
-                cursor={"pointer"}
-                onClick={handleSort.bind(null, "used_traffic")}
+                cursor="pointer"
+                onClick={() => handleSort("used_traffic")}
               >
-                <HStack>
-                  <span>{t("usersTable.dataUsage")}</span>
+                <HStack gap={1}> {/* Changed spacing to gap */}
+                  <span>{translate("usersTable.dataUsage")}</span>
                   <Sort sort={filters.sort} column="used_traffic" />
                 </HStack>
-              </Th>
-              <Th
+              </Table.ColumnHeader>
+              <Table.ColumnHeader
                 position="sticky"
                 top={{ base: "unset", md: top }}
-                width="180px" // Reduced width for actions
-                minW="150px" // Reduced minW
+                width="180px"
+                minW="150px"
               />
-            </Tr>
-          </Thead>
-          <Tbody>
-            {useTable &&
-              users?.map((user, i) => {
-                return (
-                  <Tr
-                    key={user.account_number}
-                    className={classNames("interactive", { // Ensure "interactive" class is defined
-                      "last-row": i === users.length - 1,
-                    })}
-                    onClick={() => onEditingUser(user)}
-                    cursor="pointer"
-                    _hover={{bg: "gray.50", _dark: {bg: "gray.700"}}} // Hover effect
-                  >
-                    <Td minW="200px">
-                      <HStack spacing={2}>
-                          <OnlineBadge lastOnline={user.online_at} />
-                          <Text isTruncated title={user.account_number}>{user.account_number}</Text>
-                      </HStack>
-                      <OnlineStatus lastOnline={user.online_at} />
-                    </Td>
-                    <Td width="250px" minW="200px">
-                      <StatusBadge
-                        expiryDate={user.expire}
-                        status={user.status}
-                        compact={false}
-                      />
-                    </Td>
-                    <Td width="350px" minW="230px">
-                      <UsageSlider
-                        totalUsedTraffic={user.lifetime_used_traffic}
-                        dataLimitResetStrategy={user.data_limit_reset_strategy}
-                        used={user.used_traffic}
-                        total={user.data_limit}
-                        colorScheme={statusColors[user.status]?.bandWidthColor || "primary"}
-                      />
-                    </Td>
-                    <Td width="180px" minW="150px">
-                      <ActionButtons user={user} />
-                    </Td>
-                  </Tr>
-                );
-              })}
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {users?.map((user, i) => (
+              <Table.Row
+                key={user.account_number}
+                className={classNames("interactive", { "last-row": i === users.length - 1 })}
+                onClick={() => onEditingUser(user)}
+                cursor="pointer"
+                _hover={{ bg: "gray.50", _dark: { bg: "gray.700" } }}
+              >
+                <Table.Cell minW="200px">
+                  <HStack gap={2}> {/* Changed spacing to gap */}
+                      <OnlineBadge lastOnline={user.online_at} />
+                      <Text style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user.account_number}>{user.account_number}</Text>
+                  </HStack>
+                  <OnlineStatus lastOnline={user.online_at} />
+                </Table.Cell>
+                <Table.Cell width="250px" minW="200px">
+                  <StatusBadge
+                    expiryDate={user.expire}
+                    status={user.status}
+                    compact={false}
+                  />
+                </Table.Cell>
+                <Table.Cell width="350px" minW="230px">
+                  <UsageSlider
+                    totalUsedTraffic={user.lifetime_used_traffic}
+                    dataLimitResetStrategy={user.data_limit_reset_strategy}
+                    used={user.used_traffic}
+                    total={user.data_limit}
+                    colorScheme={statusColors[user.status]?.bandWidthColor || "primary"}
+                  />
+                </Table.Cell>
+                <Table.Cell width="180px" minW="150px">
+                  <ActionButtons user={user} />
+                </Table.Cell>
+              </Table.Row>
+            ))}
             {users.length === 0 && (
-              <Tr>
-                <Td colSpan={4}>
+              <Table.Row>
+                <Table.Cell colSpan={4}>
                   <EmptySection isFiltered={isFiltered} />
-                </Td>
-              </Tr>
+                </Table.Cell>
+              </Table.Row>
             )}
-          </Tbody>
-        </Table>
+          </Table.Body>
+        </Table.Root>
       )}
       {totalUsersCount > (filters.limit || 0) && <Pagination />}
     </Box>
   );
 };
+
 
 type ActionButtonsProps = {
   user: User;
@@ -639,11 +556,9 @@ type ActionButtonsProps = {
 
 const ActionButtons: FC<ActionButtonsProps> = ({ user }) => {
   const { setQRCode, setSubLink, onEditingUser } = useDashboard();
-
   const proxyLinks = user.links?.join("\r\n") || "";
-
   const [copied, setCopied] = useState<[number, boolean]>([-1, false]);
-  const { t } = useTranslation();
+  const { t: translate } = useTranslation();
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
@@ -663,76 +578,58 @@ const ActionButtons: FC<ActionButtonsProps> = ({ user }) => {
     }
   };
 
-
   return (
     <HStack
-      spacing={{base: 1, md: 2}} // Adjust spacing
+      gap={{ base: 1, md: 2 }} // Use gap
       justifyContent="flex-end"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
       }}
     >
-      <Tooltip
-        label={
-          copied[0] === 0 && copied[1]
-            ? t("usersTable.copied", "Copied!")
-            : t("usersTable.copyLink", "Copy Subscription Link")
-        }
-        placement="top" hasArrow
+      <IconButton
+        aria-label={translate("usersTable.copyLink", "Copy Subscription Link")}
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          const subUrl = user.subscription_url.startsWith("/")
+            ? window.location.origin + user.subscription_url
+            : user.subscription_url;
+          handleCopy(subUrl, 0);
+        }}
+        title={copied[0] === 0 && copied[1] ? translate("usersTable.copied", "Copied!") : translate("usersTable.copyLink", "Copy Subscription Link")}
       >
-        <IconButton
-          aria-label={t("usersTable.copyLink", "Copy Subscription Link")}
-          icon={copied[0] === 0 && copied[1] ? <CopiedIcon /> : <SubscriptionLinkIcon />}
-          variant="ghost" // Consistent variant
-          size="sm" // Consistent size
-          onClick={() => {
-             const subUrl = user.subscription_url.startsWith("/")
-                ? window.location.origin + user.subscription_url
-                : user.subscription_url;
-             handleCopy(subUrl, 0);
-          }}
-        />
-      </Tooltip>
-      <Tooltip
-        label={
-          copied[0] === 1 && copied[1]
-            ? t("usersTable.copied", "Copied!")
-            : t("usersTable.copyConfigs", "Copy All Configs")
-        }
-        placement="top" hasArrow
+        {copied[0] === 0 && copied[1] ? <CopiedIcon /> : <SubscriptionLinkIcon />}
+      </IconButton>
+      <IconButton
+        aria-label={translate("usersTable.copyConfigs", "Copy All Configs")}
+        variant="ghost"
+        size="sm"
+        onClick={() => handleCopy(proxyLinks, 1)}
+        disabled={!proxyLinks} // Changed from isDisabled
       >
-        <IconButton
-          aria-label={t("usersTable.copyConfigs", "Copy All Configs")}
-          icon={copied[0] === 1 && copied[1] ? <CopiedIcon /> : <CopyIcon />}
-          variant="ghost"
-          size="sm"
-          onClick={() => handleCopy(proxyLinks, 1)}
-          isDisabled={!proxyLinks}
-        />
-      </Tooltip>
-      <Tooltip label={t("usersTable.qrCode", "QR Code")} placement="top" hasArrow>
-        <IconButton
-          aria-label={t("usersTable.qrCode", "QR Code")}
-          icon={<QRIcon />}
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            if (user.links && user.links.length > 0) setQRCode(user.links);
-            setSubLink(user.subscription_url);
-          }}
-          isDisabled={!user.links || user.links.length === 0}
-        />
-      </Tooltip>
-      <Tooltip label={t("userDialog.editUser", "Edit User")} placement="top" hasArrow >
-        <IconButton
-          aria-label={t("userDialog.editUser", "Edit User")}
-          icon={<EditIcon />}
-          variant="ghost"
-          size="sm"
-          onClick={() => onEditingUser(user)}
-        />
-      </Tooltip>
+        {copied[0] === 1 && copied[1] ? <CopiedIcon /> : <CopyIcon />}
+      </IconButton>
+      <IconButton
+        aria-label={translate("usersTable.qrCode", "QR Code")}
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          if (user.links && user.links.length > 0) setQRCode(user.links);
+          setSubLink(user.subscription_url);
+        }}
+        disabled={!user.links || user.links.length === 0} // Changed from isDisabled
+      >
+        <QRIcon />
+      </IconButton>
+      <IconButton
+        aria-label={translate("userDialog.editUser", "Edit User")}
+        variant="ghost"
+        size="sm"
+        onClick={() => onEditingUser(user)}
+      >
+        <EditIcon />
+      </IconButton>
     </HStack>
   );
 };
@@ -743,7 +640,7 @@ type EmptySectionProps = {
 
 const EmptySection: FC<EmptySectionProps> = ({ isFiltered }) => {
   const { onCreateUser } = useDashboard();
-  const {t} = useTranslation();
+  const { t: translate } = useTranslation();
   return (
     <Box
       padding="5"
@@ -751,43 +648,27 @@ const EmptySection: FC<EmptySectionProps> = ({ isFiltered }) => {
       display="flex"
       alignItems="center"
       flexDirection="column"
-      gap={4}
+      gap={4} // Use gap
       w="full"
     >
-      <EmptySectionIcon
-        height="150px" // Adjusted size
-        width="150px"  // Adjusted size
-        _dark={{
-          'path[fill="#fff"]': {
-            fill: "gray.800",
-          },
-          'path[fill="#f2f2f2"], path[fill="#e6e6e6"], path[fill="#ccc"]': {
-            fill: "gray.700",
-          },
-          'circle[fill="#3182CE"]': {
-            fill: "primary.300",
-          },
-        }}
-        _light={{
-          'path[fill="#f2f2f2"], path[fill="#e6e6e6"], path[fill="#ccc"]': {
-            fill: "gray.300",
-          },
-          'circle[fill="#3182CE"]': {
-            fill: "primary.500",
-          },
-        }}
+      <img
+        src={AddFileIconSvg}
+        alt="Empty section"
+        height="150"
+        width="150"
+        style={{ display: 'block' }}
       />
       <Text fontWeight="medium" color="gray.600" _dark={{ color: "gray.400" }}>
-        {isFiltered ? t("usersTable.noUserMatched", "No users matched your filters.") : t("usersTable.noUser", "No users found.")}
+        {isFiltered ? translate("usersTable.noUserMatched", "No users matched your filters.") : translate("usersTable.noUser", "No users found.")}
       </Text>
       {!isFiltered && (
         <Button
           size="sm"
           colorScheme="primary"
           onClick={() => onCreateUser(true)}
-          leftIcon={<AddFileIcon width="1em" height="1em"/>} // Example icon
         >
-          {t("createUser", "Create User")}
+          <img src={AddFileIconSvg} alt="" style={{ width: '1em', height: '1em', marginRight: 4, display: 'inline-block', verticalAlign: 'middle' }} />
+          {translate("createUser", "Create User")}
         </Button>
       )}
     </Box>

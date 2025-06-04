@@ -1,59 +1,85 @@
-import { extendTheme, type ThemeConfig } from '@chakra-ui/react';
+/**
+ * Client theme configuration for Chakra UI v3
+ * Green-based color scheme for client portal interface
+ */
 
-const config: ThemeConfig = {
-  initialColorMode: 'light',
-  useSystemColorMode: false,
-};
+import { createSystem, defaultConfig } from "@chakra-ui/react";
+import { baseColors, baseSemanticTokens, baseFonts, baseSpacing } from "./base";
 
-const colors = {
-  brand: {
-    50: '#f0fdf4',
-    100: '#dcfce7',
-    200: '#bbf7d0',
-    300: '#86efac',
-    400: '#4ade80',
-    500: '#22c55e', // Primary brand color
-    600: '#16a34a',
-    700: '#15803d',
-    800: '#166534',
-    900: '#14532d',
-  },
-};
-
-const components = {
-  Button: {
-    defaultProps: {
-      colorScheme: 'brand',
+const clientTheme = createSystem(defaultConfig, {
+  theme: {
+    tokens: {
+      colors: {
+        ...baseColors,
+        brand: {
+          50: { value: "#f0fdf9" },
+          100: { value: "#dcfcef" },
+          200: { value: "#bbf7e0" },
+          300: { value: "#86efcc" },
+          400: { value: "#4adeb5" },
+          500: { value: "#22c55e" },
+          600: { value: "#16a34a" },
+          700: { value: "#15803d" },
+          800: { value: "#166534" },
+          900: { value: "#14532d" },
+        },
+        primary: {
+          50: { value: "#f0fdf9" },
+          100: { value: "#dcfcef" },
+          200: { value: "#bbf7e0" },
+          300: { value: "#86efcc" },
+          400: { value: "#4adeb5" },
+          500: { value: "#22c55e" },
+          600: { value: "#16a34a" },
+          700: { value: "#15803d" },
+          800: { value: "#166534" },
+          900: { value: "#14532d" },
+        },
+      },
+      fonts: baseFonts,
+      spacing: baseSpacing,
     },
-  },
-  Badge: {
-    defaultProps: {
-      colorScheme: 'brand',
-    },
-  },
-  Link: {
-    baseStyle: {
-      color: 'brand.500',
-      _hover: {
-        textDecoration: 'none',
-        color: 'brand.600',
+    semanticTokens: {
+      colors: {
+        ...baseSemanticTokens.colors,
+        // Client-specific accent colors
+        "client-accent": {
+          default: { value: "{colors.brand.500}" },
+          _dark: { value: "{colors.brand.400}" },
+        },
+        "client-accent-hover": {
+          default: { value: "{colors.brand.600}" },
+          _dark: { value: "{colors.brand.300}" },
+        },
+        // Navigation colors
+        "nav-bg": {
+          default: { value: "white" },
+          _dark: { value: "{colors.gray.800}" },
+        },
+        "nav-item-hover": {
+          default: { value: "{colors.gray.100}" },
+          _dark: { value: "{colors.gray.700}" },
+        },
+        "nav-item-active": {
+          default: { value: "{colors.brand.50}" },
+          _dark: { value: "{colors.brand.900}" },
+        },
+        // Status colors for VPN states
+        "status-connected": {
+          default: { value: "{colors.success.500}" },
+          _dark: { value: "{colors.success.400}" },
+        },
+        "status-connecting": {
+          default: { value: "{colors.warning.500}" },
+          _dark: { value: "{colors.warning.400}" },
+        },
+        "status-disconnected": {
+          default: { value: "{colors.error.500}" },
+          _dark: { value: "{colors.error.400}" },
+        },
       },
     },
   },
-};
-
-const styles = {
-  global: (props: { colorMode: string }) => ({
-    body: {
-      bg: props.colorMode === 'dark' ? 'gray.900' : 'gray.50',
-      color: props.colorMode === 'dark' ? 'white' : 'gray.800',
-    },
-  }),
-};
-
-export const clientTheme = extendTheme({
-  config,
-  colors,
-  components,
-  styles,
 });
+
+export default clientTheme;

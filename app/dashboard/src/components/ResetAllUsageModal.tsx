@@ -1,29 +1,15 @@
 import {
   Button,
-  chakra,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
-  Spinner,
+  Dialog,
+  IconButton,
+  Icon,
   Text,
-  useToast,
 } from "@chakra-ui/react";
+import { toaster } from "@/components/ui/toaster";
 import { FC, useState } from "react";
-import { DocumentMinusIcon } from "@heroicons/react/24/outline";
-import { Icon } from "./Icon";
-import { useDashboard } from "contexts/DashboardContext";
+import { DocumentMinusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useDashboard } from "../lib/stores/DashboardContext";
 import { useTranslation } from "react-i18next";
-
-export const ResetIcon = chakra(DocumentMinusIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
 
 export type DeleteUserModalProps = {};
 
@@ -31,7 +17,7 @@ export const ResetAllUsageModal: FC<DeleteUserModalProps> = () => {
   const [loading, setLoading] = useState(false);
   const { isResetingAllUsage, onResetAllUsage, resetAllUsage } = useDashboard();
   const { t } = useTranslation();
-  const toast = useToast();
+  // toast function is replaced with createToast
   const onClose = () => {
     onResetAllUsage(false);
   };
@@ -39,20 +25,18 @@ export const ResetAllUsageModal: FC<DeleteUserModalProps> = () => {
     setLoading(true);
     resetAllUsage()
       .then(() => {
-        toast({
+        toaster.create({
           title: t("resetAllUsage.success"),
-          status: "success",
-          isClosable: true,
-          position: "top",
+          type: "success",
+          closable: true,
           duration: 3000,
         });
       })
       .catch(() => {
-        toast({
+        toaster.create({
           title: t("resetAllUsage.error"),
-          status: "error",
-          isClosable: true,
-          position: "top",
+          type: "error",
+          closable: true,
           duration: 3000,
         });
       })
@@ -61,45 +45,51 @@ export const ResetAllUsageModal: FC<DeleteUserModalProps> = () => {
       });
   };
   return (
-    <Modal isCentered isOpen={isResetingAllUsage} onClose={onClose} size="sm">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3">
-        <ModalHeader pt={6}>
-          <Icon color="red">
-            <ResetIcon />
-          </Icon>
-        </ModalHeader>
-        <ModalCloseButton mt={3} />
-        <ModalBody>
-          <Text fontWeight="semibold" fontSize="lg">
-            {t("resetAllUsage.title")}
-          </Text>
-          {isResetingAllUsage && (
-            <Text
-              mt={1}
-              fontSize="sm"
-              _dark={{ color: "gray.400" }}
-              color="gray.600"
-            >
-              {t("resetAllUsage.prompt")}
+    <Dialog.Root open={isResetingAllUsage} onOpenChange={(d) => !d.open && onClose()}>
+      <Dialog.Backdrop bg="blackAlpha.300" backdropFilter="blur(10px)" />
+      <Dialog.Positioner>
+        <Dialog.Content mx="3">
+          <Dialog.Header pt={6}>
+            <Icon color="red">
+              <DocumentMinusIcon className="w-5 h-5" />
+            </Icon>
+          </Dialog.Header>
+          <Dialog.CloseTrigger asChild>
+            <IconButton aria-label="close" size="sm" variant="ghost" mt={3}>
+              <XMarkIcon className="w-4 h-4" />
+            </IconButton>
+          </Dialog.CloseTrigger>
+          <Dialog.Body>
+            <Text fontWeight="semibold" fontSize="lg">
+              {t("resetAllUsage.title")}
             </Text>
-          )}
-        </ModalBody>
-        <ModalFooter display="flex">
-          <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
-            {t("cancel")}
-          </Button>
-          <Button
-            size="sm"
-            w="full"
-            colorScheme="red"
-            onClick={onReset}
-            leftIcon={loading ? <Spinner size="xs" /> : undefined}
-          >
-            {t("reset")}
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+            {isResetingAllUsage && (
+              <Text
+                mt={1}
+                fontSize="sm"
+                _dark={{ color: "gray.400" }}
+                color="gray.600"
+              >
+                {t("resetAllUsage.prompt")}
+              </Text>
+            )}
+          </Dialog.Body>
+          <Dialog.Footer display="flex">
+            <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
+              {t("cancel")}
+            </Button>
+            <Button
+              size="sm"
+              w="full"
+              colorPalette="red"
+              onClick={onReset}
+              loading={loading}
+            >
+              {t("reset")}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
   );
 };

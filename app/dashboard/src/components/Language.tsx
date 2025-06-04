@@ -1,10 +1,7 @@
 import {
-  chakra,
-  IconButton,
+  Button,
   Menu,
-  MenuButton,
-  MenuItem,
-  MenuList,
+  Portal,
 } from "@chakra-ui/react";
 import { LanguageIcon } from "@heroicons/react/24/outline";
 import { FC, ReactNode } from "react";
@@ -14,59 +11,42 @@ type HeaderProps = {
   actions?: ReactNode;
 };
 
-const LangIcon = chakra(LanguageIcon, {
-  baseStyle: {
-    w: 4,
-    h: 4,
-  },
-});
-
 export const Language: FC<HeaderProps> = ({ actions }) => {
   const { i18n } = useTranslation();
 
-  var changeLanguage = (lang: string) => {
+  const changeLanguage = (lang: string) => {
     i18n.changeLanguage(lang);
   };
 
   return (
-    <Menu placement="bottom-end">
-      <MenuButton
-        as={IconButton}
-        size="sm"
-        variant="outline"
-        icon={<LangIcon />}
-        position="relative"
-      />
-      <MenuList minW="100px" zIndex={9999}>
-        <MenuItem
-          maxW="100px"
-          fontSize="sm"
-          onClick={() => changeLanguage("en")}
+    <Menu.Root>
+      <Menu.Trigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Change language"
         >
-          English
-        </MenuItem>
-        <MenuItem
-          maxW="100px"
-          fontSize="sm"
-          onClick={() => changeLanguage("fa")}
-        >
-          فارسی
-        </MenuItem>
-        <MenuItem
-          maxW="100px"
-          fontSize="sm"
-          onClick={() => changeLanguage("zh-cn")}
-        >
-          简体中文
-        </MenuItem>
-        <MenuItem
-          maxW="100px"
-          fontSize="sm"
-          onClick={() => changeLanguage("ru")}
-        >
-          Русский
-        </MenuItem>
-      </MenuList>
-    </Menu>
+          <LanguageIcon width={16} height={16} />
+        </Button>
+      </Menu.Trigger>
+      <Portal>
+        <Menu.Positioner>
+          <Menu.Content minW="100px" zIndex={9999}>
+            <Menu.Item value="en" onClick={() => changeLanguage("en")}>
+              English
+            </Menu.Item>
+            <Menu.Item value="fa" onClick={() => changeLanguage("fa")}>
+              فارسی
+            </Menu.Item>
+            <Menu.Item value="zh-cn" onClick={() => changeLanguage("zh-cn")}>
+              简体中文
+            </Menu.Item>
+            <Menu.Item value="ru" onClick={() => changeLanguage("ru")}>
+              Русский
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Positioner>
+      </Portal>
+    </Menu.Root>
   );
 };

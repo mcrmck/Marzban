@@ -6,33 +6,27 @@ import {
     Text,
     VStack,
     Table,
-    Thead,
-    Tbody,
-    Tr,
-    Th,
-    Td,
     Badge,
     Spinner,
-    useToast,
 } from "@chakra-ui/react";
-import { useClientPortalStore } from "../../store/clientPortalStore";
-import type { ClientNode } from "../../types/clientPortal";
+import { useClientPortalStore } from "../../lib/stores";
+import type { ClientNode } from "../../lib/types";
+import { toaster } from "@/components/ui/toaster";
 
 export const ClientServersPage = () => {
-    const toast = useToast();
     const { servers, fetchServers, isLoadingServers } = useClientPortalStore();
 
     useEffect(() => {
-        fetchServers().catch((error) => {
-            toast({
+        fetchServers().catch(() => {
+            toaster.create({
                 title: "Error",
                 description: "Failed to fetch servers. Please try again.",
-                status: "error",
+                type: "error",
                 duration: 5000,
-                isClosable: true,
+                closable: true,
             });
         });
-    }, [fetchServers, toast]);
+    }, [fetchServers]);
 
     if (isLoadingServers) {
         return (
@@ -44,7 +38,7 @@ export const ClientServersPage = () => {
 
     return (
         <Container maxW="container.xl" py={10}>
-            <VStack spacing={8} align="stretch">
+            <VStack gap={8} align="stretch">
                 <Box>
                     <Heading size="xl">Available Servers</Heading>
                     <Text color="gray.600" mt={2}>
@@ -53,24 +47,24 @@ export const ClientServersPage = () => {
                 </Box>
 
                 <Box overflowX="auto">
-                    <Table variant="simple">
-                        <Thead>
-                            <Tr>
-                                <Th>Name</Th>
-                                <Th>Location</Th>
-                                <Th>Address</Th>
-                                <Th>Status</Th>
-                            </Tr>
-                        </Thead>
-                        <Tbody>
+                    <Table.Root>
+                        <Table.Header>
+                            <Table.Row>
+                                <Table.ColumnHeader>Name</Table.ColumnHeader>
+                                <Table.ColumnHeader>Location</Table.ColumnHeader>
+                                <Table.ColumnHeader>Address</Table.ColumnHeader>
+                                <Table.ColumnHeader>Status</Table.ColumnHeader>
+                            </Table.Row>
+                        </Table.Header>
+                        <Table.Body>
                             {servers.map((server: ClientNode) => (
-                                <Tr key={server.id}>
-                                    <Td fontWeight="medium">{server.name}</Td>
-                                    <Td>{server.location}</Td>
-                                    <Td fontFamily="mono" fontSize="sm">
+                                <Table.Row key={server.id}>
+                                    <Table.Cell fontWeight="medium">{server.name}</Table.Cell>
+                                    <Table.Cell>{server.location}</Table.Cell>
+                                    <Table.Cell fontFamily="mono" fontSize="sm">
                                         {server.address}
-                                    </Td>
-                                    <Td>
+                                    </Table.Cell>
+                                    <Table.Cell>
                                         <Badge
                                             colorScheme={
                                                 server.status === "online"
@@ -80,11 +74,11 @@ export const ClientServersPage = () => {
                                         >
                                             {server.status}
                                         </Badge>
-                                    </Td>
-                                </Tr>
+                                    </Table.Cell>
+                                </Table.Row>
                             ))}
-                        </Tbody>
-                    </Table>
+                        </Table.Body>
+                    </Table.Root>
                 </Box>
             </VStack>
         </Container>

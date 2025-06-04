@@ -1,100 +1,85 @@
 import React from 'react';
 import {
   Box,
-  Button,
-  Checkbox,
-  Flex,
   Heading,
-  Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-  useToast,
-  Spinner, // Added for loading state
+  Spinner,
 } from '@chakra-ui/react';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { fetch } from 'service/http'; // Assuming this is your configured fetch
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetch } from '../lib/api/http';
 import { useTranslation } from 'react-i18next';
-import { Node } from 'types/node'; // Ensure this Node type is correct
+import { Node } from '../lib/types/node';
+import { toaster } from "@/components/ui/toaster";
+import { Table } from '@chakra-ui/react';
+import { Checkbox } from '@chakra-ui/react';
 
-// Updated props to use accountNumber
 interface NodeSelectionProps {
   accountNumber: string;
 }
 
 export const NodeSelection: React.FC<NodeSelectionProps> = ({ accountNumber }) => {
   const { t } = useTranslation();
-  const toast = useToast();
+  // createToast is now imported directly
   const queryClient = useQueryClient();
 
-  const { data: allNodes, isLoading: isLoadingNodes } = useQuery<Node[]>(
-    ['nodes'], // Query key for all available nodes
-    () => fetch('/nodes').then((res) => res.json()) // API endpoint to get all nodes
-  );
+  const { data: nodes, isLoading } = useQuery<Node[]>({
+    queryKey: ['nodes'],
+    queryFn: () => fetch.get<Node[]>('/api/nodes'),
+  });
 
-  // Query key for nodes associated with the specific user (using accountNumber)
   const userNodesQueryKey = ['user-nodes', accountNumber];
-  const { data: selectedNodes, isLoading: isLoadingSelectedNodes } = useQuery<Node[]>(
-    userNodesQueryKey,
-    () => fetch(`/user/${accountNumber}/nodes`).then((res) => res.json()), // API endpoint using accountNumber
-    { enabled: !!accountNumber } // Only run if accountNumber is available
-  );
+  const { data: selectedNodes, isLoading: isLoadingSelectedNodes } = useQuery<Node[]>({
+    queryKey: userNodesQueryKey,
+    queryFn: () => fetch.get<Node[]>(`/user/${accountNumber}/nodes`),
+    enabled: !!accountNumber
+  });
 
   const mutationOptions = {
     onSuccess: () => {
-      queryClient.invalidateQueries(userNodesQueryKey); // Invalidate user's specific nodes list
-      // Optionally, invalidate all nodes list if selection affects some global state of nodes, though unlikely
-      // queryClient.invalidateQueries(['nodes']);
+      queryClient.invalidateQueries({ queryKey: userNodesQueryKey });
     },
     onError: (error: any) => {
-      toast({
+      toaster.create({
         title: t('nodeSelection.error'),
         description: error?.message || t('nodeSelection.genericError'),
-        status: 'error',
+        type: 'error',
         duration: 5000,
-        isClosable: true,
+        closable: true,
       });
     }
   };
 
-  const addNodeMutation = useMutation(
-    (nodeId: number) =>
-      fetch(`/user/${accountNumber}/nodes/${nodeId}`, { method: 'POST' }), // API endpoint using accountNumber
-    {
-      ...mutationOptions,
-      onSuccess: (...args) => {
-        mutationOptions.onSuccess();
-        toast({
-          title: t('nodeSelection.nodeAdded'),
-          status: 'success',
-          duration: 3000,
-        });
-      },
-    }
-  );
+  const addNodeMutation = useMutation({
+    mutationFn: (nodeId: number) => fetch.post(`/user/${accountNumber}/nodes/${nodeId}`),
+    ...mutationOptions,
+    onSuccess: () => {
+      mutationOptions.onSuccess();
+      toaster.create({
+        title: t('nodeSelection.nodeAdded'),
+        type: 'success',
+        duration: 3000,
+        closable: true,
+      });
+    },
+  });
 
-  const removeNodeMutation = useMutation(
-    (nodeId: number) =>
-      fetch(`/user/${accountNumber}/nodes/${nodeId}`, { method: 'DELETE' }), // API endpoint using accountNumber
-    {
-      ...mutationOptions,
-      onSuccess: (...args) => {
-        mutationOptions.onSuccess();
-        toast({
-          title: t('nodeSelection.nodeRemoved'),
-          status: 'success',
-          duration: 3000,
-        });
-      },
-    }
-  );
+  const removeNodeMutation = useMutation({
+    mutationFn: (nodeId: number) => fetch.delete(`/user/${accountNumber}/nodes/${nodeId}`),
+    ...mutationOptions,
+    onSuccess: () => {
+      mutationOptions.onSuccess();
+      toaster.create({
+        title: t('nodeSelection.nodeRemoved'),
+        type: 'success',
+        duration: 3000,
+        closable: true,
+      });
+    },
+  });
 
   const handleNodeToggle = (node: Node) => {
-    if (!accountNumber) return; // Guard against missing accountNumber
+    if (!accountNumber) return;
 
-    const isSelected = selectedNodes?.some((n) => n.id === node.id);
+    const isSelected = selectedNodes?.some((n: Node) => n.id === node.id);
     if (isSelected) {
       removeNodeMutation.mutate(node.id);
     } else {
@@ -102,7 +87,7 @@ export const NodeSelection: React.FC<NodeSelectionProps> = ({ accountNumber }) =
     }
   };
 
-  if (isLoadingNodes || isLoadingSelectedNodes) {
+  if (isLoading || isLoadingSelectedNodes) {
     return <Box display="flex" justifyContent="center" alignItems="center" p={5}><Spinner /> Loading nodes...</Box>;
   }
 
@@ -111,35 +96,37 @@ export const NodeSelection: React.FC<NodeSelectionProps> = ({ accountNumber }) =
       <Heading size="md" mb={4}>
         {t('nodeSelection.title')}
       </Heading>
-      <Table variant="simple" size="sm">
-        <Thead>
-          <Tr>
-            <Th>{t('nodeSelection.name')}</Th>
-            <Th>{t('nodeSelection.address')}</Th>
-            <Th>{t('nodeSelection.status')}</Th>
-            <Th textAlign="center">{t('nodeSelection.select')}</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {allNodes?.map((node) => (
-            <Tr key={node.id}>
-              <Td>{node.name}</Td>
-              <Td>{node.address}</Td>
-              <Td>{node.status || 'N/A'}</Td>
-              <Td textAlign="center">
-                <Checkbox
-                  isChecked={selectedNodes?.some((n) => n.id === node.id)}
+      <Table.Root>
+        <Table.Header>
+          <Table.Row>
+            <Table.ColumnHeader>{t('nodeSelection.name')}</Table.ColumnHeader>
+            <Table.ColumnHeader>{t('nodeSelection.address')}</Table.ColumnHeader>
+            <Table.ColumnHeader>{t('nodeSelection.status')}</Table.ColumnHeader>
+            <Table.ColumnHeader textAlign="center">{t('nodeSelection.select')}</Table.ColumnHeader>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {nodes?.map((node: Node) => (
+            <Table.Row key={node.id}>
+              <Table.Cell>{node.name}</Table.Cell>
+              <Table.Cell>{node.address}</Table.Cell>
+              <Table.Cell>{node.status || 'N/A'}</Table.Cell>
+              <Table.Cell textAlign="center">
+                <Checkbox.Root
+                  checked={selectedNodes?.some((n: Node) => n.id === node.id)}
                   onChange={() => handleNodeToggle(node)}
-                  isDisabled={addNodeMutation.isLoading || removeNodeMutation.isLoading}
+                  disabled={addNodeMutation.isPending || removeNodeMutation.isPending}
                 />
-              </Td>
-            </Tr>
+              </Table.Cell>
+            </Table.Row>
           ))}
-          {(!allNodes || allNodes.length === 0) && (
-            <Tr><Td colSpan={4}>{t('nodeSelection.noNodesAvailable')}</Td></Tr>
+          {(!nodes || nodes.length === 0) && (
+            <Table.Row>
+              <Table.Cell colSpan={4}>{t('nodeSelection.noNodesAvailable')}</Table.Cell>
+            </Table.Row>
           )}
-        </Tbody>
-      </Table>
+        </Table.Body>
+      </Table.Root>
     </Box>
   );
 };

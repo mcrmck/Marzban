@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useClientPortalStore } from "../../store/clientPortalStore";
+import { useIsAuthenticated, useIsLoadingAuth } from "../../lib/stores";
 import { Spinner, Container } from "@chakra-ui/react";
 
 interface ClientProtectedRouteProps {
@@ -10,7 +10,8 @@ interface ClientProtectedRouteProps {
 export const ClientProtectedRoute = ({ children }: ClientProtectedRouteProps) => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { isAuthenticated, isLoadingAuth } = useClientPortalStore();
+    const isAuthenticated = useIsAuthenticated();
+    const isLoadingAuth = useIsLoadingAuth();
 
     useEffect(() => {
         if (!isLoadingAuth && !isAuthenticated) {

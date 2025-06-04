@@ -5,82 +5,119 @@ import {
     Button,
     VStack,
     Text,
-    useToast,
     Container,
     Heading,
     Code,
     HStack,
-    IconButton,
     useClipboard,
+    IconButton
 } from "@chakra-ui/react";
-import { useClientPortalStore } from "../../store/clientPortalStore";
-import { CheckIcon, CopyIcon } from "@chakra-ui/icons";
+import { useClientPortalStore } from "../../lib/stores";
+import { ClipboardIcon } from "@heroicons/react/24/outline";
+import { toaster } from "@/components/ui/toaster";
 
-export const ClientRegisterPage = () => {
+const ClientRegisterPage = () => {
     const navigate = useNavigate();
-    const toast = useToast();
     const { register, isLoadingAuth, error } = useClientPortalStore();
-    const [accountNumber, setAccountNumber] = useState<string | null>(null);
+    const [accountNumber] = useState<string | null>(null);
+    const { copy } = useClipboard({ value: accountNumber || "" });
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
             const success = await register();
             if (success) {
-                toast({
+                toaster.create({
                     title: "Account Created",
                     description: "Your account has been created successfully.",
-                    status: "success",
+                    type: "success",
                     duration: 5000,
-                    isClosable: true,
+                    closable: true,
                 });
                 navigate("/account", { replace: true });
             }
         } catch (err) {
-            toast({
+            toaster.create({
                 title: "Registration Failed",
                 description: error || "Failed to create account. Please try again.",
-                status: "error",
+                type: "error",
                 duration: 5000,
-                isClosable: true,
+                closable: true,
             });
         }
     };
 
+    const handleCopyAccountNumber = () => {
+        copy();
+        toaster.create({
+            title: "Copied!",
+            description: "Account number copied to clipboard",
+            type: "success",
+            duration: 2000,
+            closable: true,
+        });
+    };
+
     return (
         <Container maxW="container.sm" py={10}>
-            <VStack spacing={8} align="stretch">
+            <VStack gap={8} align="stretch">
                 <Box textAlign="center">
-                    <Heading size="xl" mb={2}>Create Your Account</Heading>
-                    <Text color="gray.600">Click the button below to create your account</Text>
+                    <Heading size="xl" mb={2}>Create Account</Heading>
+                    <Text color="gray.600">Register for a new client account</Text>
                 </Box>
 
                 <form onSubmit={handleSubmit}>
-                    <VStack spacing={4}>
+                    <VStack gap={4}>
+                        {accountNumber && (
+                            <Box
+                                p={4}
+                                borderWidth="1px"
+                                borderRadius="md"
+                                bg="gray.50"
+                                width="full"
+                            >
+                                <Text mb={2} fontWeight="medium">
+                                    Your Account Number
+                                </Text>
+                                <HStack>
+                                    <Code p={2} flex="1">
+                                        {accountNumber}
+                                    </Code>
+                                    <IconButton
+                                        aria-label="Copy account number"
+                                        onClick={handleCopyAccountNumber}
+                                        size="sm"
+                                        variant="ghost"
+                                    >
+                                        <ClipboardIcon style={{ width: 20, height: 20 }} />
+                                    </IconButton>
+                                </HStack>
+                            </Box>
+                        )}
+
                         <Button
                             type="submit"
                             colorScheme="brand"
                             size="lg"
                             width="full"
-                            isLoading={isLoadingAuth}
+                            loading={isLoadingAuth}
                             loadingText="Creating account..."
                         >
                             Create Account
                         </Button>
 
-                        <Text fontSize="sm" color="gray.500">
-                            Already have an account?{" "}
-                            <Button
-                                variant="link"
-                                color="brand.500"
-                                onClick={() => navigate("/login")}
-                            >
-                                Login here
-                            </Button>
-                        </Text>
+                        <Button
+                            variant="ghost"
+                            onClick={() => navigate("/login")}
+                            size="sm"
+                        >
+                            Already have an account? Login
+                        </Button>
                     </VStack>
                 </form>
             </VStack>
         </Container>
     );
 };
+
+export default ClientRegisterPage;

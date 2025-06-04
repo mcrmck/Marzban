@@ -1,22 +1,16 @@
 import {
-  Alert,
-  AlertDescription,
-  AlertIcon,
-  Box,
   Button,
-  Checkbox,
-  Collapse,
-  FormControl,
-  FormLabel,
   HStack,
   IconButton,
   Input,
-  Switch,
   Text,
   Textarea,
-  Tooltip,
   VStack,
-  useToast,
+  Tooltip,
+  Collapsible,
+  Field,
+  Switch,
+  Alert,
 } from "@chakra-ui/react";
 import {
   EyeIcon,
@@ -24,299 +18,238 @@ import {
 } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FC, useState } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, SubmitHandler } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "react-query";
-import { NodeSchema, NodeType } from "contexts/NodesContext";
-import { fetch } from "service/http";
-import { generateErrorMessage } from "utils/toastHandler";
+import { useQuery } from "@tanstack/react-query";
+import { NodeSchema, NodeType } from "../lib/stores/NodesContext";
+import { fetch } from "../lib/api/http";
+import { toaster } from "@/components/ui/toaster";
+
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const DownloadCertButton = ({ pem }: { pem: string }) => {
+  const { t } = useTranslation();
+  const blob = new Blob([pem], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+
+  return (
+    <Button
+      asChild
+      size="xs"
+      colorPalette="primary"
+      variant="solid"
+    >
+      {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
+      <a href={url} download="ssl_client_cert.pem">
+        {t("nodes.download-certificate")}
+      </a>
+    </Button>
+  );
+};
+
+const ToggleIconButton: FC<{ label: string; shown: boolean; onToggle: () => void }> = ({ label, shown, onToggle }) => (
+  <Tooltip.Root>
+    <Tooltip.Trigger asChild>
+      <IconButton
+        aria-label={label}
+        size="xs"
+        variant="ghost"
+        onClick={onToggle}
+      >
+        {shown ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+      </IconButton>
+    </Tooltip.Trigger>
+    <Tooltip.Positioner>
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Positioner>
+  </Tooltip.Root>
+);
+
+function selectAllText(el: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Component                                                                  */
+/* -------------------------------------------------------------------------- */
 
 interface NodeFormProps {
   initialValues?: NodeType | null;
-  onSubmit: (values: NodeType) => void;
+  onSubmit: (values: NodeType) => void | Promise<void>;
   submitText: string;
 }
 
-export const NodeForm: FC<NodeFormProps> = ({
-  initialValues,
-  onSubmit,
-  submitText,
-}) => {
+export const NodeForm: FC<NodeFormProps> = ({ initialValues, onSubmit, submitText }) => {
   const { t } = useTranslation();
-  const toast = useToast();
+  // const toast = createToast; // Not needed anymore
   const [showCertificate, setShowCertificate] = useState(false);
   const [showClientCert, setShowClientCert] = useState(false);
   const [showClientKey, setShowClientKey] = useState(false);
 
-  const { data: nodeSettings } = useQuery({
-    queryKey: "node-settings",
-    queryFn: () =>
-      fetch<{
-        min_node_version: string;
-        certificate: string;
-      }>("/node/settings"),
+  const { data: certificateData } = useQuery({
+    queryKey: ["certificate"],
+    queryFn: () => fetch.get<{ certificate: string }>("/api/certificate"),
   });
 
   const form = useForm<NodeType>({
-    resolver: zodResolver(NodeSchema),
-    defaultValues: initialValues || {
-      name: "",
-      address: "",
-      port: 0,
-      api_port: 0,
-      usage_coefficient: 1,
-      status: "connecting",
-      panel_client_cert: "",
-      panel_client_key: "",
-    },
+    resolver: zodResolver(NodeSchema) as any,
+    defaultValues:
+      initialValues ?? {
+        name: "",
+        address: "",
+        port: 0,
+        api_port: 0,
+        usage_coefficient: 1,
+        status: "connecting",
+        panel_client_cert: "",
+        panel_client_key: "",
+      },
   });
 
-  const handleSubmit = async (values: NodeType) => {
+  const handleSubmit: SubmitHandler<NodeType> = async (values) => {
     try {
       await onSubmit(values);
-    } catch (error) {
-      generateErrorMessage(error, toast, form);
+    } catch (err: any) {
+      toaster.create({
+        title: t("error"),
+        description: err.message || t("nodes.errorSaving"),
+        type: "error",
+        duration: 5000,
+        closable: true,
+      });
     }
   };
 
-  function selectText(node: HTMLElement) {
-    if (window.getSelection) {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      selection!.removeAllRanges();
-      selection!.addRange(range);
-    }
-  }
-
   return (
-    <form onSubmit={form.handleSubmit(handleSubmit)}>
-      <VStack spacing={4}>
-        {nodeSettings?.certificate && (
-          <Alert status="info" alignItems="start">
-            <AlertDescription
-              display="flex"
-              flexDirection="column"
-              overflow="hidden"
-            >
+    <form onSubmit={form.handleSubmit(handleSubmit as any)}>
+      <VStack gap={4}>
+        {/* ------------------------------------------------ Certificate hint */}
+        {certificateData && (
+          <Alert.Root status="info" alignItems="flex-start">
+            <Alert.Description display="flex" flexDirection="column" overflow="hidden">
               <span>{t("nodes.connection-hint")}</span>
-              <HStack justify="end" py={2}>
-                <Button
-                  as="a"
-                  colorScheme="primary"
-                  size="xs"
-                  download="ssl_client_cert.pem"
-                  href={URL.createObjectURL(
-                    new Blob([nodeSettings.certificate], { type: "text/plain" })
-                  )}
-                >
-                  {t("nodes.download-certificate")}
-                </Button>
-                <Tooltip
-                  placement="top"
-                  label={t(
-                    !showCertificate
-                      ? "nodes.show-certificate"
-                      : "nodes.hide-certificate"
-                  )}
-                >
-                  <IconButton
-                    aria-label={t(
-                      !showCertificate
-                        ? "nodes.show-certificate"
-                        : "nodes.hide-certificate"
-                    )}
-                    onClick={() => setShowCertificate(!showCertificate)}
-                    colorScheme="whiteAlpha"
-                    color="primary"
-                    size="xs"
-                  >
-                    {!showCertificate ? (
-                      <EyeIcon width="15px" />
-                    ) : (
-                      <EyeSlashIcon width="15px" />
-                    )}
-                  </IconButton>
-                </Tooltip>
+              <HStack justify="flex-end" py={2} gap={2} wrap="wrap">
+                <DownloadCertButton pem={certificateData.certificate} />
+                <ToggleIconButton
+                  label={t(showCertificate ? "nodes.hide-certificate" : "nodes.show-certificate")}
+                  shown={showCertificate}
+                  onToggle={() => setShowCertificate((v) => !v)}
+                />
               </HStack>
-              <Collapse in={showCertificate} animateOpacity>
-                <Text
-                  bg="rgba(255,255,255,.5)"
-                  _dark={{
-                    bg: "rgba(255,255,255,.2)",
-                  }}
-                  rounded="md"
-                  p="2"
-                  lineHeight="1.2"
-                  fontSize="10px"
-                  fontFamily="Courier"
-                  whiteSpace="pre"
-                  overflow="auto"
-                  onClick={(e) => selectText(e.target as HTMLElement)}
-                >
-                  {nodeSettings.certificate}
-                </Text>
-              </Collapse>
-            </AlertDescription>
-          </Alert>
+              <Collapsible.Root open={showCertificate}>
+                <Collapsible.Content>
+                  <Text
+                    bg="whiteAlpha.500"
+                    _osDark={{ bg: "whiteAlpha.200" }}
+                    rounded="md"
+                    p={2}
+                    fontSize="10px"
+                    fontFamily="Courier"
+                    whiteSpace="pre"
+                    overflow="auto"
+                    lineHeight="1.2"
+                    onClick={(e) => selectAllText(e.currentTarget)}
+                  >
+                    {certificateData.certificate}
+                  </Text>
+                </Collapsible.Content>
+              </Collapsible.Root>
+            </Alert.Description>
+          </Alert.Root>
         )}
 
-        <HStack w="full">
-          <FormControl isInvalid={!!form.formState?.errors?.name}>
-            <FormLabel>{t("nodes.nodeName")}</FormLabel>
-            <Input
-              {...form.register("name")}
-              placeholder="Marzban-S2"
-            />
-          </FormControl>
-          <HStack px={1}>
-            <Controller
-              name="status"
-              control={form.control}
-              render={({ field }) => (
-                <Tooltip
-                  placement="top"
-                  label={
-                    `${t("usersTable.status")}: ` +
-                    (field.value !== "disabled" ? t("active") : t("disabled"))
-                  }
-                >
-                  <Box mt="6">
-                    <Switch
-                      colorScheme="primary"
-                      isChecked={field.value !== "disabled"}
-                      onChange={(e) => {
-                        field.onChange(e.target.checked ? "connecting" : "disabled");
-                      }}
-                    />
-                  </Box>
-                </Tooltip>
-              )}
-            />
-          </HStack>
+        {/* ---------------------------------------------------------------- Name & status */}
+        <HStack w="full" gap={3} wrap="wrap">
+          <Field.Root invalid={!!form.formState.errors.name} flex={1} minW="200px">
+            <Field.Label>{t("nodes.nodeName")}</Field.Label>
+            <Input placeholder="Marzban-S2" {...form.register("name")} />
+          </Field.Root>
+
+          <Controller
+            name="status"
+            control={form.control}
+            render={({ field }) => (
+              <Switch.Root
+                id="node-status-switch"
+                checked={field.value !== "disabled"}
+                onCheckedChange={(d) => field.onChange(d.checked ? "connecting" : "disabled")}
+                aria-label={t("nodes.statusToggle")}
+              >
+                <Switch.Control />
+              </Switch.Root>
+            )}
+          />
         </HStack>
 
-        <HStack w="full">
-          <FormControl isInvalid={!!form.formState?.errors?.address}>
-            <FormLabel>{t("nodes.nodeAddress")}</FormLabel>
-            <Input
-              {...form.register("address")}
-              placeholder="51.20.12.13"
-            />
-          </FormControl>
+        {/* ---------------------------------------------------------------- Address */}
+        <Field.Root invalid={!!form.formState.errors.address} w="full">
+          <Field.Label>{t("nodes.nodeAddress")}</Field.Label>
+          <Input placeholder="51.20.12.13" {...form.register("address")} />
+        </Field.Root>
+
+        {/* ---------------------------------------------------------------- Ports & coeff */}
+        <HStack w="full" gap={3} wrap="wrap">
+          <Field.Root invalid={!!form.formState.errors.port} flex={1} minW="120px">
+            <Field.Label>{t("nodes.nodePort")}</Field.Label>
+            <Input type="number" placeholder="62050" {...form.register("port", { valueAsNumber: true })} />
+          </Field.Root>
+          <Field.Root invalid={!!form.formState.errors.api_port} flex={1} minW="120px">
+            <Field.Label>{t("nodes.nodeAPIPort")}</Field.Label>
+            <Input type="number" placeholder="62051" {...form.register("api_port", { valueAsNumber: true })} />
+          </Field.Root>
+          <Field.Root invalid={!!form.formState.errors.usage_coefficient} flex={1} minW="140px">
+            <Field.Label>{t("nodes.usageCoefficient")}</Field.Label>
+            <Input type="number" placeholder="1" {...form.register("usage_coefficient", { valueAsNumber: true })} />
+          </Field.Root>
         </HStack>
 
-        <HStack w="full">
-          <FormControl isInvalid={!!form.formState?.errors?.port}>
-            <FormLabel>{t("nodes.nodePort")}</FormLabel>
-            <Input
-              {...form.register("port", { valueAsNumber: true })}
-              placeholder="62050"
-              type="number"
-            />
-          </FormControl>
-          <FormControl isInvalid={!!form.formState?.errors?.api_port}>
-            <FormLabel>{t("nodes.nodeAPIPort")}</FormLabel>
-            <Input
-              {...form.register("api_port", { valueAsNumber: true })}
-              placeholder="62051"
-              type="number"
-            />
-          </FormControl>
-          <FormControl isInvalid={!!form.formState?.errors?.usage_coefficient}>
-            <FormLabel>{t("nodes.usageCoefficient")}</FormLabel>
-            <Input
-              {...form.register("usage_coefficient", { valueAsNumber: true })}
-              placeholder="1"
-              type="number"
-            />
-          </FormControl>
-        </HStack>
-
-        <FormControl isInvalid={!!form.formState?.errors?.panel_client_cert}>
-          <FormLabel>{t("nodes.panelClientCert")}</FormLabel>
-          <HStack>
+        {/* ---------------------------------------------------------------- Client cert */}
+        <Field.Root invalid={!!form.formState.errors.panel_client_cert} w="full">
+          <Field.Label>{t("nodes.panelClientCert")}</Field.Label>
+          <HStack align="start" gap={2} wrap="wrap">
             <Textarea
-              {...form.register("panel_client_cert")}
               placeholder={t("nodes.pastePanelClientCert")}
               fontFamily="monospace"
               rows={7}
+              flex={1}
+              {...form.register("panel_client_cert")}
             />
-            <Tooltip
-              placement="top"
-              label={t(
-                !showClientCert
-                  ? "nodes.show-certificate"
-                  : "nodes.hide-certificate"
-              )}
-            >
-              <IconButton
-                aria-label={t(
-                  !showClientCert
-                    ? "nodes.show-certificate"
-                    : "nodes.hide-certificate"
-                )}
-                onClick={() => setShowClientCert(!showClientCert)}
-                colorScheme="whiteAlpha"
-                color="primary"
-                size="xs"
-              >
-                {!showClientCert ? (
-                  <EyeIcon width="15px" />
-                ) : (
-                  <EyeSlashIcon width="15px" />
-                )}
-              </IconButton>
-            </Tooltip>
+            <ToggleIconButton
+              label={t(showClientCert ? "nodes.hide-certificate" : "nodes.show-certificate")}
+              shown={showClientCert}
+              onToggle={() => setShowClientCert((v) => !v)}
+            />
           </HStack>
-        </FormControl>
+        </Field.Root>
 
-        <FormControl isInvalid={!!form.formState?.errors?.panel_client_key}>
-          <FormLabel>{t("nodes.panelClientKey")}</FormLabel>
-          <HStack>
+        {/* ---------------------------------------------------------------- Client key */}
+        <Field.Root invalid={!!form.formState.errors.panel_client_key} w="full">
+          <Field.Label>{t("nodes.panelClientKey")}</Field.Label>
+          <HStack align="start" gap={2} wrap="wrap">
             <Textarea
-              {...form.register("panel_client_key")}
               placeholder={t("nodes.pastePanelClientKey")}
               fontFamily="monospace"
               rows={7}
+              flex={1}
+              {...form.register("panel_client_key")}
             />
-            <Tooltip
-              placement="top"
-              label={t(
-                !showClientKey
-                  ? "nodes.show-certificate"
-                  : "nodes.hide-certificate"
-              )}
-            >
-              <IconButton
-                aria-label={t(
-                  !showClientKey
-                    ? "nodes.show-certificate"
-                    : "nodes.hide-certificate"
-                )}
-                onClick={() => setShowClientKey(!showClientKey)}
-                colorScheme="whiteAlpha"
-                color="primary"
-                size="xs"
-              >
-                {!showClientKey ? (
-                  <EyeIcon width="15px" />
-                ) : (
-                  <EyeSlashIcon width="15px" />
-                )}
-              </IconButton>
-            </Tooltip>
+            <ToggleIconButton
+              label={t(showClientKey ? "nodes.hide-certificate" : "nodes.show-certificate")}
+              shown={showClientKey}
+              onToggle={() => setShowClientKey((v) => !v)}
+            />
           </HStack>
-        </FormControl>
+        </Field.Root>
 
-        <Button
-          type="submit"
-          colorScheme="primary"
-          size="sm"
-          px={5}
-          w="full"
-          isLoading={form.formState.isSubmitting}
-        >
+        {/* ---------------------------------------------------------------- Submit */}
+        <Button type="submit" colorPalette="primary" loading={form.formState.isSubmitting} w="full">
           {submitText}
         </Button>
       </VStack>

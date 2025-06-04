@@ -1,82 +1,148 @@
+/**
+ * Unified Vite configuration for both admin and client portals
+ * Supports single build with dynamic routing and optimized development experience
+ */
+
 import react from "@vitejs/plugin-react";
-import { defineConfig, splitVendorChunkPlugin, type Plugin } from "vite"; // Make sure to import 'Plugin' type
+import { defineConfig, splitVendorChunkPlugin, type Plugin } from "vite";
 import svgr from "vite-plugin-svgr";
 import { visualizer } from "rollup-plugin-visualizer";
-import tsconfigPaths from "vite-tsconfig-paths";
 import { loadEnv } from 'vite';
 import type { ConfigEnv } from 'vite';
 
-// Define the custom plugin to fix the admin root serving in dev mode
-function devServerAdminRootFix(): Plugin {
+// Custom plugin for dev server routing
+function devServerRoutingFix(): Plugin {
   return {
-    name: 'dev-server-admin-root-fix',
+    name: 'dev-server-routing-fix',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        // If the request is for the bare '/admin/' path,
-        // rewrite it to '/admin/admin.html' to serve the correct entry file.
-        if (req.url === '/admin/') {
-          req.url = '/admin/admin.html';
+        const url = req.url || '';
+        
+        // Handle admin routes
+        if (url.startsWith('/admin') && !url.includes('.') && !url.startsWith('/api')) {
+          req.url = '/admin.html';
         }
+        // Handle client routes (spa fallback)
+        else if (!url.startsWith('/api') && !url.includes('.') && !url.startsWith('/admin')) {
+          req.url = '/index.html';
+        }
+        
         next();
       });
     }
   };
 }
 
-// https://vitejs.dev/config/
-export default defineConfig(({ mode }: ConfigEnv) => {
+export default defineConfig(async ({ mode }: ConfigEnv) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const isDev = mode === 'development' || mode === 'admin' || mode === 'portal';
-
+  const isDev = mode === 'development';
+  
+  // Determine build target from mode
   const isAdminBuild = mode === 'admin';
-  const base = isAdminBuild ? '/admin/' : '/';
-  const outDir = isAdminBuild ? 'dist_admin' : 'dist_portal';
+  const isClientBuild = mode === 'portal' || mode === 'client';
+  const isUnifiedBuild = !isAdminBuild && !isClientBuild; // Default unified build
+
+  // Build configuration
+  const getOutDir = () => {
+    if (isAdminBuild) return 'dist_admin';
+    if (isClientBuild) return 'dist_portal';
+    return 'dist'; // Unified build
+  };
+
+  const getBase = () => {
+    if (isAdminBuild) return '/admin/';
+    return '/';
+  };
 
   const apiBaseUrl = isDev
     ? `http://${env.VITE_API_TARGET_HOST || 'marzban-panel'}:${env.UVICORN_PORT || 8000}`
     : '';
   const proxyTarget = apiBaseUrl || 'http://marzban-panel:8000';
-  const apiBasePath = env.VITE_BASE_API || '/api';
 
-  // Initialize plugins array
-  const pluginsToUse: Plugin[] = [
-    tsconfigPaths(),
-    react({
-      include: "**/*.tsx",
+  // Dynamic import of ESM-only module
+  const { default: tsconfigPaths } = await import('vite-tsconfig-paths');
+
+  // Plugins configuration
+  const plugins: Plugin[] = [
+    tsconfigPaths({
+      projects: ['./tsconfig.json']
     }),
-    svgr(),
-    visualizer(),
+    react({
+      include: "**/*.{jsx,tsx}",
+    }),
+    svgr({
+      include: "**/*.svg?react",
+    }),
     splitVendorChunkPlugin(),
   ];
 
-  // Conditionally add the dev server fix plugin only for admin mode
-  if (isAdminBuild) {
-    pluginsToUse.push(devServerAdminRootFix());
+  if (isDev) {
+    plugins.push(devServerRoutingFix());
   }
 
+  if (!isDev) {
+    plugins.push(visualizer({
+      filename: 'dist/stats.html',
+      open: false
+    }));
+  }
+
+  // Build options
+  const getBuildConfig = () => {
+    if (isUnifiedBuild) {
+      // Unified build with multiple entry points
+      return {
+        rollupOptions: {
+          input: {
+            main: 'index.html',
+            admin: 'admin.html'
+          },
+          output: {
+            manualChunks: {
+              vendor: ['react', 'react-dom'],
+              chakra: ['@chakra-ui/react'],
+              router: ['react-router-dom'],
+              query: ['@tanstack/react-query'],
+            },
+            assetFileNames: 'assets/[name].[hash][extname]',
+            chunkFileNames: 'assets/[name].[hash].js',
+            entryFileNames: 'assets/[name].[hash].js'
+          }
+        }
+      };
+    } else {
+      // Separate builds
+      return {
+        rollupOptions: {
+          input: isAdminBuild ? 'admin.html' : 'index.html',
+          output: {
+            assetFileNames: 'statics/[name].[hash][extname]',
+            chunkFileNames: 'statics/[name].[hash].js',
+            entryFileNames: 'statics/[name].[hash].js'
+          }
+        }
+      };
+    }
+  };
+
   return {
-    plugins: pluginsToUse, // Use the constructed plugins array
-    base: base,
+    plugins,
+    base: getBase(),
+    resolve: {
+      alias: {
+        '@': '/src',
+        '@shared': '/src/shared',
+        '@admin': '/src/apps/admin',
+        '@client': '/src/apps/client',
+      }
+    },
     build: {
-      outDir: outDir,
-      assetsDir: 'statics',
+      outDir: getOutDir(),
+      assetsDir: isUnifiedBuild ? 'assets' : 'statics',
       minify: !isDev,
       sourcemap: isDev,
-      rollupOptions: {
-        input: isAdminBuild ? {
-          main: 'admin.html',
-          admin: 'src/admin.tsx'
-        } : {
-          main: 'index.html',
-          portal: 'src/main.portal.tsx'
-        },
-        output: {
-          manualChunks: undefined,
-          assetFileNames: 'statics/[name].[hash][extname]',
-          chunkFileNames: 'statics/[name].[hash].js',
-          entryFileNames: 'statics/[name].[hash].js'
-        }
-      }
+      target: 'es2020',
+      ...getBuildConfig(),
     },
     server: {
       port: isAdminBuild ? 3000 : 3001,
@@ -88,37 +154,33 @@ export default defineConfig(({ mode }: ConfigEnv) => {
           changeOrigin: true,
           secure: false,
           ws: true,
-          rewrite: (path) => {
-            console.log(`[DEBUG] Admin API path: ${path}`);
-            return path;
-          }
         },
         '/api/portal': {
           target: proxyTarget,
           changeOrigin: true,
           secure: false,
           ws: true,
-          rewrite: (path) => {
-            console.log(`[DEBUG] Portal API path: ${path}`);
-            return path;
-          }
         },
         '/sub': {
           target: proxyTarget,
           changeOrigin: true,
           secure: false,
           ws: true,
-          rewrite: (path) => {
-            const rewritten = path.replace(/^\/sub/, '');
-            console.log(`[DEBUG] Rewriting sub path: ${path} -> ${rewritten}`);
-            return rewritten;
-          }
         }
       }
     },
-    logLevel: 'info',
-    hmr: {
-      overlay: false
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        '@chakra-ui/react',
+        'react-router-dom',
+        '@tanstack/react-query',
+      ]
+    },
+    define: {
+      __APP_MODE__: JSON.stringify(mode),
+      __IS_DEV__: isDev,
     }
   };
 });

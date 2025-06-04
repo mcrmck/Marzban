@@ -1,8 +1,6 @@
-import { joinPaths } from "@remix-run/router";
-
-import fa from "date-fns/locale/fa-IR";
-import ru from "date-fns/locale/ru";
-import zh from "date-fns/locale/zh-CN";
+import { faIR } from "date-fns/locale/fa-IR";
+import { ru } from "date-fns/locale/ru";
+import { zhCN } from "date-fns/locale/zh-CN";
 import dayjs from "dayjs";
 import i18n from "i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
@@ -36,13 +34,10 @@ i18n
                 caches: ["localStorage", "sessionStorage", "cookie"],
             },
             backend: {
-                loadPath: joinPaths([
-                    import.meta.env.BASE_URL,
-                    `statics/locales/{{lng}}.json`,
-                ]),
+                loadPath: `${import.meta.env.BASE_URL}statics/locales/{{lng}}.json`,
             },
         },
-        function (err, t) {
+        function () {
             dayjs.locale(i18n.language);
         }
     );
@@ -52,8 +47,8 @@ i18n.on("languageChanged", (lng) => {
 });
 
 // DataPicker
-registerLocale("zh-cn", zh);
+registerLocale("zh-cn", zhCN);
 registerLocale("ru", ru);
-registerLocale("fa", fa);
+registerLocale("fa", faIR);
 
 export default i18n;

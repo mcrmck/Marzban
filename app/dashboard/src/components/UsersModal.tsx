@@ -2,7 +2,7 @@ import React, { FC } from 'react';
 import { Box, Button, VStack } from '@chakra-ui/react';
 import { NodeSelection } from './NodeSelection';
 import { useTranslation } from 'react-i18next';
-import { useDashboard } from '../contexts/DashboardContext';
+import { useDashboard } from '../lib/stores/DashboardContext';
 // Assuming User type might be needed if editingUser was more deeply used here,
 // but for now, it's correctly inferred from useDashboard.
 // import { User } from "types/User";
@@ -26,12 +26,12 @@ const UserForm: FC<UserFormType> = ({
   btnProps,
   btnLeftAdornment,
 }) => {
-  const { t } = useTranslation();
+  const { } = useTranslation();
   const { editingUser } = useDashboard(); // editingUser is of type User | null | undefined
 
   return (
     <form onSubmit={form.handleSubmit((data: any) => mutate(data))}>
-      <VStack spacing={4} align="stretch">
+      <VStack gap={4} align="stretch">
         {/* ... existing form fields ... */}
 
         {editingUser && (
@@ -46,7 +46,7 @@ const UserForm: FC<UserFormType> = ({
         <Button
           type="submit"
           colorScheme="blue" // Assuming blue, adjust if needed
-          isLoading={isLoading}
+          loading={isLoading}
           {...btnProps}
         >
           {btnLeftAdornment}

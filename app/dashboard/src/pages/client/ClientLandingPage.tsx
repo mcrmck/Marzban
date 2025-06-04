@@ -1,101 +1,124 @@
-import {
-  Box,
-  Button,
-  Container,
-  Flex,
-  Heading,
-  Stack,
-  Text,
-  useColorModeValue,
-  VStack,
-  HStack,
-  Icon,
-} from "@chakra-ui/react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaShieldAlt, FaGlobe, FaLock } from "react-icons/fa";
+import {
+    Box,
+    Button,
+    Container,
+    Heading,
+    Text,
+    VStack,
+    SimpleGrid,
+    Icon,
+    Spinner,
+} from "@chakra-ui/react";
+import { FaServer, FaCreditCard, FaUser } from "react-icons/fa";
+import { useClientPortalStore } from "../../lib/stores";
+import { toaster } from "@/components/ui/toaster";
 
-const Feature = ({ icon, title, text }: { icon: any; title: string; text: string }) => {
-  return (
-    <Stack spacing={4} align="center" textAlign="center">
-      <Flex
-        w={16}
-        h={16}
-        align="center"
-        justify="center"
-        color="white"
-        rounded="full"
-        bg="brand.500"
-        mb={1}
-      >
-        <Icon as={icon} w={8} h={8} />
-      </Flex>
-      <Text fontWeight={600}>{title}</Text>
-      <Text color={useColorModeValue("gray.600", "gray.400")}>{text}</Text>
-    </Stack>
-  );
-};
+const FeatureCard = ({ icon, title, description, onClick }: {
+    icon: any;
+    title: string;
+    description: string;
+    onClick: () => void;
+}) => (
+    <Box
+        p={6}
+        borderWidth="1px"
+        borderRadius="lg"
+        bg="white"
+        shadow="sm"
+        _hover={{ shadow: "md" }}
+        cursor="pointer"
+        onClick={onClick}
+    >
+        <VStack align="start" gap={4}>
+            <Icon as={icon} w={8} h={8} color="blue.500" />
+            <Heading size="md">{title}</Heading>
+            <Text color="gray.600">{description}</Text>
+        </VStack>
+    </Box>
+);
 
 export const ClientLandingPage = () => {
-  const navigate = useNavigate();
-  const textColor = useColorModeValue("gray.600", "gray.400");
+    const navigate = useNavigate();
+    const { clientDetails, fetchClientDetails, isLoadingDetails } = useClientPortalStore();
 
-  return (
-    <Box>
-      {/* Hero Section */}
-      <Box pt={24} pb={20}>
-        <Container maxW="container.xl">
-          <Stack spacing={8} align="center" textAlign="center">
-            <Heading
-              fontSize={{ base: "3xl", md: "4xl", lg: "5xl" }}
-              bgGradient="linear(to-r, brand.400, brand.600)"
-              bgClip="text"
-            >
-              Secure, Fast, and Private VPN Service
-            </Heading>
-            <Text fontSize="xl" color={textColor} maxW="2xl">
-              Experience unrestricted internet access with our premium VPN service.
-              Protect your privacy and bypass geo-restrictions with ease.
-            </Text>
-            <Button
-              size="lg"
-              colorScheme="brand"
-              onClick={() => navigate("/plans")}
-            >
-              View Plans
-            </Button>
-          </Stack>
-        </Container>
-      </Box>
+    useEffect(() => {
+        fetchClientDetails().catch(() => {
+            toaster.create({
+                title: "Error",
+                description: "Failed to fetch account details. Please try again.",
+                type: "error",
+                duration: 5000,
+                closable: true,
+            });
+        });
+    }, [fetchClientDetails]);
 
-      {/* Features Section */}
-      <Box py={20} bg={useColorModeValue("gray.50", "gray.900")}>
-        <Container maxW="container.xl">
-          <VStack spacing={12}>
-            <Heading textAlign="center">Why Choose Our VPN?</Heading>
-            <Stack
-              direction={{ base: "column", md: "row" }}
-              spacing={10}
-              align="center"
-            >
-              <Feature
-                icon={FaShieldAlt}
-                title="Strong Security"
-                text="Military-grade encryption to keep your data safe and secure"
-              />
-              <Feature
-                icon={FaGlobe}
-                title="Global Access"
-                text="Access content from anywhere with our worldwide server network"
-              />
-              <Feature
-                icon={FaLock}
-                title="Privacy First"
-                text="No logs policy ensures your online activities remain private"
-              />
-            </Stack>
-          </VStack>
+    if (isLoadingDetails) {
+        return (
+            <Container centerContent py={10}>
+                <Spinner size="xl" />
+            </Container>
+        );
+    }
+
+    return (
+        <Container maxW="container.xl" py={10}>
+            <VStack gap={8} align="stretch">
+                <Box>
+                    <Heading size="xl">Welcome, {clientDetails?.user.username}</Heading>
+                    <Text color="gray.600" mt={2}>
+                        Manage your services and account settings
+                    </Text>
+                </Box>
+
+                <SimpleGrid columns={{ base: 1, md: 3 }} gap={6}>
+                    <FeatureCard
+                        icon={FaServer}
+                        title="Servers"
+                        description="View and manage your server configurations"
+                        onClick={() => navigate("/servers")}
+                    />
+                    <FeatureCard
+                        icon={FaCreditCard}
+                        title="Plans"
+                        description="Browse and subscribe to available plans"
+                        onClick={() => navigate("/plans")}
+                    />
+                    <FeatureCard
+                        icon={FaUser}
+                        title="Account"
+                        description="View and update your account information"
+                        onClick={() => navigate("/account")}
+                    />
+                </SimpleGrid>
+
+                {clientDetails?.user.status === "inactive" && (
+                    <Box
+                        p={6}
+                        borderWidth="1px"
+                        borderRadius="lg"
+                        bg="yellow.50"
+                        borderColor="yellow.200"
+                    >
+                        <VStack align="start" gap={4}>
+                            <Heading size="md" color="yellow.700">
+                                Account Inactive
+                            </Heading>
+                            <Text color="yellow.700">
+                                Your account is currently inactive. Please subscribe to a plan to activate your account.
+                            </Text>
+                            <Button
+                                colorScheme="yellow"
+                                onClick={() => navigate("/plans")}
+                            >
+                                View Plans
+                            </Button>
+                        </VStack>
+                    </Box>
+                )}
+            </VStack>
         </Container>
-      </Box>
-    </Box>
-  );
+    );
 };

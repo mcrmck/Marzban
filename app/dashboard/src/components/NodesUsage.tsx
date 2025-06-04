@@ -1,114 +1,133 @@
+// components/NodesUsage.tsx
 import {
   Box,
-  CircularProgress,
+  Dialog,            // ← new Modal replacement
   HStack,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
-  Text,
   VStack,
+  Text,
+  IconButton,
+  Spinner,             // ← CircularProgress → Spinner
   chakra,
-  useColorMode,
+  Icon,
 } from "@chakra-ui/react";
-import { ChartPieIcon } from "@heroicons/react/24/outline";
-import { FilterUsageType, useDashboard } from "contexts/DashboardContext";
-import { useNodes } from "contexts/NodesContext";
-import dayjs from "dayjs";
+import { useTheme }            from "next-themes";   // ← useColorMode is gone
+import { ChartPieIcon }        from "@heroicons/react/24/outline";
+import { FilterUsageType, useDashboard } from "../lib/stores/DashboardContext";
+import { useNodes }            from "../lib/stores/NodesContext";
+import dayjs                   from "dayjs";
 import { FC, Suspense, useEffect, useState } from "react";
-import ReactApexChart from "react-apexcharts";
-import { useTranslation } from "react-i18next";
-import { Icon } from "./Icon";
+import ReactApexChart          from "react-apexcharts";
+import { useTranslation }      from "react-i18next";
 import { UsageFilter, createUsageConfig } from "./UsageFilter";
 
-const UsageIcon = chakra(ChartPieIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
+/* ---------------- icon wrapper (chakra v3 pattern) ----------- */
+const StatusIcon = chakra(ChartPieIcon);
 
-export type NodesUsageProps = {};
-
-export const NodesUsage: FC<NodesUsageProps> = () => {
-  const { isShowingNodesUsage, onShowingNodesUsage } = useDashboard();
-  const { fetchNodesUsage } = useNodes();
+/* --------------------------------------------------------------------- */
+export const NodesUsage: FC = () => {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(false);
-  const { colorMode } = useColorMode();
 
-  const usageTitle = t("userDialog.total");
-  const [usage, setUsage] = useState(createUsageConfig(colorMode, usageTitle));
-  const [usageFilter, setUsageFilter] = useState("1m");
-  const fetchUsageWithFilter = (query: FilterUsageType) => {
-    fetchNodesUsage(query).then((data: any) => {
-      const labels = [];
-      const series = [];
-      for (const key in data.usages) {
-        const entry = data.usages[key];
-        series.push(entry.uplink + entry.downlink);
-        labels.push(entry.node_name);
-      }
-      setUsage(createUsageConfig(colorMode, usageTitle, series, labels));
-    });
+  /* ---------- Chakra v3: Dialog instead of Modal -------------------- */
+  const { isShowingNodesUsage, onShowingNodesUsage } = useDashboard();
+  const closeDialog = () => {
+    onShowingNodesUsage(false);
+    setCurrentFilter("1m");
   };
 
+  /* ---------- color mode comes from next-themes --------------------- */
+  const { theme } = useTheme();
+  const colorMode = theme === "dark" ? "dark" : "light";
+
+  /* ---------- usage data / chart state ------------------------------ */
+  const { fetchNodesUsage } = useNodes();
+  const title = t("userDialog.total");
+
+  const [chart, setChart] = useState(createUsageConfig(title));
+  const [currentFilter, setCurrentFilter] = useState<"1m" | "3m" | "6m">("1m");
+  const [fetching, setFetching] = useState(false);
+
+  const loadUsage = async (query: FilterUsageType) => {
+    setFetching(true);
+    try {
+      const data = await fetchNodesUsage(query);
+
+      const series = Object.values(data.usages).map(
+        (u: any) => u.uplink + u.downlink
+      );
+      const labels = Object.values(data.usages).map(
+        (u: any) => u.node_name
+      );
+
+      setChart(createUsageConfig(title, series, labels));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  /* initial fetch when dialog opens */
   useEffect(() => {
     if (isShowingNodesUsage) {
-      fetchUsageWithFilter({
+      loadUsage({
         start: dayjs().utc().subtract(30, "day").format("YYYY-MM-DDTHH:00:00"),
       });
     }
   }, [isShowingNodesUsage]);
 
-  const onClose = () => {
-    onShowingNodesUsage(false);
-    setUsageFilter("1m");
-  };
-
-  const disabled = loading;
-
+  /* ------------------------------- UI ------------------------------- */
   return (
-    <Modal isOpen={isShowingNodesUsage} onClose={onClose} size="2xl">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3" w="full">
-        <ModalHeader pt={6}>
+    <Dialog.Root open={isShowingNodesUsage} onOpenChange={closeDialog}>
+      <Dialog.Backdrop bg="blackAlpha.300" backdropFilter="blur(10px)" />
+      <Dialog.Content mx="3" w="full" maxW="2xl">
+        <Dialog.Header pt={6}>
           <HStack gap={2}>
             <Icon color="primary">
-              <UsageIcon color="white" />
+              <StatusIcon w={5} h={5} color="white" />
             </Icon>
             <Text fontWeight="semibold" fontSize="lg">
               {t("header.nodesUsage")}
             </Text>
           </HStack>
-        </ModalHeader>
-        <ModalCloseButton mt={3} disabled={disabled} />
-        <ModalBody>
+        </Dialog.Header>
+
+        {/* Dialog.CloseTrigger replaces ModalCloseButton */}
+        <Dialog.CloseTrigger asChild>
+          <IconButton
+            aria-label="close"
+            size="sm"
+            variant="ghost"
+            pos="absolute"
+            top="3"
+            right="3"
+            disabled={fetching}
+          >
+            <span>&times;</span>
+          </IconButton>
+        </Dialog.CloseTrigger>
+
+        <Dialog.Body>
           <VStack gap={4}>
             <UsageFilter
-              defaultValue={usageFilter}
-              onChange={(filter, query) => {
-                setUsageFilter(filter);
-                fetchUsageWithFilter(query);
+              defaultValue={currentFilter}
+              onChange={(flt, q) => {
+                setCurrentFilter(flt as any);
+                loadUsage(q);
               }}
             />
-            <Box justifySelf="center" w="full" maxW="300px" mt="4">
-              <Suspense fallback={<CircularProgress isIndeterminate />}>
+            <Box w="full" maxW="300px" mt={4}>
+              <Suspense fallback={<Spinner />}>
                 <ReactApexChart
-                  options={usage.options}
-                  series={usage.series}
+                  options={chart.options}
+                  series={chart.series}
                   type="donut"
-                  height="500px"
+                  height={500}
                 />
               </Suspense>
             </Box>
           </VStack>
-        </ModalBody>
-        <ModalFooter mt="3"></ModalFooter>
-      </ModalContent>
-    </Modal>
+        </Dialog.Body>
+
+        <Dialog.Footer />
+      </Dialog.Content>
+    </Dialog.Root>
   );
 };

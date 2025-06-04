@@ -1,21 +1,23 @@
+/* --------------------------------------------------------------------
+ * NodesTable.tsx – Chakra UI v3 compliant
+ * ------------------------------------------------------------------ */
+
 import {
   Box,
   Button,
   HStack,
   IconButton,
   Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-  useDisclosure,
   VStack,
+  useDisclosure,
 } from "@chakra-ui/react";
-import { EditIcon, DeleteIcon } from "@chakra-ui/icons";
+import {
+  PencilIcon as HeroEditIcon,
+  TrashIcon as HeroDeleteIcon,
+} from "@heroicons/react/24/outline";
 import { FC, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNodes, useNodesQuery, NodeType } from "contexts/NodesContext";
+import { useNodes, useNodesQuery, NodeType } from "../lib/stores/NodesContext";
 import { NodeModalStatusBadge } from "./NodeModalStatusBadge";
 import { EditNodeDialog } from "./EditNodeDialog";
 import { DeleteNodeModal } from "./DeleteNodeModal";
@@ -23,9 +25,10 @@ import { ReloadIcon } from "./Filters";
 
 export const NodesTable: FC = () => {
   const { t } = useTranslation();
-  const { data: nodes, isLoading } = useNodesQuery();
+  const { data: nodes } = useNodesQuery();
   const { setDeletingNode, reconnectNode } = useNodes();
-  const { isOpen, onOpen, onClose } = useDisclosure();
+
+  const { open, onOpen, onClose } = useDisclosure();
   const [selectedNode, setSelectedNode] = useState<NodeType | null>(null);
 
   const handleEdit = (node: NodeType) => {
@@ -33,21 +36,18 @@ export const NodesTable: FC = () => {
     onOpen();
   };
 
-  const handleDelete = (node: NodeType) => {
-    setDeletingNode(node);
-  };
+  const handleDelete = (node: NodeType) => setDeletingNode(node);
 
-  const handleReconnect = (node: NodeType) => {
-    reconnectNode(node);
-  };
+  const handleReconnect = (node: NodeType) => reconnectNode(node);
 
   return (
     <Box>
-      <VStack spacing={4} align="stretch">
-        <HStack justifyContent="flex-end">
+      <VStack gap={4} align="stretch">
+        {/* ── Add-node button ─────────────────────────────────────────── */}
+        <HStack justify="flex-end">
           <Button
-            colorScheme="primary"
             size="sm"
+            colorPalette="primary"
             onClick={() => {
               setSelectedNode(null);
               onOpen();
@@ -57,61 +57,68 @@ export const NodesTable: FC = () => {
           </Button>
         </HStack>
 
-        <Table variant="simple">
-          <Thead>
-            <Tr>
-              <Th>{t("nodes.nodeName")}</Th>
-              <Th>{t("nodes.nodeAddress")}</Th>
-              <Th>{t("nodes.status")}</Th>
-              <Th>{t("nodes.xrayVersion")}</Th>
-              <Th>{t("nodes.actions")}</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
+        {/* ── Nodes table ─────────────────────────────────────────────── */}
+        <Table.Root variant="line" size="sm" striped stickyHeader>
+          <Table.Header>
+            <Table.Row>
+              <Table.ColumnHeader>{t("nodes.nodeName")}</Table.ColumnHeader>
+              <Table.ColumnHeader>{t("nodes.nodeAddress")}</Table.ColumnHeader>
+              <Table.ColumnHeader>{t("nodes.status")}</Table.ColumnHeader>
+              <Table.ColumnHeader>{t("nodes.xrayVersion")}</Table.ColumnHeader>
+              <Table.ColumnHeader>{t("nodes.actions")}</Table.ColumnHeader>
+            </Table.Row>
+          </Table.Header>
+
+          <Table.Body>
             {nodes?.map((node) => (
-              <Tr key={node.id}>
-                <Td>{node.name}</Td>
-                <Td>{node.address}</Td>
-                <Td>
+              <Table.Row key={node.id}>
+                <Table.Cell>{node.name}</Table.Cell>
+                <Table.Cell>{node.address}</Table.Cell>
+                <Table.Cell>
                   <NodeModalStatusBadge status={node.status || "connecting"} />
-                </Td>
-                <Td>{node.xray_version || "-"}</Td>
-                <Td>
-                  <HStack spacing={2}>
+                </Table.Cell>
+                <Table.Cell>{node.xray_version || "-"}</Table.Cell>
+                <Table.Cell>
+                  <HStack gap={1}>
+                    {/* Edit */}
                     <IconButton
-                      aria-label="edit node"
-                      icon={<EditIcon />}
+                      aria-label={t("edit")}
                       size="sm"
                       onClick={() => handleEdit(node)}
-                    />
+                    >
+                      <HeroEditIcon className="h-4 w-4" />
+                    </IconButton>
+
+                    {/* Delete */}
                     <IconButton
-                      aria-label="delete node"
-                      icon={<DeleteIcon />}
+                      aria-label={t("delete")}
                       size="sm"
-                      colorScheme="red"
+                      colorPalette="red"
                       onClick={() => handleDelete(node)}
-                    />
+                    >
+                      <HeroDeleteIcon className="h-4 w-4" />
+                    </IconButton>
+
+                    {/* Re-connect (only on error) */}
                     {node.status === "error" && (
                       <IconButton
-                        aria-label="reconnect node"
-                        icon={<ReloadIcon />}
+                        aria-label={t("nodes.reconnect")}
                         size="sm"
                         onClick={() => handleReconnect(node)}
-                      />
+                      >
+                        <ReloadIcon />
+                      </IconButton>
                     )}
                   </HStack>
-                </Td>
-              </Tr>
+                </Table.Cell>
+              </Table.Row>
             ))}
-          </Tbody>
-        </Table>
+          </Table.Body>
+        </Table.Root>
       </VStack>
 
-      <EditNodeDialog
-        isOpen={isOpen}
-        onClose={onClose}
-        node={selectedNode}
-      />
+      {/* ── Dialogs ──────────────────────────────────────────────────── */}
+      <EditNodeDialog open={open} onClose={onClose} node={selectedNode} />
       <DeleteNodeModal />
     </Box>
   );

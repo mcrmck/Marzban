@@ -25,7 +25,6 @@ develop-eggs/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -186,3 +185,4 @@ certs/
 *.env.node1
 *.csr
 *.srl
+.claude/

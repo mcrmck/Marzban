@@ -1,250 +1,54 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
     Box,
     Button,
     Container,
-    Grid,
     Heading,
     Text,
     VStack,
-    HStack,
-    Badge,
-    Divider,
-    useToast,
     Spinner,
-    Card,
-    CardBody,
-    CardHeader,
-    Stat,
-    StatLabel,
-    StatNumber,
-    StatHelpText,
-    IconButton,
-    useClipboard,
+    Alert
 } from "@chakra-ui/react";
-import { useClientPortalStore } from "../../store/clientPortalStore";
-import { QRCodeSVG } from "qrcode.react";
-import type { ClientPortalUser, ClientNode } from "../../types/clientPortal";
-import { CheckIcon, ClipboardIcon } from "@heroicons/react/24/outline";
-import { chakra } from "@chakra-ui/react";
-import { formatBytes } from "../../utils/formatByte";
-import { formatDate } from "../../utils/dateFormatter";
-
-const CopyIcon = chakra(ClipboardIcon, {
-    baseStyle: {
-        w: 4,
-        h: 4,
-    },
-});
-
-const AccountContent = ({ user, active_node, available_nodes = [] }: {
-    user: ClientPortalUser;
-    active_node?: ClientNode | null;
-    available_nodes: ClientNode[];
-}) => {
-    const navigate = useNavigate();
-    const toast = useToast();
-    const { logout } = useClientPortalStore();
-    const { hasCopied, onCopy } = useClipboard(user.account_number);
-
-    const handleLogout = () => {
-        logout();
-        navigate("/portal/login");
-    };
-
-    const handleCopyAccountNumber = () => {
-        onCopy();
-        toast({
-            title: "Copied!",
-            description: "Account number copied to clipboard",
-            status: "success",
-            duration: 2000,
-            isClosable: true,
-        });
-    };
-
-    return (
-        <Container maxW="container.xl" py={10}>
-            <VStack spacing={8} align="stretch">
-                <HStack justify="space-between">
-                    <Box>
-                        <Heading size="xl">Account Dashboard</Heading>
-                        <Text color="gray.600">Welcome back!</Text>
-                    </Box>
-                    <Button colorScheme="red" onClick={handleLogout}>
-                        Logout
-                    </Button>
-                </HStack>
-
-                <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6}>
-                    {/* Account Info Card */}
-                    <Card>
-                        <CardHeader>
-                            <Heading size="md">Account Information</Heading>
-                        </CardHeader>
-                        <CardBody>
-                            <VStack spacing={4} align="stretch">
-                                <Stat>
-                                    <StatLabel>Account Number</StatLabel>
-                                    <HStack>
-                                        <StatNumber fontSize="md" fontFamily="mono">
-                                            {user.account_number}
-                                        </StatNumber>
-                                        <IconButton
-                                            aria-label="Copy account number"
-                                            icon={hasCopied ? <CheckIcon /> : <CopyIcon />}
-                                            onClick={handleCopyAccountNumber}
-                                            size="sm"
-                                            colorScheme={hasCopied ? "green" : "gray"}
-                                        />
-                                    </HStack>
-                                    <StatHelpText>Use this number to log in</StatHelpText>
-                                </Stat>
-                                <Stat>
-                                    <StatLabel>Status</StatLabel>
-                                    <StatNumber>
-                                        <Badge
-                                            colorScheme={user.status === "active" ? "green" : "red"}
-                                            fontSize="md"
-                                        >
-                                            {user.status}
-                                        </Badge>
-                                    </StatNumber>
-                                </Stat>
-                                <Stat>
-                                    <StatLabel>Data Limit</StatLabel>
-                                    <StatNumber>
-                                        {user.data_limit ? formatBytes(user.data_limit) : "Unlimited"}
-                                    </StatNumber>
-                                </Stat>
-                                <Stat>
-                                    <StatLabel>Expiry Date</StatLabel>
-                                    <StatNumber>
-                                        {user.expire ? formatDate(Number(user.expire)) : "Never"}
-                                    </StatNumber>
-                                </Stat>
-                            </VStack>
-                        </CardBody>
-                    </Card>
-
-                    {/* Active Node Card */}
-                    <Card>
-                        <CardHeader>
-                            <Heading size="md">Active Node</Heading>
-                        </CardHeader>
-                        <CardBody>
-                            {active_node ? (
-                                <VStack spacing={4} align="stretch">
-                                    <Text fontWeight="bold">{active_node.name}</Text>
-                                    <Text>{active_node.address}</Text>
-                                    <Text color="gray.600">{active_node.location}</Text>
-                                </VStack>
-                            ) : (
-                                <Text color="gray.500">No active node selected</Text>
-                            )}
-                        </CardBody>
-                    </Card>
-                </Grid>
-
-                {/* Subscription Link and QR Codes */}
-                <Card>
-                    <CardHeader>
-                        <Heading size="md">Connection Details</Heading>
-                    </CardHeader>
-                    <CardBody>
-                        <VStack spacing={6}>
-                            <Box width="full">
-                                <Text fontWeight="bold" mb={2}>Subscription Link</Text>
-                                <Text
-                                    p={2}
-                                    bg="gray.50"
-                                    borderRadius="md"
-                                    fontFamily="mono"
-                                    fontSize="sm"
-                                >
-                                    {user.sub_link}
-                                </Text>
-                            </Box>
-
-                            {user.qr_code_url_list?.length > 0 && (
-                                <>
-                                    <Divider />
-                                    <Box>
-                                        <Text fontWeight="bold" mb={4}>QR Codes</Text>
-                                        <Grid
-                                            templateColumns={{
-                                                base: "1fr",
-                                                md: "repeat(2, 1fr)",
-                                                lg: "repeat(3, 1fr)",
-                                            }}
-                                            gap={4}
-                                        >
-                                            {user.qr_code_url_list.map((url: string, index: number) => (
-                                                <Box
-                                                    key={index}
-                                                    p={4}
-                                                    borderWidth="1px"
-                                                    borderRadius="md"
-                                                    textAlign="center"
-                                                >
-                                                    <QRCodeSVG value={url} size={200} />
-                                                </Box>
-                                            ))}
-                                        </Grid>
-                                    </Box>
-                                </>
-                            )}
-                        </VStack>
-                    </CardBody>
-                </Card>
-
-                {/* Available Nodes */}
-                {available_nodes.length > 0 && (
-                    <Card>
-                        <CardHeader>
-                            <Heading size="md">Available Nodes</Heading>
-                        </CardHeader>
-                        <CardBody>
-                            <Grid
-                                templateColumns={{
-                                    base: "1fr",
-                                    md: "repeat(2, 1fr)",
-                                    lg: "repeat(3, 1fr)",
-                                }}
-                                gap={4}
-                            >
-                                {available_nodes.map((node: ClientNode) => (
-                                    <Box
-                                        key={node.id}
-                                        p={4}
-                                        borderWidth="1px"
-                                        borderRadius="md"
-                                    >
-                                        <VStack align="stretch" spacing={2}>
-                                            <Text fontWeight="bold">{node.name}</Text>
-                                            <Text fontSize="sm">{node.address}</Text>
-                                            <Text fontSize="sm" color="gray.600">
-                                                {node.location}
-                                            </Text>
-                                        </VStack>
-                                    </Box>
-                                ))}
-                            </Grid>
-                        </CardBody>
-                    </Card>
-                )}
-            </VStack>
-        </Container>
-    );
-};
+import { useClientPortalStore } from "../../lib/stores";
+import { toaster } from "@/components/ui/toaster";
 
 export const ClientAccountPage = () => {
-    const { clientDetails, fetchClientDetails, isLoadingDetails } = useClientPortalStore();
+    const navigate = useNavigate();
+    const { clientDetails, fetchClientDetails, isLoadingDetails, logout } = useClientPortalStore();
 
     useEffect(() => {
-        fetchClientDetails();
+        fetchClientDetails().catch(() => {
+            toaster.create({
+                title: "Error",
+                description: "Failed to fetch account details. Please try again.",
+                type: "error",
+                duration: 5000,
+            });
+        });
     }, [fetchClientDetails]);
+
+    const handleLogout = async () => {
+        try {
+            await logout();
+            toaster.create({
+                title: "Logged Out",
+                description: "You have been successfully logged out.",
+                type: "success",
+                duration: 3000,
+                closable: true,
+            });
+            navigate("/login");
+        } catch (error) {
+            toaster.create({
+                title: "Error",
+                description: "Failed to log out. Please try again.",
+                type: "error",
+                duration: 5000,
+                closable: true,
+            });
+        }
+    };
 
     if (isLoadingDetails) {
         return (
@@ -254,13 +58,66 @@ export const ClientAccountPage = () => {
         );
     }
 
-    if (!clientDetails) {
-        return (
-            <Container centerContent py={10}>
-                <Text>No client details available</Text>
-            </Container>
-        );
-    }
+    return (
+        <Container maxW="container.xl" py={10}>
+            <VStack gap={8} align="stretch">
+                <Box>
+                    <Heading size="xl">Account Details</Heading>
+                    <Text color="gray.600" mt={2}>
+                        View and manage your account information
+                    </Text>
+                </Box>
 
-    return <AccountContent {...clientDetails} />;
+                {clientDetails?.user.status === "inactive" && (
+                    <Alert.Root status="warning">
+                        Your account is currently inactive. Please subscribe to a plan to activate your account.
+                    </Alert.Root>
+                )}
+
+                <Box
+                    p={6}
+                    borderWidth="1px"
+                    borderRadius="lg"
+                    bg="white"
+                    shadow="sm"
+                >
+                    <VStack align="stretch" gap={4}>
+                        <Box>
+                            <Text fontWeight="medium" color="gray.600">
+                                Account Number
+                            </Text>
+                            <Text fontSize="lg">{clientDetails?.user.username}</Text>
+                        </Box>
+
+                        <Box>
+                            <Text fontWeight="medium" color="gray.600">
+                                Status
+                            </Text>
+                            <Text fontSize="lg" color={clientDetails?.user.status === "active" ? "green.500" : "red.500"}>
+                                {clientDetails?.user.status}
+                            </Text>
+                        </Box>
+
+                        <Box>
+                            <Text fontWeight="medium" color="gray.600">
+                                Current Plan
+                            </Text>
+                            <Text fontSize="lg">
+                                {clientDetails?.user.plan?.name || "No active plan"}
+                            </Text>
+                        </Box>
+
+                        <Button
+                            colorScheme="red"
+                            variant="outline"
+                            onClick={handleLogout}
+                            alignSelf="flex-start"
+                        >
+                            Logout
+                        </Button>
+                    </VStack>
+                </Box>
+            </VStack>
+        </Container>
+    );
 };

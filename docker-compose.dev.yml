@@ -30,8 +30,11 @@ services:
     ports:
       - "3000:3000" # Admin panel dev server (matches package.json)
     volumes:
-      - ./app/dashboard:/app
-      - /app/node_modules
+      - ./app/dashboard/src:/app/src:delegated
+      - ./app/dashboard/public:/app/public:delegated
+      - ./app/dashboard/index.html:/app/index.html:delegated
+      - ./app/dashboard/vite.config.ts:/app/vite.config.ts:delegated
+      - ./app/dashboard/tsconfig.json:/app/tsconfig.json:delegated
     working_dir: /app
     command: npm run dev:admin
     environment:
@@ -45,25 +48,51 @@ services:
       - marzban-panel
 
   marzban-dashboard-portal: # Client portal development service
-      build:
-        context: ./app/dashboard
-        dockerfile: Dockerfile.dev
-      ports:
-        - "3001:3001" # Client portal dev server (matches package.json)
-      volumes:
-        - ./app/dashboard:/app
-        - /app/node_modules
-      working_dir: /app
-      command: npm run dev:portal
-      environment:
-        - UVICORN_PORT=8000
-        - VITE_API_TARGET_HOST=marzban-panel
-        - VITE_BASE_API=/api/portal
-        - XRAY_SUBSCRIPTION_PATH=sub
-      networks:
-        - marzban_network
-      depends_on:
-        - marzban-panel
+    build:
+      context: ./app/dashboard
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3001:3001" # Client portal dev server (matches package.json)
+    volumes:
+      - ./app/dashboard/src:/app/src:delegated
+      - ./app/dashboard/public:/app/public:delegated
+      - ./app/dashboard/index.html:/app/index.html:delegated
+      - ./app/dashboard/vite.config.ts:/app/vite.config.ts:delegated
+      - ./app/dashboard/tsconfig.json:/app/tsconfig.json:delegated
+    working_dir: /app
+    command: npm run dev:portal
+    environment:
+      - UVICORN_PORT=8000
+      - VITE_API_TARGET_HOST=marzban-panel
+      - VITE_BASE_API=/api/portal
+      - XRAY_SUBSCRIPTION_PATH=sub
+    networks:
+      - marzban_network
+    depends_on:
+      - marzban-panel
+
+  marzban-node-1:
+    build:
+      context: ./node
+      dockerfile: Dockerfile
+    restart: always
+    env_file: .env.node1
+    ports:
+      - "443:443"
+      - "80:80"
+      - "6001:6001"  # REST API port
+    volumes:
+      - ./node1-certs:/etc/marzban-node/certs:ro
+    environment:
+      - SERVICE_PORT=6001
+      - SERVICE_PROTOCOL=rest
+      - SSL_CERT_FILE=/etc/marzban-node/certs/server.crt
+      - SSL_KEY_FILE=/etc/marzban-node/certs/server.key
+      - SSL_CLIENT_CERT_FILE=/etc/marzban-node/certs/ca.crt
+    networks:
+      - marzban_network
+    depends_on:
+      - marzban-panel
 
 networks:
   marzban_network:

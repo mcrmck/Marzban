@@ -3,12 +3,19 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Copy package files
 COPY package*.json ./
+
+# Create theme directory and copy theme files
+RUN mkdir -p src/theme
+COPY src/theme/adminTheme.ts src/theme/
+COPY src/theme/clientTheme.ts src/theme/
+
+# Install dependencies and generate theme typings
 RUN npm install
 
-# The rest of the source code will be mounted via docker-compose volume
-# So, no need to COPY . . here for development
+# Copy the rest of the source code
+COPY . .
 
 # Expose both admin and portal ports
 EXPOSE 3000 3001

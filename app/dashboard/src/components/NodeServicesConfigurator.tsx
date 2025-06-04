@@ -2,31 +2,13 @@ import React, { useState, useEffect, ChangeEvent, FormEvent } from 'react';
 import {
     Box,
     Button,
-    Table,
-    Thead,
-    Tbody,
-    Tr,
-    Th,
-    Td,
-    Switch,
     IconButton,
-    useToast,
-    Modal,
-    ModalOverlay,
-    ModalContent,
-    ModalHeader,
-    ModalBody,
-    ModalCloseButton,
-    FormControl,
-    FormLabel,
     Input,
-    Select,
-    Textarea,
     VStack,
     HStack,
     useDisclosure,
 } from '@chakra-ui/react';
-import { EditIcon, DeleteIcon, AddIcon } from '@chakra-ui/icons';
+import { Plus, Edit, Trash } from 'lucide-react';
 import {
     NodeServiceConfigurationResponse,
     NodeServiceConfigurationCreate,
@@ -34,13 +16,13 @@ import {
     ProtocolType,
     NetworkType,
     SecurityType,
-} from '../types/NodeService';
+} from '../lib/types/NodeService';
 import {
     getServicesForNode,
     addServiceToNode,
     updateServiceOnNode,
     deleteServiceOnNode,
-} from '../service/nodeService';
+} from '../lib/api/nodeService';
 import { JsonEditor } from './JsonEditor';
 
 interface NodeServicesConfiguratorProps {
@@ -58,8 +40,7 @@ export const NodeServicesConfigurator: React.FC<NodeServicesConfiguratorProps> =
         listen_port: 443,
         security_type: SecurityType.TLS,
     });
-    const { isOpen, onOpen, onClose } = useDisclosure();
-    const toast = useToast();
+    const { open, onOpen, onClose } = useDisclosure();
 
     const fetchServices = async () => {
         try {
@@ -67,13 +48,7 @@ export const NodeServicesConfigurator: React.FC<NodeServicesConfiguratorProps> =
             const data = await getServicesForNode(nodeId);
             setServices(data);
         } catch (error) {
-            toast({
-                title: 'Error fetching services',
-                description: error instanceof Error ? error.message : 'Unknown error',
-                status: 'error',
-                duration: 5000,
-                isClosable: true,
-            });
+            console.error('Error fetching services:', error);
         } finally {
             setLoading(false);
         }
@@ -97,19 +72,9 @@ export const NodeServicesConfigurator: React.FC<NodeServicesConfiguratorProps> =
         if (window.confirm('Are you sure you want to delete this service?')) {
             try {
                 await deleteServiceOnNode(nodeId, serviceId);
-                toast({
-                    title: 'Service deleted',
-                    status: 'success',
-                    duration: 3000,
-                });
                 fetchServices();
             } catch (error) {
-                toast({
-                    title: 'Error deleting service',
-                    description: error instanceof Error ? error.message : 'Unknown error',
-                    status: 'error',
-                    duration: 5000,
-                });
+                console.error('Error deleting service:', error);
             }
         }
     };
@@ -135,213 +100,215 @@ export const NodeServicesConfigurator: React.FC<NodeServicesConfiguratorProps> =
         try {
             if (selectedService) {
                 await updateServiceOnNode(nodeId, selectedService.id, formData as NodeServiceConfigurationUpdate);
-                toast({
-                    title: 'Service updated',
-                    status: 'success',
-                    duration: 3000,
-                });
             } else {
                 await addServiceToNode(nodeId, formData as NodeServiceConfigurationCreate);
-                toast({
-                    title: 'Service added',
-                    status: 'success',
-                    duration: 3000,
-                });
             }
             onClose();
             fetchServices();
         } catch (error) {
-            toast({
-                title: 'Error saving service',
-                description: error instanceof Error ? error.message : 'Unknown error',
-                status: 'error',
-                duration: 5000,
-            });
+            console.error('Error saving service:', error);
         }
     };
 
     const handleToggleEnabled = async (service: NodeServiceConfigurationResponse, enabled: boolean) => {
         try {
             await updateServiceOnNode(nodeId, service.id, { ...service, enabled });
-            toast({
-                title: 'Service updated',
-                status: 'success',
-                duration: 3000,
-            });
             fetchServices();
         } catch (error) {
-            toast({
-                title: 'Error updating service',
-                description: error instanceof Error ? error.message : 'Unknown error',
-                status: 'error',
-                duration: 5000,
-            });
+            console.error('Error updating service:', error);
         }
     };
 
     return (
         <Box>
-            <Button leftIcon={<AddIcon />} colorScheme="blue" mb={4} onClick={handleAddService}>
+            <Button colorScheme="blue" mb={4} onClick={handleAddService}>
+                <Plus />
                 Add Service
             </Button>
 
-            <Table variant="simple">
-                <Thead>
-                    <Tr>
-                        <Th>Service Name</Th>
-                        <Th>Protocol</Th>
-                        <Th>Port</Th>
-                        <Th>Network</Th>
-                        <Th>Security</Th>
-                        <Th>Enabled</Th>
-                        <Th>Actions</Th>
-                    </Tr>
-                </Thead>
-                <Tbody>
+            <Box as="table" width="100%">
+                <Box as="thead">
+                    <Box as="tr">
+                        <Box as="th">Service Name</Box>
+                        <Box as="th">Protocol</Box>
+                        <Box as="th">Port</Box>
+                        <Box as="th">Network</Box>
+                        <Box as="th">Security</Box>
+                        <Box as="th">Enabled</Box>
+                        <Box as="th">Actions</Box>
+                    </Box>
+                </Box>
+                <Box as="tbody">
                     {services.map((service) => (
-                        <Tr key={service.id}>
-                            <Td>{service.service_name}</Td>
-                            <Td>{service.protocol_type}</Td>
-                            <Td>{service.listen_port}</Td>
-                            <Td>{service.network_type || 'TCP'}</Td>
-                            <Td>{service.security_type}</Td>
-                            <Td>
-                                <Switch
-                                    isChecked={service.enabled}
-                                    onChange={(e) => handleToggleEnabled(service, e.target.checked)}
+                        <Box as="tr" key={service.id}>
+                            <Box as="td">{service.service_name}</Box>
+                            <Box as="td">{service.protocol_type}</Box>
+                            <Box as="td">{service.listen_port}</Box>
+                            <Box as="td">{service.network_type || 'TCP'}</Box>
+                            <Box as="td">{service.security_type}</Box>
+                            <Box as="td">
+                                <input
+                                    type="checkbox"
+                                    checked={service.enabled}
+                                    onChange={(e: ChangeEvent<HTMLInputElement>) => handleToggleEnabled(service, e.target.checked)}
                                 />
-                            </Td>
-                            <Td>
+                            </Box>
+                            <Box as="td">
                                 <IconButton
                                     aria-label="Edit service"
-                                    icon={<EditIcon />}
                                     size="sm"
                                     mr={2}
                                     onClick={() => handleEditService(service)}
-                                />
+                                >
+                                    <Edit />
+                                </IconButton>
                                 <IconButton
                                     aria-label="Delete service"
-                                    icon={<DeleteIcon />}
                                     size="sm"
                                     colorScheme="red"
                                     onClick={() => handleDeleteService(service.id)}
-                                />
-                            </Td>
-                        </Tr>
+                                >
+                                    <Trash />
+                                </IconButton>
+                            </Box>
+                        </Box>
                     ))}
-                </Tbody>
-            </Table>
+                </Box>
+            </Box>
 
-            <Modal isOpen={isOpen} onClose={onClose} size="xl">
-                <ModalOverlay />
-                <ModalContent>
-                    <ModalHeader>
-                        {selectedService ? 'Edit Service' : 'Add Service'}
-                    </ModalHeader>
-                    <ModalCloseButton />
-                    <ModalBody>
+            {open && (
+                <Box
+                    position="fixed"
+                    top="0"
+                    left="0"
+                    right="0"
+                    bottom="0"
+                    bg="blackAlpha.600"
+                    zIndex="modal"
+                    onClick={onClose}
+                >
+                    <Box
+                        position="absolute"
+                        top="50%"
+                        left="50%"
+                        transform="translate(-50%, -50%)"
+                        bg="white"
+                        p={6}
+                        borderRadius="md"
+                        width="xl"
+                        maxW="90vw"
+                        maxH="90vh"
+                        overflowY="auto"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+                            <Box fontSize="xl" fontWeight="bold">
+                                {selectedService ? 'Edit Service' : 'Add Service'}
+                            </Box>
+                            <Button variant="ghost" onClick={onClose}>×</Button>
+                        </Box>
                         <form onSubmit={handleSubmit}>
-                            <VStack spacing={4}>
-                                <FormControl isRequired>
-                                    <FormLabel>Service Name</FormLabel>
+                            <VStack gap={4}>
+                                <Box>
+                                    <Box as="label">Service Name</Box>
                                     <Input
                                         value={formData.service_name}
                                         onChange={(e) => handleChange('service_name', e.target.value)}
                                     />
-                                </FormControl>
+                                </Box>
 
-                                <FormControl isRequired>
-                                    <FormLabel>Protocol Type</FormLabel>
-                                    <Select
+                                <Box>
+                                    <Box as="label">Protocol Type</Box>
+                                    <select
                                         value={formData.protocol_type}
-                                        onChange={(e) => handleChange('protocol_type', e.target.value)}
+                                        onChange={(e: ChangeEvent<HTMLSelectElement>) => handleChange('protocol_type', e.target.value)}
                                     >
                                         {Object.values(ProtocolType).map((type) => (
                                             <option key={type} value={type}>
                                                 {type}
                                             </option>
                                         ))}
-                                    </Select>
-                                </FormControl>
+                                    </select>
+                                </Box>
 
-                                <FormControl isRequired>
-                                    <FormLabel>Listen Port</FormLabel>
+                                <Box>
+                                    <Box as="label">Listen Port</Box>
                                     <Input
                                         type="number"
                                         value={formData.listen_port}
                                         onChange={(e) => handleChange('listen_port', parseInt(e.target.value))}
                                     />
-                                </FormControl>
+                                </Box>
 
-                                <FormControl>
-                                    <FormLabel>Network Type</FormLabel>
-                                    <Select
+                                <Box>
+                                    <Box as="label">Network Type</Box>
+                                    <select
                                         value={formData.network_type || NetworkType.TCP}
-                                        onChange={(e) => handleChange('network_type', e.target.value)}
+                                        onChange={(e: ChangeEvent<HTMLSelectElement>) => handleChange('network_type', e.target.value)}
                                     >
                                         {Object.values(NetworkType).map((type) => (
                                             <option key={type} value={type}>
                                                 {type}
                                             </option>
                                         ))}
-                                    </Select>
-                                </FormControl>
+                                    </select>
+                                </Box>
 
-                                <FormControl isRequired>
-                                    <FormLabel>Security Type</FormLabel>
-                                    <Select
+                                <Box>
+                                    <Box as="label">Security Type</Box>
+                                    <select
                                         value={formData.security_type}
-                                        onChange={(e) => handleChange('security_type', e.target.value)}
+                                        onChange={(e: ChangeEvent<HTMLSelectElement>) => handleChange('security_type', e.target.value)}
                                     >
                                         {Object.values(SecurityType).map((type) => (
                                             <option key={type} value={type}>
                                                 {type}
                                             </option>
                                         ))}
-                                    </Select>
-                                </FormControl>
+                                    </select>
+                                </Box>
 
-                                <FormControl>
-                                    <FormLabel>Advanced Protocol Settings</FormLabel>
+                                <Box>
+                                    <Box as="label">Advanced Protocol Settings</Box>
                                     <JsonEditor
                                         json={formData.advanced_protocol_settings || {}}
                                         onChange={handleJsonChange('advanced_protocol_settings')}
                                     />
-                                </FormControl>
+                                </Box>
 
-                                <FormControl>
-                                    <FormLabel>Advanced Stream Settings</FormLabel>
+                                <Box>
+                                    <Box as="label">Advanced Stream Settings</Box>
                                     <JsonEditor
                                         json={formData.advanced_stream_settings || {}}
                                         onChange={handleJsonChange('advanced_stream_settings')}
                                     />
-                                </FormControl>
+                                </Box>
 
-                                <FormControl>
-                                    <FormLabel>Advanced TLS Settings</FormLabel>
+                                <Box>
+                                    <Box as="label">Advanced TLS Settings</Box>
                                     <JsonEditor
                                         json={formData.advanced_tls_settings || {}}
                                         onChange={handleJsonChange('advanced_tls_settings')}
                                     />
-                                </FormControl>
+                                </Box>
 
-                                <FormControl>
-                                    <FormLabel>Advanced REALITY Settings</FormLabel>
+                                <Box>
+                                    <Box as="label">Advanced REALITY Settings</Box>
                                     <JsonEditor
                                         json={formData.advanced_reality_settings || {}}
                                         onChange={handleJsonChange('advanced_reality_settings')}
                                     />
-                                </FormControl>
+                                </Box>
 
-                                <FormControl>
-                                    <FormLabel>Sniffing Settings</FormLabel>
+                                <Box>
+                                    <Box as="label">Sniffing Settings</Box>
                                     <JsonEditor
                                         json={formData.sniffing_settings || {}}
                                         onChange={handleJsonChange('sniffing_settings')}
                                     />
-                                </FormControl>
+                                </Box>
 
-                                <HStack spacing={4} width="100%" justify="flex-end">
+                                <HStack gap={4} width="100%" justify="flex-end">
                                     <Button onClick={onClose}>Cancel</Button>
                                     <Button type="submit" colorScheme="blue">
                                         {selectedService ? 'Update' : 'Add'}
@@ -349,9 +316,9 @@ export const NodeServicesConfigurator: React.FC<NodeServicesConfiguratorProps> =
                                 </HStack>
                             </VStack>
                         </form>
-                    </ModalBody>
-                </ModalContent>
-            </Modal>
+                    </Box>
+                </Box>
+            )}
         </Box>
     );
 };

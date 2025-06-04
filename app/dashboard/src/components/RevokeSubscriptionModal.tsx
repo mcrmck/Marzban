@@ -1,80 +1,84 @@
 import {
   Button,
   chakra,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
-  Spinner,
+  Dialog,
   Text,
-  useToast,
 } from "@chakra-ui/react";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import { useDashboard } from "contexts/DashboardContext";
+import { useDashboard } from "../lib/stores/DashboardContext";
 import { FC, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Icon } from "./Icon";
-import { User } from "types/User"; // Added import
+import { User } from "../lib/types/User";
 
-export const ResetIcon = chakra(ArrowPathIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
+const ResetIcon = chakra(ArrowPathIcon);   // v3: no `baseStyle` option
 
-export type RevokeSubscriptionModalProps = {
-  isOpen: boolean;
+type Props = {
+  open: boolean;           // v3 prop names
   onClose: () => void;
-  user: User; // Changed from { account_number: string } to User
+  user: User;
 };
 
-export const RevokeSubscriptionModal: FC<RevokeSubscriptionModalProps> = ({ isOpen, onClose, user }) => {
+export const RevokeSubscriptionDialog: FC<Props> = ({
+  open,
+  onClose,
+  user,
+}) => {
   const { t } = useTranslation();
   const { revokeSubscription } = useDashboard();
-  const [isRevoking, setIsRevoking] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleRevoke = async () => {
-    setIsRevoking(true);
+    setLoading(true);
     try {
-      await revokeSubscription(user); // Changed from user.account_number to user
+      await revokeSubscription(user);
       onClose();
-    } catch (error) {
-      console.error(error);
     } finally {
-      setIsRevoking(false);
+      setLoading(false);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose}>
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>{t("revokeSubscription")}</ModalHeader>
-        <ModalCloseButton />
-        <ModalBody>
-          <Text>
-            <Trans i18nKey="revokeSubscriptionConfirm" values={{ account_number: user.account_number }}>
-              Are you sure you want to revoke the subscription for user {{ account_number: user.account_number }}?
-            </Trans>
-          </Text>
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="ghost" mr={3} onClick={onClose}>
-            {t("cancel")}
-          </Button>
-          <Button
-            colorScheme="primary"
-            onClick={handleRevoke}
-            isLoading={isRevoking}
-          >
-            {t("revoke")}
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(v) => !v && onClose()}
+      placement="center"
+    >
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content>
+          <Dialog.Header>
+            <ResetIcon w={5} h={5} me={2} />
+            {t("revokeSubscription")}
+          </Dialog.Header>
+
+          <Dialog.CloseTrigger />
+
+          <Dialog.Body>
+            <Text>
+              <Trans
+                i18nKey="revokeSubscriptionConfirm"
+                values={{ account_number: user.account_number }}
+              >
+                Are you sure you want to revoke the subscription for user
+                <b>{user.account_number}</b>?
+              </Trans>
+            </Text>
+          </Dialog.Body>
+
+          <Dialog.Footer gap={2}>
+            <Button variant="ghost" onClick={onClose}>
+              {t("cancel")}
+            </Button>
+            <Button
+              colorPalette="primary"
+              onClick={handleRevoke}
+              loading={loading}   // v3 prop
+            >
+              {t("revoke")}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
   );
 };

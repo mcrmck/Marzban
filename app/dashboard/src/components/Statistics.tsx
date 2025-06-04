@@ -1,42 +1,38 @@
-import { Box, BoxProps, Card, chakra, HStack, Text } from "@chakra-ui/react";
+import { Box, BoxProps, Text } from "@chakra-ui/react";
 import {
   ChartBarIcon,
   ChartPieIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
-import { useDashboard } from "contexts/DashboardContext";
-import { FC, PropsWithChildren, ReactElement, ReactNode } from "react";
+import { useDashboard } from "../lib/stores/DashboardContext";
+import { FC, PropsWithChildren, ReactElement, ReactNode, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "react-query";
-import { fetch } from "service/http";
-import { formatBytes, numberWithCommas } from "utils/formatByte";
+import { useQuery } from "@tanstack/react-query";
+import { fetch } from "../lib/api/http";
+import { formatBytes, numberWithCommas } from "../lib/utils/formatByte";
 
-const TotalUsersIcon = chakra(UsersIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-    position: "relative",
-    zIndex: "2",
-  },
-});
+// Define the system data type
+interface SystemData {
+  users_active: number;
+  total_user: number;
+  incoming_bandwidth: number;
+  outgoing_bandwidth: number;
+  mem_used: number;
+  mem_total: number;
+  version: string;
+}
 
-const NetworkIcon = chakra(ChartBarIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-    position: "relative",
-    zIndex: "2",
-  },
-});
-
-const MemoryIcon = chakra(ChartPieIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-    position: "relative",
-    zIndex: "2",
-  },
-});
+// Styled icon components using Box instead of chakra()
+const IconWrapper: FC<{ children: ReactElement }> = ({ children }) => (
+  <Box
+    w={5}
+    h={5}
+    position="relative"
+    zIndex={2}
+  >
+    {children}
+  </Box>
+);
 
 type StatisticCardProps = {
   title: string;
@@ -50,11 +46,11 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
   icon,
 }) => {
   return (
-    <Card
+    <Box
       p={6}
       borderWidth="1px"
-      borderColor="light-border"
-      bg="#F9FAFB"
+      borderColor="gray.200"
+      bg="gray.50"
       _dark={{ borderColor: "gray.600", bg: "gray.750" }}
       borderStyle="solid"
       boxShadow="none"
@@ -64,9 +60,9 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
       justifyContent="space-between"
       flexDirection="row"
     >
-      <HStack alignItems="center" columnGap="4">
+      <Box display="flex" alignItems="center" gap={4}>
         <Box
-          p="2"
+          p={2}
           position="relative"
           color="white"
           _before={{
@@ -74,29 +70,29 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
             position: "absolute",
             top: 0,
             left: 0,
-            bg: "primary.400",
+            bg: "blue.400",
             display: "block",
             w: "full",
             h: "full",
             borderRadius: "5px",
-            opacity: ".5",
-            z: "1",
+            opacity: 0.5,
+            zIndex: 1,
           }}
           _after={{
             content: `""`,
             position: "absolute",
             top: "-5px",
             left: "-5px",
-            bg: "primary.400",
+            bg: "blue.400",
             display: "block",
             w: "calc(100% + 10px)",
             h: "calc(100% + 10px)",
             borderRadius: "8px",
-            opacity: ".4",
-            z: "1",
+            opacity: 0.4,
+            zIndex: 1,
           }}
         >
-          {icon}
+          <IconWrapper>{icon}</IconWrapper>
         </Box>
         <Text
           color="gray.600"
@@ -109,41 +105,45 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
         >
           {title}
         </Text>
-      </HStack>
-      <Box fontSize="3xl" fontWeight="semibold" mt="2">
+      </Box>
+      <Box fontSize="3xl" fontWeight="semibold" mt={2}>
         {content}
       </Box>
-    </Card>
+    </Box>
   );
 };
-export const StatisticsQueryKey = "statistics-query-key";
+
+export const StatisticsQueryKey = ["statistics-query-key"];
+
 export const Statistics: FC<BoxProps> = (props) => {
   const { version } = useDashboard();
-  const { data: systemData } = useQuery({
+  const { data: systemData } = useQuery<SystemData, Error, SystemData>({
     queryKey: StatisticsQueryKey,
-    queryFn: () => fetch("/system"),
+    queryFn: () => fetch.get<SystemData>("/system"),
     refetchInterval: 5000,
-    onSuccess: ({ version: currentVersion }) => {
-      if (version !== currentVersion)
-        useDashboard.setState({ version: currentVersion });
-    },
   });
+
+  // Update version when data changes
+  useEffect(() => {
+    if (systemData && version !== systemData.version) {
+      useDashboard.setState({ version: systemData.version });
+    }
+  }, [systemData, version]);
+
   const { t } = useTranslation();
+
   return (
-    <HStack
-      justifyContent="space-between"
-      gap={0}
-      columnGap={{ lg: 4, md: 0 }}
-      rowGap={{ lg: 0, base: 4 }}
-      display="flex"
-      flexDirection={{ lg: "row", base: "column" }}
+    <Box
+      display="grid"
+      gridTemplateColumns={{ base: "1fr", lg: "repeat(3, 1fr)" }}
+      gap={4}
       {...props}
     >
       <StatisticCard
         title={t("activeUsers")}
         content={
           systemData && (
-            <HStack alignItems="flex-end">
+            <Box display="flex" alignItems="flex-end">
               <Text>{numberWithCommas(systemData.users_active)}</Text>
               <Text
                 fontWeight="normal"
@@ -154,10 +154,10 @@ export const Statistics: FC<BoxProps> = (props) => {
               >
                 / {numberWithCommas(systemData.total_user)}
               </Text>
-            </HStack>
+            </Box>
           )
         }
-        icon={<TotalUsersIcon />}
+        icon={<UsersIcon />}
       />
       <StatisticCard
         title={t("dataUsage")}
@@ -167,13 +167,13 @@ export const Statistics: FC<BoxProps> = (props) => {
             systemData.incoming_bandwidth + systemData.outgoing_bandwidth
           )
         }
-        icon={<NetworkIcon />}
+        icon={<ChartBarIcon />}
       />
       <StatisticCard
         title={t("memoryUsage")}
         content={
           systemData && (
-            <HStack alignItems="flex-end">
+            <Box display="flex" alignItems="flex-end">
               <Text>{formatBytes(systemData.mem_used, 1, true)[0]}</Text>
               <Text
                 fontWeight="normal"
@@ -185,11 +185,11 @@ export const Statistics: FC<BoxProps> = (props) => {
                 {formatBytes(systemData.mem_used, 1, true)[1]} /{" "}
                 {formatBytes(systemData.mem_total, 1)}
               </Text>
-            </HStack>
+            </Box>
           )
         }
-        icon={<MemoryIcon />}
+        icon={<ChartPieIcon />}
       />
-    </HStack>
+    </Box>
   );
 };

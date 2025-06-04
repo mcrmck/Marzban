@@ -1,9 +1,9 @@
-import { BoxProps, HStack, Link, Text } from "@chakra-ui/react";
+import { HStack, Link, Text, StackProps } from "@chakra-ui/react";
 import { ORGANIZATION_URL, REPO_URL } from "constants/Project";
-import { useDashboard } from "contexts/DashboardContext";
+import { useDashboard } from "../lib/stores/DashboardContext";
 import { FC } from "react";
 
-export const Footer: FC<BoxProps> = (props) => {
+export const Footer: FC<StackProps> = (props) => {
   const { version } = useDashboard();
   return (
     <HStack w="full" py="0" position="relative" {...props}>

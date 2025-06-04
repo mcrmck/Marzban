@@ -1,10 +1,10 @@
 import { Badge, Text } from "@chakra-ui/react";
 
-import { statusColors } from "constants/UserSettings";
+import { statusColors } from "../lib/constants/UserSettings";
 import { FC } from "react";
 import { useTranslation } from "react-i18next";
-import { Status as UserStatusType } from "types/User";
-import { relativeExpiryDate } from "utils/dateFormatter";
+import { Status as UserStatusType } from "../lib/types/User";
+import { relativeExpiryDate } from "../lib/utils/dateFormatter";
 
 type UserStatusProps = {
   expiryDate?: number | null;

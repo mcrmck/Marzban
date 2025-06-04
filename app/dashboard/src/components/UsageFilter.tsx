@@ -1,47 +1,53 @@
 import {
   Box,
-  ColorMode,
   HStack,
   Icon,
   SimpleGrid,
-  Tab,
-  TabList,
-  TabPanel,
-  TabPanels,
   Tabs,
   Text,
-  UseRadioProps,
   VStack,
   useBreakpointValue,
-  useColorMode,
   useDisclosure,
-  useOutsideClick,
-  useRadio,
-  useRadioGroup,
+  RadioGroup,
 } from "@chakra-ui/react";
 import { CalendarIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { ApexOptions } from "apexcharts";
-import { FilterUsageType } from "contexts/DashboardContext";
+import { FilterUsageType } from "../lib/stores/DashboardContext";
 import dayjs, { ManipulateType } from "dayjs";
-import { FC, useRef, useState } from "react";
+import { FC, useRef, useState, useEffect } from "react";
 import ReactDatePicker from "react-datepicker";
 import { useTranslation } from "react-i18next";
-import { generateDistinctColors } from "utils/color";
-import { formatBytes } from "utils/formatByte";
+import { generateDistinctColors } from "../lib/utils/color";
+import { formatBytes } from "../lib/utils/formatByte";
+import { useTheme } from "next-themes";
+
+// Custom hook for outside click detection
+const useOutsideClick = (ref: React.RefObject<HTMLElement | null>, handler: () => void) => {
+  useEffect(() => {
+    const listener = (event: MouseEvent | TouchEvent) => {
+      if (!ref.current || ref.current.contains(event.target as Node)) {
+        return;
+      }
+      handler();
+    };
+
+    document.addEventListener('mousedown', listener);
+    document.addEventListener('touchstart', listener);
+
+    return () => {
+      document.removeEventListener('mousedown', listener);
+      document.removeEventListener('touchstart', listener);
+    };
+  }, [ref, handler]);
+};
 
 type DateType = Date | null;
 
-const FilterItem: FC<UseRadioProps & { border?: boolean } & any> = ({
-  border,
-  ...props
-}) => {
-  const { getInputProps, getRadioProps } = useRadio(props);
+const FilterItem: FC<any> = ({ border, ...props }) => {
   const fontSize = useBreakpointValue({ base: "xs", md: "sm" });
   return (
     <Box as="label">
-      <input {...getInputProps()} />
       <Box
-        {...getRadioProps()}
         minW="48px"
         w="full"
         h="full"
@@ -60,6 +66,7 @@ const FilterItem: FC<UseRadioProps & { border?: boolean } & any> = ({
         }}
         px={3}
         py={1}
+        {...props}
       >
         {props.children}
       </Box>
@@ -78,7 +85,7 @@ export const UsageFilter: FC<UsageFilterProps> = ({
   ...props
 }) => {
   const { t, i18n } = useTranslation();
-  const { colorMode } = useColorMode();
+  const { theme } = useTheme();
 
   const filterOptions = useBreakpointValue({
     base: ["7h", "1d", "3d", "1w"],
@@ -105,49 +112,46 @@ export const UsageFilter: FC<UsageFilterProps> = ({
       { title: "months", options: ["1m", "2m", "3m", "6m", "8m"] },
     ],
   })!;
-  const {
-    getRootProps,
-    getRadioProps,
-    setValue: setDefaultFilter,
-  } = useRadioGroup({
-    name: "filter",
-    defaultValue: defaultValue,
-    onChange: (value: string) => {
-      if (value === "custom") {
-        return;
-      }
 
-      closeCustom();
+  const [selectedValue, setSelectedValue] = useState(defaultValue);
 
-      if (filterOptions.indexOf(value) >= 0) {
-        setCustomLabel(t("userDialog.custom"));
-        setCustom(false);
-      } else {
-        setCustomLabel(t("userDialog.custom") + ` (${value})`);
-        setCustom(true);
-      }
+  const handleValueChange = (details: { value: string | null }) => {
+    const value = details.value;
+    if (!value || value === "custom") {
+      return;
+    }
 
-      const num = Number(value.substring(0, value.length - 1));
-      const unit =
-        filterOptionTypes[
-          value[value.length - 1] as keyof typeof filterOptionTypes
-        ];
-      onChange(value, {
-        start: dayjs()
-          .utc()
-          .subtract(num, unit as ManipulateType)
-          .format("YYYY-MM-DDTHH:00:00"),
-      });
-    },
-  });
+    closeCustom();
+
+    if (filterOptions.indexOf(value) >= 0) {
+      setCustomLabel(t("userDialog.custom"));
+      setCustom(false);
+    } else {
+      setCustomLabel(t("userDialog.custom") + ` (${value})`);
+      setCustom(true);
+    }
+
+    const num = Number(value.substring(0, value.length - 1));
+    const unit =
+      filterOptionTypes[
+        value[value.length - 1] as keyof typeof filterOptionTypes
+      ];
+    onChange(value, {
+      start: dayjs()
+        .utc()
+        .subtract(num, unit as ManipulateType)
+        .format("YYYY-MM-DDTHH:00:00"),
+    });
+    setSelectedValue(value);
+  };
 
   const {
-    isOpen: isCustomOpen,
+    open: isCustomOpen,
     onOpen: openCustom,
     onClose: closeCustom,
   } = useDisclosure();
-  const customRef = useRef(null);
-  useOutsideClick({ ref: customRef, handler: closeCustom });
+  const customRef = useRef<HTMLDivElement>(null);
+  useOutsideClick(customRef, closeCustom);
 
   const [customLabel, setCustomLabel] = useState(t("userDialog.custom"));
   const [custom, setCustom] = useState(false);
@@ -179,20 +183,21 @@ export const UsageFilter: FC<UsageFilterProps> = ({
     <VStack {...props}>
       {tabIndex == 0 && (
         <SimpleGrid
-          {...getRootProps()}
           gap={0}
           display="flex"
           borderWidth="1px"
           borderRadius="md"
           minW={{ base: "320px", md: "400px" }}
         >
-          {filterOptions.map((value) => {
-            return (
-              <FilterItem key={value} {...getRadioProps({ value })}>
-                {value}
-              </FilterItem>
-            );
-          })}
+          <RadioGroup.Root value={selectedValue} onValueChange={handleValueChange}>
+            {filterOptions.map((value) => {
+              return (
+                <FilterItem key={value} value={value}>
+                  {value}
+                </FilterItem>
+              );
+            })}
+          </RadioGroup.Root>
           <Box
             onClick={() => {
               setStartDate(null);
@@ -254,62 +259,61 @@ export const UsageFilter: FC<UsageFilterProps> = ({
         }}
         display={isCustomOpen ? "unset" : "none"}
       >
-        <Tabs onChange={(index) => setTabIndex(index)}>
-          <TabList>
-            <Tab fontSize={fontSize}>{t("userDialog.relative")}</Tab>
-            <Tab fontSize={fontSize}>{t("userDialog.absolute")}</Tab>
-          </TabList>
+        <Tabs.Root defaultValue={tabIndex === 0 ? "relative" : "absolute"} onValueChange={(details) => setTabIndex(details.value === "relative" ? 0 : 1)}>
+          <Tabs.List>
+            <Tabs.Trigger value="relative">Relative</Tabs.Trigger>
+            <Tabs.Trigger value="absolute">Absolute</Tabs.Trigger>
+          </Tabs.List>
 
-          <TabPanels>
-            <TabPanel>
-              {customFilterOptions.map((row) => {
-                return (
-                  <VStack key={row.title} alignItems="start" pl={2} pr={2}>
-                    <HStack justifyItems="flex-start" mb={4}>
-                      <Text fontSize={fontSize} minW="60px">
-                        {t("userDialog." + row.title)}
-                      </Text>
+          <Tabs.Content value="relative">
+            {customFilterOptions.map((row) => {
+              return (
+                <VStack key={row.title} alignItems="start" pl={2} pr={2}>
+                  <HStack justifyItems="flex-start" mb={4}>
+                    <Text fontSize={fontSize} minW="60px">
+                      {t("userDialog." + row.title)}
+                    </Text>
+                    <RadioGroup.Root value={selectedValue} onValueChange={handleValueChange}>
                       {row.options.map((value: string) => {
                         return (
                           <FilterItem
                             key={value + ".custom"}
                             border={true}
-                            {...getRadioProps({ value })}
+                            value={value}
                           >
                             {value}
                           </FilterItem>
                         );
                       })}
-                    </HStack>
-                  </VStack>
-                );
-              })}
-            </TabPanel>
-            <TabPanel className="datepicker-panel">
-              <VStack>
-                <ReactDatePicker
-                  locale={i18n.language.toLocaleLowerCase()}
-                  selected={startDate}
-                  onChange={onDateChange}
-                  startDate={startDate}
-                  endDate={endDate}
-                  selectsRange={true}
-                  maxDate={new Date()}
-                  monthsShown={monthsShown}
-                  peekNextMonth={false}
-                  inline
-                />
-              </VStack>
-            </TabPanel>
-          </TabPanels>
-        </Tabs>
+                    </RadioGroup.Root>
+                  </HStack>
+                </VStack>
+              );
+            })}
+          </Tabs.Content>
+          <Tabs.Content value="absolute">
+            <VStack>
+              <ReactDatePicker
+                locale={i18n.language.toLocaleLowerCase()}
+                selected={startDate}
+                onChange={onDateChange}
+                startDate={startDate}
+                endDate={endDate}
+                selectsRange={true}
+                maxDate={new Date()}
+                monthsShown={monthsShown}
+                peekNextMonth={false}
+                inline
+              />
+            </VStack>
+          </Tabs.Content>
+        </Tabs.Root>
       </VStack>
     </VStack>
   );
 };
 
 export function createUsageConfig(
-  colorMode: ColorMode,
   title: string,
   series: any = [],
   labels: any = []
@@ -332,14 +336,13 @@ export function createUsageConfig(
         align: "center",
         style: {
           fontWeight: "var(--chakra-fontWeights-medium)",
-          color:
-            colorMode === "dark" ? "var(--chakra-colors-gray-300)" : undefined,
+          color: "var(--chakra-colors-gray-300)",
         },
       },
       legend: {
         position: "bottom",
         labels: {
-          colors: colorMode === "dark" ? "#CBD5E0" : undefined,
+          colors: "#CBD5E0",
           useSeriesColors: false,
         },
       },

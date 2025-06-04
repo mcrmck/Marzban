@@ -4,169 +4,152 @@ import {
   HStack,
   IconButton,
   Menu,
-  MenuButton,
-  MenuItem,
-  MenuList,
   Text,
-  useColorMode,
 } from "@chakra-ui/react";
+import { useTheme } from "next-themes";
 import {
   ArrowLeftOnRectangleIcon,
   Bars3Icon,
   ChartPieIcon,
   Cog6ToothIcon,
-  CurrencyDollarIcon,
   DocumentMinusIcon,
-  LinkIcon,
   MoonIcon,
   SunIcon,
 } from "@heroicons/react/24/outline";
-import { useDashboard } from "contexts/DashboardContext";
-import differenceInDays from "date-fns/differenceInDays";
-import isValid from "date-fns/isValid";
-import { FC, ReactNode, useState } from "react";
+import { useDashboard } from "../lib/stores/DashboardContext";
+import { FC, ReactNode } from "react";
 import GitHubButton from "react-github-btn";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { updateThemeColor } from "utils/themeColor";
+import { updateThemeColor } from "../lib/utils/themeColor";
 import { Language } from "./Language";
-import useGetUser from "hooks/useGetUser";
+import useGetUser from "../lib/hooks/useGetUser";
 import { REPO_URL } from "constants/Project";
 
-type HeaderProps = {
-  actions?: ReactNode;
-};
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
 
-const iconProps = {
-  baseStyle: {
-    w: 4,
-    h: 4,
-  },
-};
+const Icon4 = <T extends { className?: string }>(Icon: FC<T>) =>
+  chakra(Icon);
 
-const DarkIcon = chakra(MoonIcon, iconProps);
-const LightIcon = chakra(SunIcon, iconProps);
-const CoreSettingsIcon = chakra(Cog6ToothIcon, iconProps);
-const SettingsIcon = chakra(Bars3Icon, iconProps);
-const LogoutIcon = chakra(ArrowLeftOnRectangleIcon, iconProps);
-const NodesUsageIcon = chakra(ChartPieIcon, iconProps);
-const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
+const DarkIcon        = Icon4(MoonIcon);
+const LightIcon       = Icon4(SunIcon);
+const CoreSettingsIcon= Icon4(Cog6ToothIcon);
+const SettingsIcon    = Icon4(Bars3Icon);
+const LogoutIcon      = Icon4(ArrowLeftOnRectangleIcon);
+const NodesUsageIcon  = Icon4(ChartPieIcon);
+const ResetUsageIcon  = Icon4(DocumentMinusIcon);
 
-const NOTIFICATION_KEY = "marzban-menu-notification";
+type HeaderProps = { actions?: ReactNode };
 
-export const Header: FC<HeaderProps> = ({ actions }) => {
-  const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
+export const Header: FC<HeaderProps> = () => {
+  /* data ---------------------------------------------------------------- */
+  const { data: userData, isSuccess, isPending } = useGetUser();
+  const isSudo = !isPending && isSuccess && userData?.is_sudo;
 
-  const isSudo = () => {
-    if (!getUserIsPending && getUserIsSuccess && userData) {
-      return userData.is_sudo;
-    }
-    return false;
-  };
-
-  const {
-    onResetAllUsage,
-    onShowingNodesUsage,
-  } = useDashboard();
+  const { onResetAllUsage, onShowingNodesUsage } = useDashboard();
   const { t } = useTranslation();
-  const { colorMode, toggleColorMode } = useColorMode();
 
-  const gBtnColor = colorMode === "dark" ? "dark_dimmed" : colorMode;
+  const { theme, setTheme } = useTheme();
+  const gBtnColor = theme === "dark" ? "dark_dimmed" : theme;
 
-  const handleOnClose = () => {
-    localStorage.setItem(NOTIFICATION_KEY, new Date().getTime().toString());
-  };
-
+  /* render -------------------------------------------------------------- */
   return (
-    <HStack
-      gap={2}
-      justifyContent="space-between"
-      __css={{
-        "& .menuList": {
-          direction: "ltr",
-        },
-      }}
-      position="relative"
-    >
+    <HStack gap={2} justify="space-between" position="relative">
       <Text as="h1" fontWeight="semibold" fontSize="2xl">
         {t("users")}
       </Text>
+
       <Box overflow="auto" css={{ direction: "rtl" }}>
-        <HStack alignItems="center">
-          <Menu onClose={handleOnClose}>
-            <MenuButton
-              as={IconButton}
-              size="sm"
-              variant="outline"
-              icon={<SettingsIcon />}
-              position="relative"
-            ></MenuButton>
-            <MenuList minW="170px" zIndex={99999} className="menuList">
-              {isSudo() && (
+        <HStack align="center">
+          {/* settings menu ------------------------------------------------ */}
+          <Menu.Root>
+            <Menu.Trigger asChild>
+              <IconButton
+                size="sm"
+                variant="outline"
+                aria-label="settings"
+              >
+                <SettingsIcon />
+              </IconButton>
+            </Menu.Trigger>
+
+            <Menu.Content minW="170px" zIndex={9_999} className="menuList">
+              {isSudo && (
                 <>
-                  <MenuItem
-                    maxW="170px"
+                  <Menu.Item
+                    value="nodes-usage"
+                    onClick={() => onShowingNodesUsage(true)}
                     fontSize="sm"
-                    icon={<NodesUsageIcon />}
-                    onClick={onShowingNodesUsage.bind(null, true)}
-                  >
-                    {t("header.nodesUsage")}
-                  </MenuItem>
-                  <MenuItem
                     maxW="170px"
-                    fontSize="sm"
-                    icon={<ResetUsageIcon />}
-                    onClick={onResetAllUsage.bind(null, true)}
                   >
-                    {t("resetAllUsage")}
-                  </MenuItem>
+                    <HStack>
+                      <NodesUsageIcon />
+                      <Text>{t("header.nodesUsage")}</Text>
+                    </HStack>
+                  </Menu.Item>
+
+                  <Menu.Item
+                    value="reset-usage"
+                    onClick={() => onResetAllUsage(true)}
+                    fontSize="sm"
+                    maxW="170px"
+                  >
+                    <HStack>
+                      <ResetUsageIcon />
+                      <Text>{t("resetAllUsage")}</Text>
+                    </HStack>
+                  </Menu.Item>
                 </>
               )}
-              <Link to="/login">
-                <MenuItem maxW="170px" fontSize="sm" icon={<LogoutIcon />}>
-                  {t("header.logout")}
-                </MenuItem>
-              </Link>
-            </MenuList>
-          </Menu>
 
-          {isSudo() && (
+              <Link to="/login">
+                <Menu.Item value="logout" fontSize="sm" maxW="170px">
+                  <HStack>
+                    <LogoutIcon />
+                    <Text>{t("header.logout")}</Text>
+                  </HStack>
+                </Menu.Item>
+              </Link>
+            </Menu.Content>
+          </Menu.Root>
+
+          {/* core-settings button ---------------------------------------- */}
+          {isSudo && (
             <IconButton
               size="sm"
               variant="outline"
               aria-label="core settings"
-              onClick={() => {
-                useDashboard.setState({ isEditingCore: true });
-              }}
+              onClick={() => useDashboard.setState({ isEditingCore: true })}
             >
               <CoreSettingsIcon />
             </IconButton>
           )}
 
+          {/* language picker --------------------------------------------- */}
           <Language />
 
+          {/* light / dark toggle ----------------------------------------- */}
           <IconButton
             size="sm"
             variant="outline"
             aria-label="switch theme"
             onClick={() => {
-              updateThemeColor(colorMode === "dark" ? "light" : "dark");
-              toggleColorMode();
+              const next = theme === "dark" ? "light" : "dark";
+              updateThemeColor(next);
+              setTheme(next);
             }}
           >
-            {colorMode === "light" ? <DarkIcon /> : <LightIcon />}
+            {theme === "light" ? <DarkIcon /> : <LightIcon />}
           </IconButton>
 
+          {/* GitHub star button ------------------------------------------ */}
           <Box
-            css={{ direction: "ltr" }}
             display="flex"
             alignItems="center"
             pr="2"
-            __css={{
-              "&  span": {
-                display: "inline-flex",
-              },
-            }}
+            css={{ "& span": { display: "inline-flex" } }}
           >
             <GitHubButton
               href={REPO_URL}

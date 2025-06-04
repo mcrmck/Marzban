@@ -3,16 +3,15 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
     Box,
     Button,
-    FormControl,
-    FormLabel,
     Input,
     VStack,
     Text,
-    useToast,
     Container,
     Heading,
+    Field,
 } from "@chakra-ui/react";
-import { useClientPortalStore } from "../../store/clientPortalStore";
+import { useClientPortalStore, useIsAuthenticated, useIsLoadingAuth, useAuthError, useLogin } from "../../lib/stores";
+import { toaster } from "@/components/ui/toaster";
 
 interface LocationState {
     from?: {
@@ -23,8 +22,10 @@ interface LocationState {
 export const ClientLoginPage = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const toast = useToast();
-    const { login, isLoadingAuth, error, isAuthenticated } = useClientPortalStore();
+    const login = useLogin();
+    const isLoadingAuth = useIsLoadingAuth();
+    const error = useAuthError();
+    const isAuthenticated = useIsAuthenticated();
     const [accountNumber, setAccountNumber] = useState("");
 
     useEffect(() => {
@@ -41,28 +42,28 @@ export const ClientLoginPage = () => {
             await login(accountNumber);
             // Navigation will be handled by the useEffect above
         } catch (err) {
-            toast({
+            toaster.create({
                 title: "Login Failed",
                 description: error || "Please check your account number and try again.",
-                status: "error",
+                type: "error",
                 duration: 5000,
-                isClosable: true,
+                closable: true,
             });
         }
     };
 
     return (
         <Container maxW="container.sm" py={10}>
-            <VStack spacing={8} align="stretch">
+            <VStack gap={8} align="stretch">
                 <Box textAlign="center">
                     <Heading size="xl" mb={2}>Client Portal Login</Heading>
                     <Text color="gray.600">Enter your account number to access your portal</Text>
                 </Box>
 
                 <form onSubmit={handleSubmit}>
-                    <VStack spacing={4}>
-                        <FormControl isRequired>
-                            <FormLabel>Account Number</FormLabel>
+                    <VStack gap={4}>
+                        <Field.Root>
+                            <Field.Label>Account Number</Field.Label>
                             <Input
                                 type="text"
                                 value={accountNumber}
@@ -70,14 +71,15 @@ export const ClientLoginPage = () => {
                                 placeholder="Enter your account number"
                                 size="lg"
                             />
-                        </FormControl>
+                            {error && <Field.ErrorText>{error}</Field.ErrorText>}
+                        </Field.Root>
 
                         <Button
                             type="submit"
                             colorScheme="brand"
                             size="lg"
                             width="full"
-                            isLoading={isLoadingAuth}
+                            loading={isLoadingAuth}
                             loadingText="Logging in..."
                         >
                             Login

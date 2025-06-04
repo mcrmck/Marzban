@@ -1,6 +1,6 @@
 import {FC} from "react";
 import {Text} from "@chakra-ui/react";
-import {relativeExpiryDate} from "utils/dateFormatter";
+import {relativeExpiryDate} from "../lib/utils/dateFormatter";
 
 type UserStatusProps = {
     lastOnline: string | null;

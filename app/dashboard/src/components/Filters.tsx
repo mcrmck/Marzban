@@ -1,4 +1,5 @@
 import {
+  Box,
   BoxProps,
   Button,
   chakra,
@@ -7,9 +8,6 @@ import {
   HStack,
   IconButton,
   Input,
-  InputGroup,
-  InputLeftElement,
-  InputRightElement,
   Spinner,
 } from "@chakra-ui/react";
 import {
@@ -18,21 +16,14 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import classNames from "classnames";
-import { useDashboard } from "contexts/DashboardContext";
+import { useDashboard } from "../lib/stores/DashboardContext";
 import debounce from "lodash.debounce";
 import React, { FC, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-const iconProps = {
-  baseStyle: {
-    w: 4,
-    h: 4,
-  },
-};
-
-const SearchIcon = chakra(MagnifyingGlassIcon, iconProps);
-const ClearIcon = chakra(XMarkIcon, iconProps);
-export const ReloadIcon = chakra(ArrowPathIcon, iconProps);
+const SearchIcon = chakra(MagnifyingGlassIcon);
+const ClearIcon = chakra(XMarkIcon);
+export const ReloadIcon = chakra(ArrowPathIcon);
 
 export type FilterProps = {} & BoxProps;
 const setSearchField = debounce((search: string) => {
@@ -83,29 +74,47 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
       {...props}
     >
       <GridItem colSpan={{ base: 1, md: 2, lg: 1 }} order={{ base: 2, md: 1 }}>
-        <InputGroup>
-          <InputLeftElement pointerEvents="none" children={<SearchIcon />} />
+        <Box position="relative">
           <Input
             placeholder={t("search")}
             value={search}
             borderColor="light-border"
             onChange={onChange}
+            paddingLeft="2.5rem"
+            paddingRight={filters.search && filters.search.length > 0 ? "2.5rem" : "1rem"}
           />
-
-          <InputRightElement>
-            {loading && <Spinner size="xs" />}
-            {filters.search && filters.search.length > 0 && (
-              <IconButton
-                onClick={clear}
-                aria-label="clear"
-                size="xs"
-                variant="ghost"
-              >
-                <ClearIcon />
-              </IconButton>
-            )}
-          </InputRightElement>
-        </InputGroup>
+          <Box
+            position="absolute"
+            left="0.75rem"
+            top="50%"
+            transform="translateY(-50%)"
+            pointerEvents="none"
+          >
+            <SearchIcon w={4} h={4} />
+          </Box>
+          {(loading || (filters.search && filters.search.length > 0)) && (
+            <Box
+              position="absolute"
+              right="0.75rem"
+              top="50%"
+              transform="translateY(-50%)"
+            >
+              <HStack>
+                {loading && <Spinner size="xs" />}
+                {filters.search && filters.search.length > 0 && (
+                  <IconButton
+                    onClick={clear}
+                    aria-label="clear"
+                    size="xs"
+                    variant="ghost"
+                  >
+                    <ClearIcon w={4} h={4} />
+                  </IconButton>
+                )}
+              </HStack>
+            </Box>
+          )}
+        </Box>
       </GridItem>
       <GridItem colSpan={2} order={{ base: 1, md: 2 }}>
         <HStack justifyContent="flex-end" alignItems="center" h="full">

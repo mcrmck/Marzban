@@ -13,7 +13,7 @@ export const ClientStripeCancelPage = () => {
 
     return (
         <Container maxW="container.sm" py={10}>
-            <VStack spacing={8} textAlign="center">
+            <VStack gap={8} textAlign="center">
                 <Box>
                     <Heading size="xl" color="orange.500" mb={4}>
                         Payment Cancelled

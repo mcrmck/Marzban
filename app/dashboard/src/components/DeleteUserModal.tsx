@@ -1,82 +1,75 @@
 import {
   Button,
+  Dialog,
   chakra,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
-  Spinner,
-  Text,
-  useToast,
 } from "@chakra-ui/react";
 import { TrashIcon } from "@heroicons/react/24/outline";
-import { useDashboard } from "contexts/DashboardContext";
 import { FC, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Icon } from "./Icon";
-import { User } from "types/User"; // Added import
+import { useDashboard } from "../lib/stores/DashboardContext";
+import { User } from "../lib/types/User";
 
-export const DeleteIcon = chakra(TrashIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
+// simple, style later via props
+export const DeleteIcon = chakra(TrashIcon);
 
-export type DeleteUserModalProps = {
-  isOpen: boolean;
+type DeleteUserModalProps = {
+  open: boolean;          // v3 prop name
   onClose: () => void;
   user: User;
-  deleteCallback?: () => void;
 };
 
-export const DeleteUserModal: FC<DeleteUserModalProps> = ({ isOpen, onClose, user }) => {
+export const DeleteUserModal: FC<DeleteUserModalProps> = ({
+  open,
+  onClose,
+  user,
+}) => {
   const { t } = useTranslation();
   const { deleteUser } = useDashboard();
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleDelete = async () => {
-    setIsDeleting(true);
+    setLoading(true);
     try {
-      await deleteUser(user); // Changed from user.account_number to user
+      await deleteUser(user);
       onClose();
-    } catch (error) {
-      console.error(error);
     } finally {
-      setIsDeleting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose}>
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>{t("deleteUser")}</ModalHeader>
-        <ModalCloseButton />
-        <ModalBody>
-          <Text>
-            {/* Using user.account_number for display is fine */}
-            <Trans i18nKey="deleteUserConfirm" values={{ account_number: user.account_number }}>
-              Are you sure you want to delete user {{ account_number: user.account_number }}? This action cannot be undone.
+    <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()} placement="center">
+      <Dialog.Backdrop />
+
+      <Dialog.Positioner>
+        <Dialog.Content>
+          <Dialog.Header>{t("deleteUser")}</Dialog.Header>
+          <Dialog.CloseTrigger />
+
+          <Dialog.Body>
+            <Trans
+              i18nKey="deleteUserConfirm"
+              values={{ account_number: user.account_number }}
+            >
+              Are you sure you want to delete user
+              <b>{user.account_number}</b>?
             </Trans>
-          </Text>
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="ghost" mr={3} onClick={onClose}>
-            {t("cancel")}
-          </Button>
-          <Button
-            colorScheme="red"
-            onClick={handleDelete}
-            isLoading={isDeleting}
-          >
-            {t("delete")}
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+          </Dialog.Body>
+
+          <Dialog.Footer gap={2}>
+            <Button variant="outline" onClick={onClose}>
+              {t("cancel")}
+            </Button>
+            <Button
+              colorPalette="red"
+              loading={loading}          // v3 prop
+              onClick={handleDelete}
+            >
+              {t("delete")}
+            </Button>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
   );
 };

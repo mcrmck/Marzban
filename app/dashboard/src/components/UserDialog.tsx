@@ -1,147 +1,145 @@
+/* UserDialog.tsx — Chakra UI v3 */
+
 import {
   Alert,
-  AlertIcon,
   Box,
   Button,
-  Collapse,
+  CheckboxGroup,
+  Collapsible,
+  createListCollection,
+  Dialog,
+  Field,
   Flex,
-  FormControl,
-  FormErrorMessage,
-  FormHelperText,
-  FormLabel,
   Grid,
   GridItem,
   HStack,
+  Icon,
   IconButton,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
+  Input,
+  InputAddon,
+  InputGroup,
+  Portal,
   Select,
-  Spinner,
   Switch,
   Text,
   Textarea,
   Tooltip,
   VStack,
-  chakra,
-  useColorMode,
-  useToast,
+  Checkbox,
+  Select as ChakraSelect,
 } from "@chakra-ui/react";
+import { useTheme } from "next-themes";
+import { toaster } from "@/components/ui/toaster";
+
 import {
-  ChartPieIcon,
-  PencilIcon,
-  UserPlusIcon,
+  ArrowPathIcon as HeroArrowPathIcon,
+  ChartPieIcon as HeroChartPieIcon,
+  PencilIcon as HeroPencilIcon,
+  UserPlusIcon as HeroUserPlusIcon,
 } from "@heroicons/react/24/outline";
+
 import { zodResolver } from "@hookform/resolvers/zod";
-import { resetStrategy } from "constants/UserSettings";
-import { FilterUsageType, useDashboard } from "contexts/DashboardContext";
+import { FilterUsageType, useDashboard } from "../lib/stores/DashboardContext";
 import dayjs from "dayjs";
 import { FC, useEffect, useState } from "react";
 import ReactApexChart from "react-apexcharts";
 import ReactDatePicker from "react-datepicker";
-import { Controller, FormProvider, useForm, useWatch } from "react-hook-form";
-import { useTranslation } from "react-i18next";
 import {
-  ProxyKeys,
-  ProxyType,
-  User,
-  UserCreate,
-  UserInbounds,
-  Status,
-  DataLimitResetStrategy,
-} from "types/User";
-import { relativeExpiryDate } from "utils/dateFormatter";
+  Controller,
+  FormProvider,
+  SubmitHandler,
+  useForm,
+  useWatch,
+} from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import type { ProxyType, User, UserCreate, UserInbounds } from "../lib/types/User";
+import { relativeExpiryDate } from "../lib/utils/dateFormatter";
 import { z } from "zod";
 import { DeleteIcon } from "./DeleteUserModal";
-import { Icon } from "./Icon";
-import { Input } from "./Input";
-import { RadioGroup } from "./RadioGroup";
 import { UsageFilter, createUsageConfig } from "./UsageFilter";
-import { ReloadIcon } from "./Filters";
-import classNames from "classnames";
 
-const AddUserIcon = chakra(UserPlusIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Enums & helpers                                                           */
+/* ────────────────────────────────────────────────────────────────────────── */
 
-const EditUserIcon = chakra(PencilIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
+const UserStatus = {
+  ACTIVE: "active",
+  DISABLED: "disabled",
+  LIMITED: "limited",
+  EXPIRED: "expired",
+  ON_HOLD: "on_hold",
+} as const;
+type UserStatusValues = (typeof UserStatus)[keyof typeof UserStatus];
 
-const UserUsageIcon = chakra(ChartPieIcon, {
-  baseStyle: {
-    w: 5,
-    h: 5,
-  },
-});
+const DataLimitResetStrategy = {
+  NO_RESET: "no_reset",
+  DAY: "day",
+  WEEK: "week",
+  MONTH: "month",
+} as const;
+type DataLimitResetStrategyValues =
+  (typeof DataLimitResetStrategy)[keyof typeof DataLimitResetStrategy];
 
-export type UserDialogProps = {};
+const PROXY_KEYS = [
+  { title: "vless", description: "VLESS Protocol" },
+  { title: "vmess", description: "VMess Protocol" },
+  { title: "trojan", description: "Trojan Protocol" },
+  { title: "shadowsocks", description: "Shadowsocks Protocol" },
+] as const;
+type ProxyKeys = (typeof PROXY_KEYS)[number]["title"];
 
-export type FormType = {
+export interface FormType {
   account_number: string;
-  proxies: ProxyType;
+  proxies: {
+    vless: { id: string; flow: string };
+    vmess: { id: string };
+    trojan: { password: string };
+    shadowsocks: { password: string; method: string };
+  };
   expire: number | null;
-  data_limit: number | null;
-  data_limit_reset_strategy: DataLimitResetStrategy;
+  data_limit: number;
+  data_limit_reset_strategy: DataLimitResetStrategyValues;
   on_hold_expire_duration: number | null;
-  status: Status;
-  note: string;
+  status: UserStatusValues;
+  note: string | null;
   inbounds: UserInbounds;
   selected_proxies: string[];
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Utility functions                                                         */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+const convertInboundsMapToRecord = (
+  m?: Map<string, { tag: string }[]>,
+): Record<string, { tag: string }[]> | undefined => {
+  if (!m) return undefined;
+  const r: Record<string, { tag: string }[]> = {};
+  m.forEach((v, k) => {
+    r[k] = v.map(({ tag }) => ({ tag }));
+  });
+  return r;
 };
 
-const defaultValues: FormType = {
-  selected_proxies: [],
-  data_limit: null,
-  expire: null,
-  account_number: "",
-  data_limit_reset_strategy: "no_reset",
-  status: "active",
-  on_hold_expire_duration: null,
-  note: "",
-  inbounds: {},
-  proxies: {},
-};
-
-const formatUser = (user: User): FormType => {
-  return {
-    ...user,
-    data_limit: user.data_limit
-      ? Number((user.data_limit / 1073741824).toFixed(5))
-      : user.data_limit,
-    on_hold_expire_duration: user.on_hold_expire_duration
-      ? Number(user.on_hold_expire_duration / (24 * 60 * 60))
-      : user.on_hold_expire_duration,
-    selected_proxies: Object.keys(user.proxies) as ProxyKeys,
-  };
-};
-
-const getDefaultValues = (): FormType => {
-  const defaultInbounds = Object.fromEntries(useDashboard.getState().inbounds);
-  const inbounds: UserInbounds = {};
-  for (const key in defaultInbounds) {
-    inbounds[key] = defaultInbounds[key].map((i) => i.tag);
+const getDefaultValues = (
+  inbounds?: Record<string, { tag: string }[]>,
+): FormType => {
+  const defaultUserInbounds: UserInbounds = {};
+  if (inbounds) {
+    Object.keys(inbounds).forEach((k) => {
+      defaultUserInbounds[k] = inbounds[k].map((i) => i.tag);
+    });
   }
   return {
     selected_proxies: [],
-    data_limit: null,
+    data_limit: 0,
     expire: null,
     account_number: "",
-    data_limit_reset_strategy: "no_reset",
-    status: "active",
+    data_limit_reset_strategy: DataLimitResetStrategy.NO_RESET,
+    status: UserStatus.ACTIVE,
     on_hold_expire_duration: null,
     note: "",
-    inbounds,
+    inbounds: defaultUserInbounds,
     proxies: {
       vless: { id: "", flow: "" },
       vmess: { id: "" },
@@ -151,92 +149,98 @@ const getDefaultValues = (): FormType => {
   };
 };
 
+const formatUserToForm = (u: User): FormType => ({
+  ...u,
+  status: u.status as UserStatusValues,
+  data_limit_reset_strategy:
+    u.data_limit_reset_strategy as DataLimitResetStrategyValues,
+  data_limit: u.data_limit
+    ? parseFloat((u.data_limit / 1_073_741_824).toFixed(5))
+    : 0,
+  on_hold_expire_duration: u.on_hold_expire_duration
+    ? u.on_hold_expire_duration / 86_400
+    : 0,
+  selected_proxies: Object.keys(u.proxies ?? {}),
+  proxies: {
+    vless: { id: u.proxies?.vless?.id ?? "", flow: u.proxies?.vless?.flow ?? "" },
+    vmess: { id: u.proxies?.vmess?.id ?? "" },
+    trojan: { password: u.proxies?.trojan?.password ?? "" },
+    shadowsocks: {
+      password: u.proxies?.shadowsocks?.password ?? "",
+      method: u.proxies?.shadowsocks?.method ?? "chacha20-ietf-poly1305",
+    },
+  },
+  inbounds: u.inbounds ?? {},
+  note: u.note ?? null,
+});
+
 const mergeProxies = (
-  proxyKeys: string[],
-  proxyType: ProxyType | undefined
+  keys: string[],
+  proxies?: ProxyType,
 ): ProxyType => {
-  const proxies: ProxyType = proxyKeys.reduce(
-    (ac, a) => ({ ...ac, [a]: {} }),
-    {}
-  );
-  if (!proxyType) return proxies;
-  proxyKeys.forEach((proxy) => {
-    if (proxyType[proxy as keyof ProxyType]) {
-      proxies[proxy as keyof ProxyType] = proxyType[proxy as keyof ProxyType];
+  const p: ProxyType = {};
+  keys.forEach((k) => {
+    if (!PROXY_KEYS.find(({ title }) => title === k)) return;
+    switch (k as ProxyKeys) {
+      case "vless":
+        p.vless = { id: "", flow: "" };
+        break;
+      case "vmess":
+        p.vmess = { id: "" };
+        break;
+      case "trojan":
+        p.trojan = { password: "" };
+        break;
+      case "shadowsocks":
+        p.shadowsocks = { password: "", method: "chacha20-ietf-poly1305" };
+        break;
     }
   });
-  return proxies;
-};
-
-const baseSchema = {
-  account_number: z.string().min(1, { message: "Required" }),
-  selected_proxies: z.array(z.string()).optional().default([]),
-  note: z.string().nullable(),
-  proxies: z
-    .record(z.string(), z.record(z.string(), z.any()))
-    .transform((ins) => {
-      const deleteIfEmpty = (obj: any, key: string) => {
-        if (obj && obj[key] === "") {
-          delete obj[key];
-        }
-      };
-      deleteIfEmpty(ins.vmess, "id");
-      deleteIfEmpty(ins.vless, "id");
-      deleteIfEmpty(ins.trojan, "password");
-      deleteIfEmpty(ins.shadowsocks, "password");
-      deleteIfEmpty(ins.shadowsocks, "method");
-      return ins;
-    }),
-  data_limit: z
-    .string()
-    .min(0)
-    .or(z.number())
-    .nullable()
-    .transform((str) => {
-      if (str) return Number((parseFloat(String(str)) * 1073741824).toFixed(5));
-      return 0;
-    }),
-  expire: z.number().nullable(),
-  data_limit_reset_strategy: z.string(),
-  inbounds: z.record(z.string(), z.array(z.string())).transform((ins) => {
-    Object.keys(ins).forEach((protocol) => {
-      if (Array.isArray(ins[protocol]) && !ins[protocol]?.length)
-        delete ins[protocol];
+  if (proxies) {
+    keys.forEach((k) => {
+      if ((proxies as any)[k]) (p as any)[k] = (proxies as any)[k];
     });
-    return ins;
-  }),
+  }
+  return p;
 };
 
-const schema = z.discriminatedUnion("status", [
-  z.object({
-    status: z.literal("active"),
-    ...baseSchema,
-  }),
-  z.object({
-    status: z.literal("disabled"),
-    ...baseSchema,
-  }),
-  z.object({
-    status: z.literal("limited"),
-    ...baseSchema,
-  }),
-  z.object({
-    status: z.literal("expired"),
-    ...baseSchema,
-  }),
-  z.object({
-    status: z.literal("on_hold"),
-    on_hold_expire_duration: z.coerce
-      .number()
-      .min(0.1, "Required")
-      .transform((d) => {
-        return d * (24 * 60 * 60);
-      }),
-    ...baseSchema,
-  }),
-]);
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Validation schema                                                         */
+/* ────────────────────────────────────────────────────────────────────────── */
 
-export const UserDialog: FC<UserDialogProps> = () => {
+const schema = z.object({
+  account_number: z.string().min(1, "Required"),
+  selected_proxies: z.array(z.string()),
+  note: z.string().nullable(),
+  proxies: z.object({
+    vless: z.object({ id: z.string(), flow: z.string() }),
+    vmess: z.object({ id: z.string() }),
+    trojan: z.object({ password: z.string() }),
+    shadowsocks: z.object({ password: z.string(), method: z.string() }),
+  }),
+  data_limit: z
+    .preprocess(
+      (v) => (v === "" || v == null ? null : Number(v)),
+      z.number().positive("Must be positive").nullable(),
+    )
+    .transform((v) => (v != null ? Math.round(v * 1_073_741_824) : 0)),
+  expire: z.number().nullable(),
+  data_limit_reset_strategy: z.nativeEnum(DataLimitResetStrategy),
+  inbounds: z.record(z.string(), z.array(z.string())),
+  status: z.nativeEnum(UserStatus),
+  on_hold_expire_duration: z
+    .preprocess(
+      (v) => (v === "" || v == null ? null : Number(v)),
+      z.number().min(0.1, "Required").nullable(),
+    )
+    .transform((v) => (v != null ? Math.round(v * 86_400) : null)),
+}) as z.ZodType<FormType>;
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Component                                                                 */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const UserDialog: FC = () => {
   const {
     editingUser,
     isCreatingNewUser,
@@ -246,639 +250,577 @@ export const UserDialog: FC<UserDialogProps> = () => {
     onEditingUser,
     createUser,
     onDeletingUser,
+    inbounds: allInbounds,
   } = useDashboard();
-  const isEditing = !!editingUser;
-  const isOpen = isCreatingNewUser || isEditing;
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>("");
-  const toast = useToast();
+
   const { t, i18n } = useTranslation();
+  const { theme: colorMode } = useTheme();
 
-  const { colorMode } = useColorMode();
-
-  const [usageVisible, setUsageVisible] = useState(false);
-  const handleUsageToggle = () => {
-    setUsageVisible((current) => !current);
-  };
+  const isEditing = Boolean(editingUser);
+  const isOpen = isCreatingNewUser || isEditing;
 
   const form = useForm<FormType>({
-    defaultValues: getDefaultValues(),
+    defaultValues: getDefaultValues(convertInboundsMapToRecord(allInbounds)),
     resolver: zodResolver(schema),
   });
 
-  useEffect(
-    () =>
-      useDashboard.subscribe(
-        (state) => state.inbounds,
-        () => {
-          form.reset(getDefaultValues());
-        }
-      ),
-    []
-  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [dataLimit, userStatus] = useWatch({
+  /* watch GB + status for conditional fields */
+  const [formDataLimitGB, userFormStatus] = useWatch({
     control: form.control,
     name: ["data_limit", "status"],
   });
 
+  const isOnHold = userFormStatus === UserStatus.ON_HOLD;
+
+  /* usage chart state */
   const usageTitle = t("userDialog.total");
-  const [usage, setUsage] = useState(createUsageConfig(colorMode, usageTitle));
+  const [usage, setUsage] = useState(
+    createUsageConfig(colorMode ?? "light", usageTitle, [[], []]),
+  );
+  const [usageVisible, setUsageVisible] = useState(false);
   const [usageFilter, setUsageFilter] = useState("1m");
+
   const fetchUsageWithFilter = (query: FilterUsageType) => {
-    fetchUserUsage(editingUser!, query).then((data: any) => {
-      const labels = [];
-      const series = [];
-      for (const key in data.usages) {
-        series.push(data.usages[key].used_traffic);
-        labels.push(data.usages[key].node_name);
-      }
-      setUsage(createUsageConfig(colorMode, usageTitle, series, labels));
-    });
+    if (!editingUser) return;
+    fetchUserUsage(editingUser, query)
+      .then((d: any) => {
+        const labels = d.usages ? Object.keys(d.usages) : [];
+        const series = d.usages
+          ? Object.values(d.usages).map((u: any) => u.used_traffic)
+          : [];
+        setUsage(
+          createUsageConfig(colorMode ?? "light", usageTitle, [series, labels]),
+        );
+      })
+      .catch(console.error);
   };
 
+  /* sync form when editing / inbounds change */
   useEffect(() => {
     if (editingUser) {
-      form.reset(formatUser(editingUser));
-
+      form.reset(formatUserToForm(editingUser));
       fetchUsageWithFilter({
-        start: dayjs().utc().subtract(30, "day").format("YYYY-MM-DDTHH:00:00"),
+        start: dayjs().utc().subtract(30, "day").format("YYYY-MM-DDTHH:00:00Z"),
       });
+    } else {
+      form.reset(getDefaultValues(convertInboundsMapToRecord(allInbounds)));
     }
-  }, [editingUser]);
+  }, [editingUser, allInbounds]);
 
-  const submit = (values: FormType) => {
+  const randomUsername = () =>
+    form.setValue("account_number", crypto.randomUUID());
+
+  const onSubmit: SubmitHandler<FormType> = (values) => {
     setLoading(true);
-    const methods = { edited: editUser, created: createUser };
-    const method = isEditing ? "edited" : "created";
     setError(null);
 
     const { selected_proxies, ...rest } = values;
-
-    let body: UserCreate = {
+    const body: UserCreate = {
       ...rest,
-      data_limit: values.data_limit,
       proxies: mergeProxies(selected_proxies, values.proxies),
       data_limit_reset_strategy:
         values.data_limit && values.data_limit > 0
           ? values.data_limit_reset_strategy
-          : "no_reset",
-      status:
-        values.status === "active" ||
-          values.status === "disabled" ||
-          values.status === "on_hold"
-          ? values.status
-          : "active",
+          : DataLimitResetStrategy.NO_RESET,
+      note: values.note ?? "",
     };
 
-    methods[method](body)
-      .then(() => {
-        toast({
+    const api = isEditing ? editUser(body) : createUser(body);
+    api
+      .then(() =>
+        toaster.create({
           title: t(
             isEditing ? "userDialog.userEdited" : "userDialog.userCreated",
-            { username: values.account_number }
+            { username: values.account_number },
           ),
-          status: "success",
-          isClosable: true,
-          position: "top",
+          type: "success",
           duration: 3000,
-        });
-        onClose();
-      })
-      .catch((err) => {
-        if (err?.response?.status === 409 || err?.response?.status === 400)
-          setError(err?.response?._data?.detail);
-        if (err?.response?.status === 422) {
-          Object.keys(err.response._data.detail).forEach((key) => {
-            setError(err?.response._data.detail[key] as string);
-            form.setError(
-              key as "proxies" | "account_number" | "data_limit" | "expire",
-              {
-                type: "custom",
-                message: err.response._data.detail[key],
-              }
-            );
-          });
+        }),
+      )
+      .then(closeDialog)
+      .catch((err: any) => {
+        const detail =
+          err?.response?._data?.detail ?? err?.message ?? "Unknown error";
+        setError(typeof detail === "string" ? detail : JSON.stringify(detail));
+        if (err?.response?.status === 422 && typeof detail === "object") {
+          Object.keys(detail).forEach((k) =>
+            form.setError(k as any, { type: "custom", message: detail[k] }),
+          );
         }
       })
-      .finally(() => {
-        setLoading(false);
-      });
+      .finally(() => setLoading(false));
   };
 
-  const onClose = () => {
-    form.reset(getDefaultValues());
-    onCreateUser(false);
-    onEditingUser(null);
+  const closeDialog = () => {
+    form.reset(getDefaultValues(convertInboundsMapToRecord(allInbounds)));
     setError(null);
     setUsageVisible(false);
     setUsageFilter("1m");
+    onCreateUser(false);
+    onEditingUser(null);
   };
 
-  const handleResetUsage = () => {
-    useDashboard.setState({ resetUsageUser: editingUser });
-  };
+  /* reset-strategy collection */
+  const resetStrategyItems = [
+    { label: t("userDialog.resetStrategy.noReset"), value: DataLimitResetStrategy.NO_RESET },
+    { label: t("userDialog.resetStrategy.day"), value: DataLimitResetStrategy.DAY },
+    { label: t("userDialog.resetStrategy.week"), value: DataLimitResetStrategy.WEEK },
+    { label: t("userDialog.resetStrategy.month"), value: DataLimitResetStrategy.MONTH },
+  ];
+  const resetStrategyCollection = createListCollection({
+    items: resetStrategyItems,
+  });
 
-  const handleRevokeSubscription = () => {
-    useDashboard.setState({ revokeSubscriptionUser: editingUser });
-  };
-
-  const disabled = loading;
-  const isOnHold = userStatus === "on_hold";
-
-  const [randomUsernameLoading, setrandomUsernameLoading] = useState(false);
-
-  const createRandomUsername = (): string => {
-    setrandomUsernameLoading(true);
-    return crypto.randomUUID();
-  };
+  /* ──────────────────────────────────────────────────────────────────────── */
+  /* JSX                                                                     */
+  /* ──────────────────────────────────────────────────────────────────────── */
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="2xl">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <FormProvider {...form}>
-        <ModalContent mx="3">
-          <form onSubmit={form.handleSubmit(submit)}>
-            <ModalHeader pt={6}>
+    <Dialog.Root open={isOpen} onOpenChange={(d) => !d.open && closeDialog()}>
+      <Portal>
+        <Dialog.Backdrop />
+        <Dialog.Positioner>
+          <Dialog.Content>
+            {/* Header */}
+            <Box pt={6} px={6}>
               <HStack gap={2}>
                 <Icon color="primary">
                   {isEditing ? (
-                    <EditUserIcon color="white" />
+                    <HeroPencilIcon className="w-5 h-5" />
                   ) : (
-                    <AddUserIcon color="white" />
+                    <HeroUserPlusIcon className="w-5 h-5" />
                   )}
                 </Icon>
-                <Text fontWeight="semibold" fontSize="lg">
-                  {isEditing
-                    ? t("userDialog.editUserTitle")
-                    : t("createNewUser")}
-                </Text>
+                <Dialog.Title asChild>
+                  <Text fontWeight="semibold" fontSize="lg">
+                    {isEditing ? t("userDialog.editUserTitle") : t("createNewUser")}
+                  </Text>
+                </Dialog.Title>
+                <Box flex="1" />
+                <Dialog.CloseTrigger asChild>
+                  <IconButton
+                    aria-label={t("close")}
+                    size="sm"
+                    variant="ghost"
+                    disabled={loading}
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </Dialog.CloseTrigger>
               </HStack>
-            </ModalHeader>
-            <ModalCloseButton mt={3} disabled={disabled} />
-            <ModalBody>
-              <Grid
-                templateColumns={{
-                  base: "repeat(1, 1fr)",
-                  md: "repeat(2, 1fr)",
-                }}
-                gap={3}
-              >
-                <GridItem>
-                  <VStack justifyContent="space-between">
-                    <Flex
-                      flexDirection="column"
-                      gridAutoRows="min-content"
-                      w="full"
-                    >
-                      <Flex flexDirection="row" w="full" gap={2}>
-                        <FormControl mb={"10px"}>
-                          <FormLabel>
-                            <Flex gap={2} alignItems={"center"}>
-                              {t("accountNumber")}
+            </Box>
+
+            {/* Body */}
+            <Box px={6} py={4}>
+              <FormProvider {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)}>
+                  <Grid
+                    templateColumns={{ base: "1fr", md: "repeat(2,1fr)" }}
+                    gap={3}
+                  >
+                    {/* Left */}
+                    <GridItem>
+                      <VStack gap={3} align="stretch">
+                        {/* account number + status */}
+                        <Flex gap={3} wrap="wrap">
+                          <Field.Root flex="1">
+                            <Field.Label>{t("accountNumber")}</Field.Label>
+                            <HStack>
+                              <Input
+                                {...form.register("account_number")}
+                                size="sm"
+                                borderRadius="6px"
+                                disabled={loading || isEditing}
+                              />
                               {!isEditing && (
-                                <ReloadIcon
-                                  cursor={"pointer"}
-                                  className={classNames({
-                                    "animate-spin": randomUsernameLoading,
-                                  })}
-                                  onClick={() => {
-                                    const randomUsername =
-                                      createRandomUsername();
-                                    form.setValue("account_number", randomUsername);
-                                    setTimeout(() => {
-                                      setrandomUsernameLoading(false);
-                                    }, 350);
-                                  }}
-                                />
+                                <IconButton
+                                  size="xs"
+                                  variant="ghost"
+                                  aria-label={t("random")}
+                                  onClick={randomUsername}
+                                  disabled={loading}
+                                >
+                                  <HeroArrowPathIcon className="h-4 w-4" />
+                                </IconButton>
                               )}
-                            </Flex>
-                          </FormLabel>
-                          <HStack>
-                            <Input
-                              size="sm"
-                              type="text"
-                              borderRadius="6px"
-                              error={form.formState.errors.account_number?.message}
-                              disabled={disabled || isEditing}
-                              {...form.register("account_number")}
-                            />
-                            {isEditing && (
-                              <HStack px={1}>
-                                <Controller
-                                  name="status"
-                                  control={form.control}
-                                  render={({ field }) => {
-                                    return (
-                                      <Tooltip
-                                        placement="top"
-                                        label={"status: " + t(`status.${field.value}`)}
-                                        textTransform="capitalize"
-                                      >
-                                        <Box>
-                                          <Switch
-                                            colorScheme="primary"
-                                            isChecked={field.value === "active"}
-                                            onChange={(e) => {
-                                              if (e.target.checked) {
-                                                field.onChange("active");
-                                              } else {
-                                                field.onChange("disabled");
-                                              }
-                                            }}
-                                          />
-                                        </Box>
-                                      </Tooltip>
-                                    );
-                                  }}
+                            </HStack>
+                            <Field.ErrorText>
+                              {form.formState.errors.account_number?.message}
+                            </Field.ErrorText>
+                          </Field.Root>
+
+                          {!isEditing ? (
+                            <Field.Root>
+                              <Field.Label whiteSpace="nowrap">
+                                {t("userDialog.onHold")}
+                              </Field.Label>
+                              <Controller
+                                name="status"
+                                control={form.control}
+                                render={({ field }) => (
+                                  <Switch.Root
+                                    checked={field.value === UserStatus.ON_HOLD}
+                                    onCheckedChange={(c) =>
+                                      field.onChange(
+                                        c ? UserStatus.ON_HOLD : UserStatus.ACTIVE,
+                                      )
+                                    }
+                                    disabled={loading}
+                                  >
+                                    <Switch.Indicator />
+                                  </Switch.Root>
+                                )}
+                              />
+                            </Field.Root>
+                          ) : (
+                            <Field.Root>
+                              <Field.Label mr="2">
+                                {t("status.active")}
+                              </Field.Label>
+                              <Controller
+                                name="status"
+                                control={form.control}
+                                render={({ field }) => (
+                                  <Switch.Root
+                                    checked={field.value === UserStatus.ACTIVE}
+                                    onCheckedChange={(c) =>
+                                      field.onChange(
+                                        c ? UserStatus.ACTIVE : UserStatus.DISABLED,
+                                      )
+                                    }
+                                    disabled={loading}
+                                  >
+                                    <Switch.Indicator />
+                                  </Switch.Root>
+                                )}
+                              />
+                            </Field.Root>
+                          )}
+                        </Flex>
+
+                        {/* data-limit */}
+                        <Field.Root>
+                          <Field.Label>{t("userDialog.dataLimit")}</Field.Label>
+                          <Controller
+                            name="data_limit"
+                            control={form.control}
+                            render={({ field }) => (
+                              <InputGroup endAddon="GB">
+                                <Input
+                                  {...field}
+                                  type="number"
+                                  size="sm"
+                                  borderRadius="6px"
+                                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                    field.onChange(
+                                      e.target.value === "" ? null : Number(e.target.value),
+                                    )
+                                  }
+                                  value={
+                                    field.value == null || field.value === 0
+                                      ? ""
+                                      : String(field.value)
+                                  }
+                                  disabled={loading}
                                 />
-                              </HStack>
+                              </InputGroup>
                             )}
-                          </HStack>
-                        </FormControl>
-                        {!isEditing && (
-                          <FormControl flex="1">
-                            <FormLabel whiteSpace={"nowrap"}>
-                              {t("userDialog.onHold")}
-                            </FormLabel>
+                          />
+                          <Field.ErrorText>
+                            {form.formState.errors.data_limit?.message}
+                          </Field.ErrorText>
+                        </Field.Root>
+
+                        {/* periodic reset */}
+                        <Collapsible.Root
+                          open={typeof formDataLimitGB === "number" && formDataLimitGB > 0}
+                        >
+                          <Collapsible.Content>
+                            <Field.Root>
+                              <Field.Label>
+                                {t("userDialog.periodicUsageReset")}
+                              </Field.Label>
+                              <Controller
+                                name="data_limit_reset_strategy"
+                                control={form.control}
+                                render={({ field }) => (
+                                  <Select.Root
+                                    collection={resetStrategyCollection}
+                                    value={field.value ? [field.value] : []}
+                                    onValueChange={(d) => field.onChange(d.value[0])}
+                                    disabled={loading}
+                                  >
+                                    <Select.Trigger borderRadius="6px">
+                                      <Select.ValueText
+                                        placeholder={t("userDialog.selectResetStrategy")}
+                                      />
+                                    </Select.Trigger>
+                                    <Select.Positioner>
+                                      <Select.Content>
+                                        {resetStrategyItems.map((item) => (
+                                          <Select.Item key={item.value} item={item}>
+                                            {item.label}
+                                          </Select.Item>
+                                        ))}
+                                      </Select.Content>
+                                    </Select.Positioner>
+                                  </Select.Root>
+                                )}
+                              />
+                            </Field.Root>
+                          </Collapsible.Content>
+                        </Collapsible.Root>
+
+                        {/* expiry / on-hold */}
+                        <Field.Root>
+                          <Field.Label>
+                            {isOnHold
+                              ? t("userDialog.onHoldExpireDuration")
+                              : t("userDialog.expiryDate")}
+                          </Field.Label>
+
+                          {isOnHold ? (
                             <Controller
-                              name="status"
+                              name="on_hold_expire_duration"
+                              control={form.control}
+                              render={({ field }) => (
+                                <InputGroup endAddon="Days">
+                                  <Input
+                                    {...field}
+                                    type="number"
+                                    size="sm"
+                                    borderRadius="6px"
+                                    disabled={loading}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                      field.onChange(
+                                        e.target.value === "" ? null : Number(e.target.value),
+                                      )
+                                    }
+                                    value={field.value == null ? "" : String(field.value)}
+                                  />
+                                </InputGroup>
+                              )}
+                            />
+                          ) : (
+                            <Controller
+                              name="expire"
                               control={form.control}
                               render={({ field }) => {
-                                const status = field.value;
+                                const { status, time } = relativeExpiryDate(field.value);
                                 return (
                                   <>
-                                    {status ? (
-                                      <Switch
-                                        colorScheme="primary"
-                                        isChecked={status === "on_hold"}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            field.onChange("on_hold");
-                                          } else {
-                                            field.onChange("active");
-                                          }
-                                        }}
-                                      />
-                                    ) : (
-                                      ""
+                                    <ReactDatePicker
+                                      selected={
+                                        field.value ? dayjs.unix(field.value).toDate() : null
+                                      }
+                                      onChange={(d) =>
+                                        field.onChange(
+                                          d ? dayjs(d).endOf("day").unix() : null,
+                                        )
+                                      }
+                                      minDate={new Date()}
+                                      locale={i18n.language.toLowerCase()}
+                                      dateFormat={t("dateFormat") as string}
+                                      customInput={
+                                        <Input
+                                          size="sm"
+                                          borderRadius="6px"
+                                          disabled={loading}
+                                        />
+                                      }
+                                    />
+                                    {field.value && (
+                                      <Field.HelperText>
+                                        {t(status, { time })}
+                                      </Field.HelperText>
                                     )}
                                   </>
                                 );
                               }}
                             />
-                          </FormControl>
+                          )}
+                          <Field.ErrorText>
+                            {form.formState.errors.on_hold_expire_duration?.message ||
+                              form.formState.errors.expire?.message}
+                          </Field.ErrorText>
+                        </Field.Root>
+
+                        {/* note */}
+                        <Field.Root>
+                          <Field.Label>{t("userDialog.note")}</Field.Label>
+                          <Textarea
+                            {...form.register("note")}
+                            size="sm"
+                            borderRadius="6px"
+                            disabled={loading}
+                          />
+                          <Field.ErrorText>
+                            {form.formState.errors.note?.message}
+                          </Field.ErrorText>
+                        </Field.Root>
+
+                        {error && (
+                          <Alert.Root status="error" borderRadius="md">
+                            <Alert.Description>{error}</Alert.Description>
+                          </Alert.Root>
                         )}
-                      </Flex>
-                      <FormControl mb={"10px"}>
-                        <FormLabel>{t("userDialog.dataLimit")}</FormLabel>
+                      </VStack>
+                    </GridItem>
+
+                    {/* Right: protocol checkboxes */}
+                    <GridItem>
+                      <Field.Root>
+                        <Field.Label>{t("userDialog.protocols")}</Field.Label>
                         <Controller
+                          name="selected_proxies"
                           control={form.control}
-                          name="data_limit"
-                          render={({ field }) => {
-                            return (
-                              <Input
-                                endAdornment="GB"
-                                type="number"
-                                size="sm"
-                                borderRadius="6px"
-                                onChange={field.onChange}
-                                disabled={disabled}
-                                error={
-                                  form.formState.errors.data_limit?.message
-                                }
-                                value={field.value ? String(field.value) : ""}
-                              />
-                            );
-                          }}
+                          render={({ field }) => (
+                            <CheckboxGroup
+                              value={field.value}
+                              onValueChange={field.onChange}
+                              disabled={loading}
+                            >
+                              {PROXY_KEYS.map((p) => (
+                                <Checkbox.Root key={p.title} value={p.title}>
+                                  <Checkbox.HiddenInput />
+                                  <Checkbox.Control />
+                                  <Checkbox.Label>{p.description}</Checkbox.Label>
+                                </Checkbox.Root>
+                              ))}
+                            </CheckboxGroup>
+                          )}
                         />
-                      </FormControl>
-                      <Collapse
-                        in={!!(dataLimit && dataLimit > 0)}
-                        animateOpacity
-                        style={{ width: "100%" }}
-                      >
-                        <FormControl height="66px">
-                          <FormLabel>
-                            {t("userDialog.periodicUsageReset")}
-                          </FormLabel>
-                          <Controller
-                            control={form.control}
-                            name="data_limit_reset_strategy"
-                            render={({ field }) => {
-                              return (
-                                <Select
-                                  size="sm"
-                                  {...field}
-                                  disabled={disabled}
-                                  bg={disabled ? "gray.100" : "transparent"}
-                                  _dark={{
-                                    bg: disabled ? "gray.600" : "transparent",
-                                  }}
-                                  sx={{
-                                    option: {
-                                      backgroundColor: colorMode === "dark" ? "#222C3B" : "white"
-                                    }
-                                  }}
-                                >
-                                  {resetStrategy.map((s) => {
-                                    return (
-                                      <option key={s.value} value={s.value}>
-                                        {t(
-                                          "userDialog.resetStrategy" + s.title
-                                        )}
-                                      </option>
-                                    );
-                                  })}
-                                </Select>
-                              );
+                        <Field.ErrorText>
+                          {form.formState.errors.selected_proxies?.message}
+                        </Field.ErrorText>
+                      </Field.Root>
+                    </GridItem>
+
+                    {/* usage chart */}
+                    {isEditing && usageVisible && (
+                      <GridItem colSpan={2} pt={6}>
+                        <VStack gap={4}>
+                          <UsageFilter
+                            defaultValue={usageFilter}
+                            onChange={(f, q) => {
+                              setUsageFilter(f);
+                              fetchUsageWithFilter(q);
                             }}
                           />
-                        </FormControl>
-                      </Collapse>
-
-                      <FormControl mb={"10px"}>
-                        <FormLabel>
-                          {isOnHold
-                            ? t("userDialog.onHoldExpireDuration")
-                            : t("userDialog.expiryDate")}
-                        </FormLabel>
-
-                        {isOnHold && (
-                          <Controller
-                            control={form.control}
-                            name="on_hold_expire_duration"
-                            render={({ field }) => {
-                              return (
-                                <Input
-                                  endAdornment="Days"
-                                  type="number"
-                                  size="sm"
-                                  borderRadius="6px"
-                                  onChange={(on_hold) => {
-                                    form.setValue("expire", null);
-                                    field.onChange({
-                                      target: {
-                                        value: on_hold,
-                                      },
-                                    });
-                                  }}
-                                  disabled={disabled}
-                                  error={
-                                    form.formState.errors
-                                      .on_hold_expire_duration?.message
-                                  }
-                                  value={field.value ? String(field.value) : ""}
-                                />
-                              );
-                            }}
-                          />
-                        )}
-                        {!isOnHold && (
-                          <Controller
-                            name="expire"
-                            control={form.control}
-                            render={({ field }) => {
-                              function createDateAsUTC(num: number) {
-                                return dayjs(
-                                  dayjs(num * 1000).utc()
-                                  // .format("MMMM D, YYYY") // exception with: dayjs.locale(lng);
-                                ).toDate();
-                              }
-                              const { status, time } = relativeExpiryDate(
-                                field.value
-                              );
-                              return (
-                                <>
-                                  <ReactDatePicker
-                                    locale={i18n.language.toLocaleLowerCase()}
-                                    dateFormat={t("dateFormat")}
-                                    minDate={new Date()}
-                                    selected={
-                                      field.value
-                                        ? createDateAsUTC(field.value)
-                                        : undefined
-                                    }
-                                    onChange={(date: Date) => {
-                                      form.setValue(
-                                        "on_hold_expire_duration",
-                                        null
-                                      );
-                                      field.onChange({
-                                        target: {
-                                          value: date
-                                            ? dayjs(
-                                              dayjs(date)
-                                                .set("hour", 23)
-                                                .set("minute", 59)
-                                                .set("second", 59)
-                                            )
-                                              .utc()
-                                              .valueOf() / 1000
-                                            : 0,
-                                          name: "expire",
-                                        },
-                                      });
-                                    }}
-                                    customInput={
-                                      <Input
-                                        size="sm"
-                                        type="text"
-                                        borderRadius="6px"
-                                        clearable
-                                        disabled={disabled}
-                                        error={
-                                          form.formState.errors.expire?.message
-                                        }
-                                      />
-                                    }
-                                  />
-                                  {field.value ? (
-                                    <FormHelperText>
-                                      {t(status, { time: time })}
-                                    </FormHelperText>
-                                  ) : (
-                                    ""
-                                  )}
-                                </>
-                              );
-                            }}
-                          />
-                        )}
-                      </FormControl>
-
-                      <FormControl
-                        mb={"10px"}
-                        isInvalid={!!form.formState.errors.note}
-                      >
-                        <FormLabel>{t("userDialog.note")}</FormLabel>
-                        <Textarea {...form.register("note")} />
-                        <FormErrorMessage>
-                          {form.formState.errors?.note?.message}
-                        </FormErrorMessage>
-                      </FormControl>
-                    </Flex>
-                    {error && (
-                      <Alert
-                        status="error"
-                        display={{ base: "none", md: "flex" }}
-                      >
-                        <AlertIcon />
-                        {error}
-                      </Alert>
+                          <Box w={{ base: "100%", md: "70%" }} mx="auto">
+                            <ReactApexChart
+                              options={usage.options}
+                              series={usage.series}
+                              type="donut"
+                            />
+                          </Box>
+                        </VStack>
+                      </GridItem>
                     )}
-                  </VStack>
-                </GridItem>
-                <GridItem>
-                  <FormControl
-                    isInvalid={
-                      !!form.formState.errors.selected_proxies?.message
-                    }
-                  >
-                    <FormLabel>{t("userDialog.protocols")}</FormLabel>
-                    <Controller
-                      control={form.control}
-                      name="selected_proxies"
-                      render={({ field }) => {
-                        return (
-                          <RadioGroup
-                            list={[
-                              {
-                                title: "vmess",
-                                description: t("userDialog.vmessDesc"),
-                              },
-                              {
-                                title: "vless",
-                                description: t("userDialog.vlessDesc"),
-                              },
-                              {
-                                title: "trojan",
-                                description: t("userDialog.trojanDesc"),
-                              },
-                              {
-                                title: "shadowsocks",
-                                description: t("userDialog.shadowsocksDesc"),
-                              },
-                            ]}
-                            disabled={disabled}
-                            {...field}
-                          />
-                        );
-                      }}
-                    />
-                    <FormErrorMessage>
-                      {t(
-                        form.formState.errors.selected_proxies
-                          ?.message as string
-                      )}
-                    </FormErrorMessage>
-                  </FormControl>
-                </GridItem>
-                {isEditing && usageVisible && (
-                  <GridItem pt={6} colSpan={{ base: 1, md: 2 }}>
-                    <VStack gap={4}>
-                      <UsageFilter
-                        defaultValue={usageFilter}
-                        onChange={(filter, query) => {
-                          setUsageFilter(filter);
-                          fetchUsageWithFilter(query);
-                        }}
-                      />
-                      <Box
-                        width={{ base: "100%", md: "70%" }}
-                        justifySelf="center"
-                      >
-                        <ReactApexChart
-                          options={usage.options}
-                          series={usage.series}
-                          type="donut"
-                        />
-                      </Box>
-                    </VStack>
-                  </GridItem>
-                )}
-              </Grid>
-              {error && (
-                <Alert
-                  mt="3"
-                  status="error"
-                  display={{ base: "flex", md: "none" }}
-                >
-                  <AlertIcon />
-                  {error}
-                </Alert>
-              )}
-            </ModalBody>
-            <ModalFooter mt="3">
-              <HStack
-                justifyContent="space-between"
-                w="full"
-                gap={3}
-                flexDirection={{
-                  base: "column",
-                  sm: "row",
-                }}
-              >
-                <HStack
-                  justifyContent="flex-start"
-                  w={{
-                    base: "full",
-                    sm: "unset",
-                  }}
-                >
-                  {isEditing && (
-                    <>
-                      <Tooltip label={t("delete")} placement="top">
-                        <IconButton
-                          aria-label="Delete"
-                          size="sm"
-                          onClick={() => {
-                            onDeletingUser(editingUser);
-                            onClose();
-                          }}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip label={t("userDialog.usage")} placement="top">
-                        <IconButton
-                          aria-label="usage"
-                          size="sm"
-                          onClick={handleUsageToggle}
-                        >
-                          <UserUsageIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Button onClick={handleResetUsage} size="sm">
-                        {t("userDialog.resetUsage")}
-                      </Button>
-                      <Button onClick={handleRevokeSubscription} size="sm">
-                        {t("userDialog.revokeSubscription")}
-                      </Button>
-                    </>
+                  </Grid>
+
+                  {/* Mobile error duplicate */}
+                  {error && (
+                    <Alert.Root
+                      mt="3"
+                      status="error"
+                      display={{ base: "flex", md: "none" }}
+                      borderRadius="md"
+                    >
+                      <Alert.Description>{error}</Alert.Description>
+                    </Alert.Root>
                   )}
-                </HStack>
-                <HStack
-                  w="full"
-                  maxW={{ md: "50%", base: "full" }}
-                  justify="end"
-                >
-                  <Button
-                    type="submit"
-                    size="sm"
-                    px="8"
-                    colorScheme="primary"
-                    leftIcon={loading ? <Spinner size="xs" /> : undefined}
-                    disabled={disabled}
-                  >
-                    {isEditing ? t("userDialog.editUser") : t("createUser")}
-                  </Button>
-                </HStack>
-              </HStack>
-            </ModalFooter>
-          </form>
-        </ModalContent>
-      </FormProvider>
-    </Modal>
+
+                  {/* Footer */}
+                  <Box mt="4">
+                    <HStack
+                      justify="space-between"
+                      flexDir={{ base: "column", sm: "row" }}
+                      gap={3}
+                    >
+                      {/* left actions */}
+                      {isEditing && (
+                        <HStack gap={2}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger asChild>
+                              <IconButton
+                                aria-label={t("delete")}
+                                size="sm"
+                                onClick={() => {
+                                  onDeletingUser(editingUser!);
+                                  closeDialog();
+                                }}
+                                disabled={loading}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Tooltip.Trigger>
+                            <Tooltip.Positioner>
+                              <Tooltip.Content>{t("delete")}</Tooltip.Content>
+                            </Tooltip.Positioner>
+                          </Tooltip.Root>
+
+                          <Tooltip.Root>
+                            <Tooltip.Trigger asChild>
+                              <IconButton
+                                aria-label={t("userDialog.usage")}
+                                size="sm"
+                                onClick={() => setUsageVisible((v) => !v)}
+                                disabled={loading}
+                              >
+                                <HeroChartPieIcon className="h-5 w-5" />
+                              </IconButton>
+                            </Tooltip.Trigger>
+                            <Tooltip.Positioner>
+                              <Tooltip.Content>
+                                {t("userDialog.usage")}
+                              </Tooltip.Content>
+                            </Tooltip.Positioner>
+                          </Tooltip.Root>
+
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              useDashboard.setState({ resetUsageUser: editingUser })
+                            }
+                            disabled={loading}
+                          >
+                            {t("userDialog.resetUsage")}
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              useDashboard.setState({ revokeSubscriptionUser: editingUser })
+                            }
+                            disabled={loading}
+                          >
+                            {t("userDialog.revokeSubscription")}
+                          </Button>
+                        </HStack>
+                      )}
+
+                      {/* submit */}
+                      <Button
+                        type="submit"
+                        size="sm"
+                        px="8"
+                        colorPalette="primary"
+                        loading={loading}
+                        disabled={loading}
+                      >
+                        {isEditing ? t("userDialog.editUser") : t("createUser")}
+                      </Button>
+                    </HStack>
+                  </Box>
+                </form>
+              </FormProvider>
+            </Box>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
   );
 };
