@@ -11,7 +11,7 @@ import {
     Alert
 } from "@chakra-ui/react";
 import { useClientPortalStore } from "../../lib/stores";
-import { toaster } from "@/components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 
 export const ClientAccountPage = () => {
     const navigate = useNavigate();

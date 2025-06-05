@@ -15,8 +15,8 @@ import {
     AlertTitle,
     AlertDescription,
 } from "@chakra-ui/react";
-import { Toaster } from "@/components/ui/toaster";
-import { toaster } from "@/components/ui/toaster";
+import { Toaster } from "../../components/shared/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 import { useClientPortalStore } from "../../lib/stores";
 import { ClientPlan } from "../../lib/types";
 

@@ -58,36 +58,6 @@ class BotKeyboard:
         keyboard.add(types.InlineKeyboardButton(text='🔙 Back', callback_data='cancel'))
         return keyboard
 
-    @staticmethod
-    def templates_menu(templates: Dict[str, int], username: str = None):
-        keyboard = types.InlineKeyboardMarkup()
-
-        for chunk in chunk_dict(templates):
-            row = []
-            for name, _id in chunk.items():
-                row.append(
-                    types.InlineKeyboardButton(
-                        text=name,
-                        callback_data=f'template_charge:{_id}:{username}' if username else f"template_add_user:{_id}"))
-            keyboard.add(*row)
-
-        keyboard.add(
-            types.InlineKeyboardButton(
-                text='🔙 Back',
-                callback_data=f'user:{username}' if username else 'cancel'))
-        return keyboard
-
-    @staticmethod
-    def random_username(template_id: str = ''):
-        keyboard = types.InlineKeyboardMarkup()
-
-        keyboard.add(types.InlineKeyboardButton(
-            text='🔡 Random Username',
-            callback_data=f'random:{template_id}'))
-        keyboard.add(types.InlineKeyboardButton(
-            text='🔙 Cancel',
-            callback_data='cancel'))
-        return keyboard
 
     @staticmethod
     def user_menu(user_info, with_back: bool = True, page: int = 1):

@@ -1,6 +1,6 @@
 import { createHashRouter } from "react-router-dom";
 import { fetch } from "../../lib/api/http";
-import { Dashboard } from "./Dashboard";
+import { Dashboard } from "../../pages/admin/Dashboard";
 import Login from "../shared/Login";
 
 const fetchAdminLoader = async () => {

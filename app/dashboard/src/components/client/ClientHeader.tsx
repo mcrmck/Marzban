@@ -17,7 +17,7 @@ import { FC } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { updateThemeColor } from "../../lib/utils/themeColor";
-import { Language } from "../Language";
+import { Language } from "../shared/Language";
 import { useClientPortalStore } from "../../lib/stores";
 import { useTheme } from "next-themes";
 
@@ -79,11 +79,13 @@ export const ClientHeader: FC = () => {
                 {t("client.plans")}
               </Text>
             </Link>
-            <Link to="/account">
-              <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
-                {t("client.account")}
-              </Text>
-            </Link>
+            {clientDetails && (
+              <Link to="/account">
+                <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
+                  {t("client.account")}
+                </Text>
+              </Link>
+            )}
           </HStack>
         </HStack>
 
@@ -94,7 +96,7 @@ export const ClientHeader: FC = () => {
                 variant="ghost"
                 onClick={() => navigate("/login")}
               >
-                {t("login")}
+                {t("loginButton")}
               </Button>
               <Button
                 colorScheme="brand"

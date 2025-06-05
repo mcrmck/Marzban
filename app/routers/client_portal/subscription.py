@@ -1,26 +1,17 @@
-import re
-from distutils.version import LooseVersion # type: ignore
 import logging
 
-from fastapi import APIRouter, Depends, Header, Path, Request, Response, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Depends, Path, Request, Response, HTTPException
+from fastapi.responses import  JSONResponse
 from sqlalchemy.orm import Session
 
-from app.db import Session, crud, get_db # crud.get_user_by_sub_token will be used by get_validated_sub
-from app.dependencies import get_validated_sub, validate_dates
-from app.models.user import SubscriptionUserResponse, UserResponse # UserResponse now includes active_node_id
+from app.db import Session, crud, get_db
+from app.dependencies import get_validated_sub
+from app.models.user import  UserResponse
 from app.subscription.share import encode_title, generate_subscription
-from app.templates import render_template
 from config import (
     SUB_PROFILE_TITLE,
     SUB_SUPPORT_URL,
-    SUB_UPDATE_INTERVAL,
-    USE_CUSTOM_JSON_DEFAULT,
-    USE_CUSTOM_JSON_FOR_HAPP,
-    USE_CUSTOM_JSON_FOR_STREISAND,
-    USE_CUSTOM_JSON_FOR_V2RAYN,
-    USE_CUSTOM_JSON_FOR_V2RAYNG,
-    XRAY_SUBSCRIPTION_PATH,
+    SUB_UPDATE_INTERVAL
 )
 
 logger = logging.getLogger(__name__)

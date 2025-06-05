@@ -11,7 +11,7 @@ import Timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
 
 // Import i18n setup
-import "./locales/i18n";
+import "./locales/i18n.ts";
 
 // Import themes and utilities
 import adminTheme from "./theme/adminTheme";

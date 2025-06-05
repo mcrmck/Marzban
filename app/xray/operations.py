@@ -3,30 +3,22 @@ from typing import TYPE_CHECKING, Optional, Dict, List
 from datetime import datetime
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
-from fastapi import Depends
-import time
 import logging
 
-from app import xray # xray.api, xray.nodes, xray.config, xray.exc
-from app.db import GetDB, crud # crud is used for node status updates
+from app import xray
+from app.db import GetDB, crud
 from app.db import models as db_models
 from app.models.node import NodeStatus
-from app.models.user import UserResponse, UserStatus # Added UserStatus
-from app.models.proxy import ProxyTypes # To iterate user.proxies if needed
+from app.models.user import UserResponse
+from app.models.proxy import ProxyTypes
 from app.utils.concurrency import threaded_function
-from app.xray.node import XRayNode # For type hinting if node objects are passed directly
-# from xray_api import XRay as XRayAPI # Already available via xray.api and node.api
-from xray_api.types.account import Account, XTLSFlows # Account models for Xray API
-from app.xray.config import XRayConfig  # Keep for type hints
-import config
+from app.xray.node import XRayNode
+from xray_api.types.account import Account
+from xray_api import XRay as XRayAPI # For type hinting api parameters
+
 
 logger = logging.getLogger("marzban")
 
-if TYPE_CHECKING:
-    # from app.db import User as DBUser # No longer directly type hinting DBUser in public functions
-    from app.db.models import Node as DBNode # For add_node
-    from xray_api import XRay as XRayAPI # For type hinting api parameters
-    from app.db.models import NodeServiceConfiguration
 
 
 @lru_cache(maxsize=None)

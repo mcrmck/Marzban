@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field, field_validator
 from app.models.protocol_types import ProtocolType, NetworkType, SecurityType
 
 
-
 class NodeServiceConfigurationBase(BaseModel):
     service_name: str = Field(..., min_length=1, max_length=255, description="User-friendly name for this service configuration")
     enabled: bool = True

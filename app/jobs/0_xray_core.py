@@ -34,7 +34,7 @@ def core_health_check():
         if not node.connected:
             if not config:
                 config = xray.config.include_db_users()
-            xray.operations.connect_node(node_id, config)
+            xray.operations.connect_node(node_id)
 
 
 def start_core():
@@ -62,7 +62,7 @@ def start_core():
     # if the node is already configured and just needs a connection attempt.
     # However, passing it is safer if connect_node might also (re)start the Xray process on the node.
     for node_id in node_ids_to_connect:
-        xray.operations.connect_node(node_id, config_for_nodes) # Pass the generated config
+        xray.operations.connect_node(node_id)
 
     # Schedule the health check for connected nodes
     scheduler.add_job(core_health_check, 'interval',

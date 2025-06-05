@@ -9,11 +9,8 @@ from collections import deque
 from contextlib import contextmanager
 from typing import List, Optional
 
-import grpc
 import requests
 import rpyc
-from requests.adapters import HTTPAdapter
-from urllib3.poolmanager import PoolManager # For SANIgnoringAdaptor
 from websocket import create_connection, WebSocketConnectionClosedException, WebSocketTimeoutException
 
 from app.xray.config import XRayConfig # Assuming this path is correct in your project
@@ -40,19 +37,6 @@ def string_to_temp_file(content: str) -> tempfile._TemporaryFileWrapper:
     return file
 
 
-class SANIgnoringAdaptor(HTTPAdapter):
-    """
-    An HTTPAdapter for 'requests' that disables SSL hostname verification.
-    Useful for internal services where certificates might use internal names or IPs
-    not matching the hostname used for connection, or lack SubjectAlternativeName.
-    WARNING: This reduces security and should be used with caution.
-    """
-    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
-        self.poolmanager = PoolManager(num_pools=connections,
-                                       maxsize=maxsize,
-                                       block=block,
-                                       assert_hostname=False, # Disable hostname verification
-                                       **pool_kwargs)
 
 
 class NodeAPIError(Exception):
@@ -379,8 +363,6 @@ class ReSTXRayNode:
             temp_session = requests.Session()
             temp_session.cert = (self._certfile.name, self._keyfile.name)
             temp_session.verify = PANEL_TRUSTED_CA_PATH
-            # If using SANIgnoringAdaptor for main session, consider for temp too:
-            # temp_session.mount('https://', SANIgnoringAdaptor())
 
             logger.debug(f"Node {self.name} ({self.id}): Temp session configured with client cert, key, and CA verify.")
 

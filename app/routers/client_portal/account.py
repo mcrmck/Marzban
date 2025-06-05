@@ -1,30 +1,21 @@
-from fastapi import APIRouter, Depends, Request, HTTPException, BackgroundTasks, Response as FastAPIResponse, status
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import APIRouter, Depends, Request, HTTPException, BackgroundTasks, status
 from sqlalchemy.orm import Session
-# import httpx # Keep if other parts use it, though not for local node fetching
 import os
-import stripe # type: ignore
-import re
+import stripe
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
-import uuid
 from pydantic import BaseModel
 
 import logging
 from app import xray
 from app.db import get_db, crud
 from app.db.models import User as DBUser
-from app.portal.models.plan import Plan
-from app.routers.client_portal.auth_utils import get_current_user, get_current_user_optional, create_access_token
-# from app.models.admin import Admin # Pydantic Admin, not directly used in this router
-from app.models.user import UserResponse, UserStatus, UserModify, UserStatusModify, UserCreate, UserStatusCreate, ProxyTypes
-from app.models.node import NodeStatus, NodeResponse  # Added NodeResponse import
-# from app.models.node import NodeResponse # Not strictly needed if template uses ORM node attributes
+from app.routers.client_portal.auth_utils import get_current_user, get_current_user_optional
+from app.models.user import UserResponse, UserModify, UserStatusModify
+from app.models.node import NodeStatus, NodeResponse
 from app.models.plan import PlanResponse
 from app.portal.plans import get_plan_by_id
-from app.portal.models.api import PortalAccountDetailsResponse, ClientLoginRequest, TokenResponse
-from app.utils import responses
+from app.portal.models.api import PortalAccountDetailsResponse
 
 from config import MOCK_STRIPE_PAYMENT as APP_MOCK_STRIPE_PAYMENT
 
@@ -46,53 +37,6 @@ elif not MOCK_STRIPE_PAYMENT and not STRIPE_SECRET_KEY:
 
 
 router = APIRouter(prefix="/account", tags=["Client Portal API"])
-
-# --- Jinja Filters ---
-def readable_bytes_filter(size_in_bytes):
-    if size_in_bytes is None: return "Unlimited"
-    if not isinstance(size_in_bytes, (int, float)) or size_in_bytes < 0: return "0 B"
-    if size_in_bytes == 0: return "0 B" # Can mean 0 allowed or truly 0, context matters
-    units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-    i = 0
-    # Ensure size_in_bytes is float for division if it's an int
-    size_in_bytes_float = float(size_in_bytes)
-    while size_in_bytes_float >= 1024.0 and i < len(units) - 1:
-        size_in_bytes_float /= 1024.0
-        i += 1
-    return f"{size_in_bytes_float:.1f} {units[i]}"
-
-def timestamp_to_datetime_str_filter(timestamp, format_str="%Y-%m-%d %H:%M UTC"): # Renamed format to format_str
-    if timestamp is None: return "N/A"
-    try:
-        # Ensure timestamp is treated as UTC if it's naive
-        dt_obj = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
-        return dt_obj.strftime(format_str)
-    except (ValueError, TypeError, OSError):
-        return "Invalid Date"
-
-def time_until_expiry_filter(timestamp):
-    if timestamp is None: return "Never"
-    try:
-        now_utc = datetime.now(timezone.utc) # Use timezone-aware now
-        expire_dt_utc = datetime.fromtimestamp(int(timestamp), tz=timezone.utc) # Assume timestamp is UTC
-
-        if now_utc >= expire_dt_utc:
-            return "Expired"
-
-        delta = expire_dt_utc - now_utc
-        days = delta.days
-        hours, remainder = divmod(delta.seconds, 3600)
-        minutes, _ = divmod(remainder, 60)
-
-        if days > 365: return f"{days // 365} years" # Approximation
-        if days > 60: return f"{days // 30} months" # Approximation
-        if days > 0: return f"{days} days" + (f", {hours} hrs" if days < 7 and hours > 0 else "")
-        if hours > 0: return f"{hours} hours" + (f", {minutes} min" if minutes > 0 else "")
-        if minutes > 0: return f"{minutes} minutes"
-        return "Less than a minute"
-    except (ValueError, TypeError, OSError) as e:
-        logging.getLogger("marzban").error(f"Error in time_until_expiry_filter for timestamp {timestamp}: {e}")
-        return "Invalid Expiry"
 
 
 # --- Helper function to activate user plan ---
@@ -434,8 +378,8 @@ async def get_available_plans(
     db: Session = Depends(get_db)
 ):
     """Get a list of available plans."""
-    plans = crud.get_plans(db)
-    return plans  # PlanResponse inherits from Plan, so we can return plans directly
+    db_plans = crud.get_plans(db)
+    return [PlanResponse.model_validate(plan) for plan in db_plans]
 
 class NodeActivationRequest(BaseModel):
     node_id: int

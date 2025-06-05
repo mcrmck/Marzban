@@ -15,15 +15,11 @@ from pydantic import (
     # EmailStr, # Not used here anymore
 )
 
-from app import xray
 from app.models.admin import Admin # Assuming Admin model doesn't need username changes reflected here for User model
 from app.models.proxy import ProxySettings, ProxyTypes
 from app.utils.jwt import create_subscription_token # Check if this uses username
 from config import XRAY_SUBSCRIPTION_PATH, XRAY_SUBSCRIPTION_URL_PREFIX
 from app.db import crud
-
-if TYPE_CHECKING:
-    from app.subscription.share import generate_v2ray_links
 
 
 class ReminderType(str, Enum):

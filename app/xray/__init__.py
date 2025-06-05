@@ -19,13 +19,11 @@ if not logging.getLogger('app').hasHandlers(): # Check against a root app logger
 
 
 # Search for a free API port for the default config template
-api_port_found = False
 api_port_to_use = 20000 # Default fallback for api_port
 try:
     for port_candidate in range(randint(10000, 60000), 65536):
         if not check_port(port_candidate):
             api_port_to_use = port_candidate
-            api_port_found = True
             break
     # No need for an else here, api_port_to_use has a default
 finally:

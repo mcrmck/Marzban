@@ -16,7 +16,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import './index.scss';
 
 // Initialize i18n
-import './locales/i18n';
+import './i18n';
 
 // Initialize dayjs plugins
 dayjs.extend(utc);

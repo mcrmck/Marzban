@@ -11,7 +11,7 @@ import {
     Field,
 } from "@chakra-ui/react";
 import { useClientPortalStore, useIsAuthenticated, useIsLoadingAuth, useAuthError, useLogin } from "../../lib/stores";
-import { toaster } from "@/components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 
 interface LocationState {
     from?: {

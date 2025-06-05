@@ -14,7 +14,7 @@ import {
 } from "@chakra-ui/react";
 import { useClientPortalStore } from "../../lib/stores";
 import { ClipboardIcon } from "@heroicons/react/24/outline";
-import { toaster } from "@/components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 
 const ClientRegisterPage = () => {
     const navigate = useNavigate();

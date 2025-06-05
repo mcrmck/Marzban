@@ -5,7 +5,7 @@
 
 import { Outlet } from "react-router-dom";
 import { Box, Flex } from "@chakra-ui/react";
-import { Header } from "../../../components/Header";
+import { Header } from "../../../components/admin/Header";
 import { ProtectedRoute } from "../../../shared/components/ProtectedRoute";
 
 const AdminLayout = () => {

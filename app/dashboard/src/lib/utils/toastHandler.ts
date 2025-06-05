@@ -3,7 +3,7 @@
  * Provides standardized toast notifications with proper theming
  */
 
-import { toaster } from "../../components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 
 export type ToastStatus = "success" | "error" | "warning" | "info" | "loading";
 

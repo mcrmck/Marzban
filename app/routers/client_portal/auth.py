@@ -1,54 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import  JSONResponse
 from sqlalchemy.orm import Session
 
 from .auth_utils import create_access_token
 from app.db import get_db, crud
-from app.models.user import UserCreate, UserStatusCreate, UserStatus, UserResponse # Make sure UserStatus is imported if used directly
+from app.models.user import UserCreate, UserStatusCreate
 from app import xray
 from app.models.proxy import ProxyTypes
 from app.portal.models.api import TokenResponse, ClientLoginRequest
 
 import uuid
-import os
-from datetime import datetime # Import datetime
 
 # Create two routers - one for HTML pages and one for API endpoints
 api_router = APIRouter(prefix="/auth", tags=["Client Portal API"])
 
-
-def readable_bytes_filter_auth(size_in_bytes):
-    if size_in_bytes is None: return "Unlimited"
-    if size_in_bytes == 0 and isinstance(size_in_bytes, int): return "0 B"
-    if not isinstance(size_in_bytes, (int, float)) or size_in_bytes < 0:
-         return "N/A"
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size_in_bytes < 1024.0:
-            return f"{size_in_bytes:.1f} {unit}"
-        size_in_bytes /= 1024.0
-    return f"{size_in_bytes:.1f} PB"
-
-def timestamp_to_datetime_str_filter_auth(timestamp, format="%Y-%m-%d %H:%M"):
-    if timestamp is None: return "N/A"
-    try:
-        return datetime.fromtimestamp(int(timestamp)).strftime(format)
-    except:
-        return "Invalid Date"
-
-def time_until_expiry_filter_auth(timestamp):
-    if timestamp is None: return "Never"
-    now = datetime.utcnow()
-    expire_dt = datetime.fromtimestamp(int(timestamp))
-    if now >= expire_dt:
-        return "Expired"
-    delta = expire_dt - now
-    if delta.days > 0:
-        return f"{delta.days} days left"
-    elif delta.seconds // 3600 > 0:
-        return f"{delta.seconds // 3600} hours left"
-    elif delta.seconds // 60 > 0:
-        return f"{delta.seconds // 60} minutes left"
-    return "Soon"
 
 # API Authentication Endpoints
 @api_router.post("/token", response_model=TokenResponse)

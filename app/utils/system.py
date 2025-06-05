@@ -234,19 +234,6 @@ def get_network_info() -> dict:
         return {}
 
 
-def get_disk_io() -> dict:
-    """Get disk I/O statistics."""
-    try:
-        io_counters = psutil.disk_io_counters()
-        return {
-            "read_bytes": io_counters.read_bytes,
-            "write_bytes": io_counters.write_bytes,
-            "read_count": io_counters.read_count,
-            "write_count": io_counters.write_count
-        }
-    except Exception as e:
-        logger.error(f"Error getting disk I/O info: {e}")
-        return {}
 
 
 def get_network_io() -> dict:

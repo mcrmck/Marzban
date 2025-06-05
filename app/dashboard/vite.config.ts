@@ -1,8 +1,3 @@
-/**
- * Unified Vite configuration for both admin and client portals
- * Supports single build with dynamic routing and optimized development experience
- */
-
 import react from "@vitejs/plugin-react";
 import { defineConfig, splitVendorChunkPlugin, type Plugin } from "vite";
 import svgr from "vite-plugin-svgr";
@@ -17,7 +12,7 @@ function devServerRoutingFix(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url || '';
-        
+
         // Handle admin routes
         if (url.startsWith('/admin') && !url.includes('.') && !url.startsWith('/api')) {
           req.url = '/admin.html';
@@ -26,7 +21,7 @@ function devServerRoutingFix(): Plugin {
         else if (!url.startsWith('/api') && !url.includes('.') && !url.startsWith('/admin')) {
           req.url = '/index.html';
         }
-        
+
         next();
       });
     }
@@ -36,7 +31,7 @@ function devServerRoutingFix(): Plugin {
 export default defineConfig(async ({ mode }: ConfigEnv) => {
   const env = loadEnv(mode, process.cwd(), '');
   const isDev = mode === 'development';
-  
+
   // Determine build target from mode
   const isAdminBuild = mode === 'admin';
   const isClientBuild = mode === 'portal' || mode === 'client';
@@ -131,9 +126,6 @@ export default defineConfig(async ({ mode }: ConfigEnv) => {
     resolve: {
       alias: {
         '@': '/src',
-        '@shared': '/src/shared',
-        '@admin': '/src/apps/admin',
-        '@client': '/src/apps/client',
       }
     },
     build: {

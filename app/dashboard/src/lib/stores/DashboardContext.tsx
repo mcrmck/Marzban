@@ -1,7 +1,7 @@
 /* DashboardContext.tsx
    -------------------- */
 
-   import { StatisticsQueryKey } from "../../components/Statistics";
+   import { StatisticsQueryKey } from "../../components/admin/Statistics";
    import { fetch as http } from "../api/http";                    // ⬅️ use named import
    import { User, UserCreate } from "../types/User";
    import { queryClient } from "../utils/react-query";

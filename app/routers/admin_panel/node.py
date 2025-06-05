@@ -58,11 +58,22 @@ def add_node(
         cert_manager = CertificateManager(db)
         
         try:
-            # Generate certificates using node name and address
-            node_certs = cert_manager.generate_node_certificates(
-                node_name=dbnode.name,
-                node_address=dbnode.address
-            )
+            # Check if certificates already exist for this node
+            node_certs = cert_manager.get_node_certificates(dbnode.name)
+            
+            if not node_certs:
+                # Generate new certificates using node name and address
+                node_certs = cert_manager.generate_node_certificates(
+                    node_name=dbnode.name,
+                    node_address=dbnode.address
+                )
+                logging.getLogger("marzban").info(
+                    f'New certificates generated for node "{dbnode.name}"'
+                )
+            else:
+                logging.getLogger("marzban").info(
+                    f'Using existing certificates for node "{dbnode.name}"'
+                )
             
             # Update the node with the generated client certificates
             # This stores the panel's client cert in the existing node table fields
@@ -70,9 +81,6 @@ def add_node(
             dbnode.panel_client_key_pem = node_certs.panel_client_cert.private_key_pem
             db.commit()
             
-            logging.getLogger("marzban").info(
-                f'Certificates automatically generated for node "{dbnode.name}"'
-            )
             
         except Exception as cert_error:
             logging.getLogger("marzban").warning(

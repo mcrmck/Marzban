@@ -11,7 +11,7 @@ import {
 } from "@chakra-ui/react";
 import { useClientPortalStore } from "../../lib/stores";
 import type { ClientNode } from "../../lib/types";
-import { toaster } from "@/components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 
 const ClientServersPage = () => {
     const { servers, fetchServers, isLoadingServers } = useClientPortalStore();

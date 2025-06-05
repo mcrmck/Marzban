@@ -5,7 +5,6 @@ from decouple import UndefinedValueError, config
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from app.db import GetDB, crud

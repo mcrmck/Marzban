@@ -19,7 +19,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { ClientPortalUser, ClientNode } from "../../lib/types";
 import { ClipboardIcon } from "@heroicons/react/24/outline";
 import { formatBytes, formatDate } from "../../lib/utils";
-import { toaster } from "@/components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */

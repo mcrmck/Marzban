@@ -1,7 +1,6 @@
 import base64
 import json # For logging dicts
 import logging
-import random
 import secrets
 from collections import defaultdict
 from datetime import datetime as dt

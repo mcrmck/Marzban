@@ -62,7 +62,7 @@ def record_user_usages(ignore_write_to_db: bool = False):
             continue
 
         try:
-            stats = node_instance.api.get_all_users_traffic(reset=True, timeout=30)
+            stats = node_instance.api.get_users_stats(reset=True, timeout=30)
 
             for stat_item in stats: # Renamed from 'stat' to avoid conflict if 'stat' module is ever imported
                 user_identifier = stat_item.name

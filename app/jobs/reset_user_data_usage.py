@@ -3,6 +3,8 @@ from datetime import datetime
 import logging
 from app.db import crud, GetDB, get_users
 from app.models.user import UserDataLimitResetStrategy, UserStatus
+from app import xray
+
 
 reset_strategy_to_days = {
     UserDataLimitResetStrategy.day.value: 1,

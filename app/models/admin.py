@@ -40,7 +40,6 @@ class Admin(BaseModel):
 
     @classmethod
     def get_admin(cls, token: str, db: Session) -> Optional["Admin"]: # Return type is Pydantic Admin
-        logger.debug(f"Validating admin token: {token[:20]}...")
         payload = get_admin_payload(token)
         if not payload:
             logger.warning("get_admin_payload returned None")
@@ -51,7 +50,6 @@ class Admin(BaseModel):
             logger.warning("Token payload missing username")
             return None
 
-        logger.debug(f"Looking up admin in database: {username_from_token}")
         db_admin_orm = crud.get_admin(db, username_from_token)
 
         if not db_admin_orm:
@@ -75,10 +73,7 @@ class Admin(BaseModel):
 
         # Now, if the username is in SUDOERS, ensure their is_sudo status is True
         if username_from_token in SUDOERS:
-            logger.debug(f"Admin {username_from_token} is in SUDOERS, ensuring is_sudo=True")
             pydantic_admin_instance.is_sudo = True
-
-        logger.debug(f"Successfully validated admin token for: {username_from_token}")
         return pydantic_admin_instance
 
     @classmethod

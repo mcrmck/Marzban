@@ -13,7 +13,8 @@ import {
 } from "@chakra-ui/react";
 import { FaServer, FaCreditCard, FaUser } from "react-icons/fa";
 import { useClientPortalStore } from "../../lib/stores";
-import { toaster } from "@/components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
+import { useTranslation } from "react-i18next";
 
 const FeatureCard = ({ icon, title, description, onClick }: {
     icon: any;
@@ -41,19 +42,20 @@ const FeatureCard = ({ icon, title, description, onClick }: {
 
 export const ClientLandingPage = () => {
     const navigate = useNavigate();
+    const { t } = useTranslation();
     const { clientDetails, fetchClientDetails, isLoadingDetails } = useClientPortalStore();
 
     useEffect(() => {
         fetchClientDetails().catch(() => {
             toaster.create({
-                title: "Error",
-                description: "Failed to fetch account details. Please try again.",
+                title: t("error"),
+                description: t("client.fetchDetailsError"),
                 type: "error",
                 duration: 5000,
                 closable: true,
             });
         });
-    }, [fetchClientDetails]);
+    }, [fetchClientDetails, t]);
 
     if (isLoadingDetails) {
         return (
@@ -67,29 +69,29 @@ export const ClientLandingPage = () => {
         <Container maxW="container.xl" py={10}>
             <VStack gap={8} align="stretch">
                 <Box>
-                    <Heading size="xl">Welcome, {clientDetails?.user.username}</Heading>
+                    <Heading size="xl">{t("client.welcome")}</Heading>
                     <Text color="gray.600" mt={2}>
-                        Manage your services and account settings
+                        {t("client.manageServices")}
                     </Text>
                 </Box>
 
                 <SimpleGrid columns={{ base: 1, md: 3 }} gap={6}>
                     <FeatureCard
                         icon={FaServer}
-                        title="Servers"
-                        description="View and manage your server configurations"
+                        title={t("client.servers")}
+                        description={t("client.serversDescription")}
                         onClick={() => navigate("/servers")}
                     />
                     <FeatureCard
                         icon={FaCreditCard}
-                        title="Plans"
-                        description="Browse and subscribe to available plans"
+                        title={t("client.plans")}
+                        description={t("client.plansDescription")}
                         onClick={() => navigate("/plans")}
                     />
                     <FeatureCard
                         icon={FaUser}
-                        title="Account"
-                        description="View and update your account information"
+                        title={t("client.account")}
+                        description={t("client.accountDescription")}
                         onClick={() => navigate("/account")}
                     />
                 </SimpleGrid>
@@ -104,16 +106,16 @@ export const ClientLandingPage = () => {
                     >
                         <VStack align="start" gap={4}>
                             <Heading size="md" color="yellow.700">
-                                Account Inactive
+                                {t("client.accountInactive")}
                             </Heading>
                             <Text color="yellow.700">
-                                Your account is currently inactive. Please subscribe to a plan to activate your account.
+                                {t("client.accountInactiveDescription")}
                             </Text>
                             <Button
                                 colorScheme="yellow"
                                 onClick={() => navigate("/plans")}
                             >
-                                View Plans
+                                {t("client.viewPlans")}
                             </Button>
                         </VStack>
                     </Box>

@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from copy import deepcopy
 from pathlib import PosixPath
-from typing import Union, List, Dict, Optional
+from typing import Union, List
 
 import commentjson
-from sqlalchemy import func
 
-from app.db import GetDB # Assuming GetDB provides a session
 from app.db import models as db_models
 from app.models.proxy import ProxyTypes
-from app.models.user import UserStatus # Assuming UserStatus is correctly defined
-from app.utils.crypto import get_cert_SANs
 # Removed XRAY_FALLBACKS_INBOUND_TAG from this import
-from config import DEBUG, XRAY_EXCLUDE_INBOUND_TAGS
+from config import DEBUG
 import logging
 
 logger = logging.getLogger(__name__)

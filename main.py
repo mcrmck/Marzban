@@ -1,13 +1,9 @@
 # Marzban/main.py
 
-import click
 import logging
 import os
-import ssl
 from contextlib import asynccontextmanager # Keep this for the main_lifespan definition
 import uvicorn
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
 from fastapi import FastAPI # For type hinting
 
 
@@ -18,10 +14,6 @@ except ImportError as e:
 
 from config import (DEBUG, UVICORN_HOST, UVICORN_PORT, UVICORN_SSL_CERTFILE,
                     UVICORN_SSL_KEYFILE, UVICORN_SSL_CA_TYPE, UVICORN_UDS)
-# Only import these if the lifespan tasks are re-enabled later
-# from app.db import Base, engine, SessionLocal, crud
-# from app.models.node import NodeStatus
-# from app.xray.operations import get_tls
 
 
 logger = logging.getLogger("marzban.main")
@@ -36,21 +28,11 @@ async def main_lifespan(fastapi_app: FastAPI):
     yield
     logger.info("Main lifespan: Custom shutdown tasks would run here.")
 
-# --- CRITICAL CHANGE FOR THIS TEST: Do NOT assign the custom lifespan ---
-# app.router.lifespan_context = main_lifespan # COMMENT THIS LINE OUT
-
 
 # Cert Validation and DB Table Creation can remain as placeholders
 def validate_cert_and_key(cert_file_path, key_file_path, ca_type):
-    # ... (your existing code or pass) ...
     pass
 try:
-    # from app.db import Base, engine # Ensure these are available if create_all is run
-    # if 'Base' in globals() and hasattr(Base, 'metadata'):
-    # Base.metadata.create_all(bind=engine)
-    # logger.info("Database tables checked/created if not existing (main.py).")
-    # else:
-    # logger.warning("Base or Base.metadata not defined, skipping table creation in main.py.")
     logger.info("MAIN.PY: DB creation logic present but might be effectively skipped if Base/engine not fully available due to other commented out lifespan tasks.")
 except Exception as e:
     logger.error(f"Error during DB table creation (main.py): {e}", exc_info=True)

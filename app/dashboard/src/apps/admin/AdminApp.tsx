@@ -9,7 +9,7 @@ import { GlobalProviders } from "../../shared/providers/GlobalProviders";
 // Admin pages - lazy loaded
 import { lazy } from "react";
 
-const Dashboard = lazy(() => import("../../app/admin/Dashboard"));
+const Dashboard = lazy(() => import("../../pages/admin/Dashboard"));
 const Login = lazy(() => import("../../app/shared/Login"));
 
 // Admin layout

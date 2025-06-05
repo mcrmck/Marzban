@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 
-router = APIRouter()
 
 # Import and include client portal specific routers
 from . import (
@@ -8,18 +7,19 @@ from . import (
     auth,
     subscription,
 )
+from fastapi import Depends, Request
+from sqlalchemy.orm import Session
+from app.db import get_db, crud
+from app.portal.models.api import TokenResponse, ClientLoginRequest
+
+
+router = APIRouter()
 
 # Include all client portal routers
 router.include_router(auth.router)
 router.include_router(account.router)
 router.include_router(subscription.router)
 
-# Add direct routes that frontend expects (to avoid 404s)
-from fastapi import Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from app.db import get_db, crud
-from app.portal.models.api import TokenResponse, ClientLoginRequest
-from typing import List
 
 @router.post("/register", response_model=TokenResponse)
 async def register_direct_route(db: Session = Depends(get_db)):
@@ -41,7 +41,7 @@ async def logout_direct_route():
     response = Response()
     return await api_logout(response=response)
 
-@router.get("/account/plans")  
+@router.get("/account/plans")
 async def plans_direct_route(db: Session = Depends(get_db)):
     """Direct plans route - get all available plans"""
     from app.db.models import Plan
@@ -69,18 +69,18 @@ async def plans_direct_route(db: Session = Depends(get_db)):
 
 @router.get("/servers")
 async def servers_direct_route(
-    request: Request, 
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Direct servers route that proxies to account.servers"""
     from .account import get_servers
     from .auth_utils import get_current_user
     from app.db.models import User as DBUser
-    
+
     # Get current user and convert to DB user object
     current_user = await get_current_user(request, db)
     current_user_orm: DBUser = crud.get_user(db, account_number=current_user.account_number)
-    
+
     return await get_servers(request=request, db=db, current_user_orm=current_user_orm)
 
 __all__ = ["router"]

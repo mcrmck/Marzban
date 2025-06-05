@@ -19,7 +19,7 @@ import { FieldValues, useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 
-import { Footer } from "../../components/Footer";
+import { Footer } from "../../components/shared/Footer";
 import { fetch } from "../../lib/api/http";
 import {
   removeAuthToken,
@@ -28,7 +28,7 @@ import {
 
 import Logo from "../../assets/logo.svg?react";
 import { useTranslation } from "react-i18next";
-import { Language } from "../../components/Language";
+import { Language } from "../../components/shared/Language";
 
 /* ------------------------------------------------------------------- */
 /* Validation schema                                                   */
@@ -83,7 +83,7 @@ const Login: FC = () => {
     formData.append("grant_type", "password");
 
     setLoading(true);
-    fetch.post<{ access_token: string }>("/api/admin/token", formData)
+    fetch.post<{ access_token: string }>("/token", formData)
       .then(({ access_token: token }) => {
         setAuthToken(token);
         // Redirect to admin dashboard root
@@ -168,7 +168,7 @@ const Login: FC = () => {
                     loading={loading}
                   >
                     <LoginIcon className="me-1" />
-                    {t("login")}
+                    {t("loginButton")}
                   </Button>
                 </VStack>
               </form>

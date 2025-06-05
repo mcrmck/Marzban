@@ -2,7 +2,6 @@ import re
 from datetime import datetime as dt
 from typing import Optional
 
-from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 
 from app.models.user import User, UserResponse, UserStatus
@@ -60,8 +59,7 @@ def get_user_info_text(db_user: User, db: Session) -> str:
     online_at = time_to_string(user.online_at) if user.online_at else "-"
     sub_updated_at = time_to_string(user.sub_updated_at) if user.sub_updated_at else "-"
     if user.status == UserStatus.on_hold:
-        expiry_text = f"⏰ <b>On Hold Duration:</b> <code>{on_hold_duration} days</code> (auto start at <code>{
-            on_hold_timeout}</code>)"
+        expiry_text = f"⏰ <b>On Hold Duration:</b> <code>{on_hold_duration} days</code> (auto start at <code>{ on_hold_timeout}</code>)"
     else:
         expiry_text = f"📅 <b>Expiry Date:</b> <code>{expiry_date}</code> ({time_left})"
     return f"""\

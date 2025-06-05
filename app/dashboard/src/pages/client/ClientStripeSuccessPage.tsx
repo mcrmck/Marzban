@@ -10,7 +10,7 @@ import {
     Spinner,
 } from "@chakra-ui/react";
 import { useClientPortalStore } from "../../lib/stores";
-import { toaster } from "@/components/ui/toaster";
+import { toaster } from "../../components/shared/ui/toaster";
 
 export const ClientStripeSuccessPage = () => {
     const navigate = useNavigate();

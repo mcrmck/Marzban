@@ -10,7 +10,7 @@ import {
     Field,
     Input,
 } from "@chakra-ui/react";
-import { toaster, Toaster } from "@/components/ui/toaster";
+import { toaster, Toaster } from "../../components/shared/ui/toaster";
 import { useClientPortalStore } from "../../lib/stores";
 import { useTranslation } from "react-i18next";
 

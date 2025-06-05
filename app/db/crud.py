@@ -5,15 +5,12 @@ Functions for managing proxy hosts, users, user templates, nodes, and administra
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
-from .models import TLS
 import logging
 
 from sqlalchemy import and_, delete, func, or_, select  # Add select here
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
-from app.models.plan import Plan  # Add Plan model import
-
-logger = logging.getLogger("marzban")
+from app.db.models import Plan  # Changed from app.models.plan import Plan
 
 from app.db.models import (
     JWT,
@@ -34,7 +31,6 @@ from app.db.models import (
 from app.models.admin import AdminCreate, AdminModify, AdminPartialModify
 from app.models.node import NodeCreate, NodeModify, NodeStatus, NodeUsageResponse
 from app.models.node_service import NodeServiceConfigurationCreate, NodeServiceConfigurationUpdate
-from app.models.proxy import ProxyTypes
 from app.models.user import (
     ReminderType,
     UserCreate,
@@ -44,11 +40,11 @@ from app.models.user import (
     UserStatus,
     UserUsageResponse
 )
-from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
-from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODELETE_DAYS
-import logging
-import os
 
+from config import  USERS_AUTODELETE_DAYS
+
+
+logger = logging.getLogger("marzban")
 
 # Set logging level to DEBUG
 logger.setLevel(logging.DEBUG)
@@ -282,7 +278,7 @@ def update_user(db: Session, dbuser: DBUser, modify: UserModify) -> DBUser:
     print(f"[DEBUG] update_user: Modify data: {modify.model_dump()}")
 
     if modify.proxies is not None:
-        print(f"[DEBUG] update_user: Updating proxies")
+        print("[DEBUG] update_user: Updating proxies")
         # Clear existing proxies for this user
         for p in list(dbuser.proxies): # Iterate over a copy
             print(f"[DEBUG] update_user: Removing proxy {p.type}")
@@ -306,16 +302,16 @@ def update_user(db: Session, dbuser: DBUser, modify: UserModify) -> DBUser:
         if key == "next_plan":
             if value is None:
                 if dbuser.next_plan:
-                    print(f"[DEBUG] update_user: Removing next plan")
+                    print("[DEBUG] update_user: Removing next plan")
                     db.delete(dbuser.next_plan)
                     dbuser.next_plan = None
             else:
                 if dbuser.next_plan:
-                    print(f"[DEBUG] update_user: Updating existing next plan")
+                    print("[DEBUG] update_user: Updating existing next plan")
                     for np_key, np_value in value.items():
                         setattr(dbuser.next_plan, np_key, np_value)
                 else:
-                    print(f"[DEBUG] update_user: Creating new next plan")
+                    print("[DEBUG] update_user: Creating new next plan")
                     dbuser.next_plan = NextPlan(**value, user_id=dbuser.id)
         elif hasattr(dbuser, key):
             print(f"[DEBUG] update_user: Setting {key} to {value}")
@@ -333,11 +329,11 @@ def update_user(db: Session, dbuser: DBUser, modify: UserModify) -> DBUser:
         if dbuser.status not in (UserStatus.expired, UserStatus.disabled):
             if not value or (dbuser.used_traffic < value if value is not None else True):
                 if dbuser.status == UserStatus.limited and dbuser.status != UserStatus.on_hold:
-                    print(f"[DEBUG] update_user: Setting status to active due to data limit change")
+                    print("[DEBUG] update_user: Setting status to active due to data limit change")
                     setattr(dbuser, 'status', UserStatus.active)
                     dbuser.last_status_change = datetime.utcnow()
             elif value is not None and dbuser.used_traffic >= value:
-                print(f"[DEBUG] update_user: Setting status to limited due to data limit change")
+                print("[DEBUG] update_user: Setting status to limited due to data limit change")
                 setattr(dbuser, 'status', UserStatus.limited)
                 dbuser.last_status_change = datetime.utcnow()
 
@@ -381,7 +377,8 @@ def reset_user_data_usage(db: Session, dbuser: DBUser) -> DBUser:
 
 
 def reset_user_by_next(db: Session, dbuser: DBUser) -> DBUser:
-    if dbuser.next_plan is None: return dbuser
+    if dbuser.next_plan is None:
+        return dbuser
 
     usage_log = UserUsageResetLogs(user_id=dbuser.id, used_traffic_at_reset=dbuser.used_traffic)
     db.add(usage_log)
@@ -412,7 +409,8 @@ def revoke_user_sub(db: Session, dbuser: DBUser) -> DBUser:
     # If not, an explicit re-fetch or ensuring proxies are loaded is crucial here.
     # For safety, let's assume dbuser might be detached or proxies not loaded by caller:
     user_with_proxies = get_user_by_id(db, dbuser.id)
-    if not user_with_proxies: return dbuser # Should not happen if dbuser is valid
+    if not user_with_proxies:
+        return dbuser # Should not happen if dbuser is valid
 
     user_pydantic = UserResponse.model_validate(user_with_proxies, context={'db': db})
 
@@ -427,7 +425,8 @@ def revoke_user_sub(db: Session, dbuser: DBUser) -> DBUser:
             })
 
     # Update proxies in the database
-    for p in list(user_with_proxies.proxies): db.delete(p) # Use user_with_proxies
+    for p in list(user_with_proxies.proxies):
+        db.delete(p) # Use user_with_proxies
     user_with_proxies.proxies.clear()
     db.flush()
 
@@ -666,12 +665,15 @@ def get_admins(db: Session, offset: Optional[int] = None, limit: Optional[int] =
     query = db.query(Admin)
     if username:
         query = query.filter(Admin.username.ilike(f'%{username}%'))
-    if offset is not None: query = query.offset(offset)
-    if limit is not None: query = query.limit(limit)
+    if offset is not None:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     return query.all()
 
 def reset_admin_usage(db: Session, dbadmin: Admin) -> Admin:
-    if dbadmin.users_usage == 0: return dbadmin
+    if dbadmin.users_usage == 0:
+        return dbadmin
     usage_log = AdminUsageLogs(admin_id=dbadmin.id, used_traffic_at_reset=dbadmin.users_usage)
     db.add(usage_log)
     dbadmin.users_usage = 0
@@ -690,7 +692,8 @@ def get_nodes(db: Session, status: Optional[Union[NodeStatus, list]] = None, ena
     query = db.query(Node)
     if status:
         if isinstance(status, list): query = query.filter(Node.status.in_(status))
-        else: query = query.filter(Node.status == status)
+        else:
+            query = query.filter(Node.status == status)
     if enabled is not None:
         if enabled: query = query.filter(Node.status != NodeStatus.disabled)
         # else: query = query.filter(Node.status == NodeStatus.disabled) # Only if explicit "show only disabled" is needed
@@ -751,7 +754,8 @@ def update_node(db: Session, dbnode_obj: Node, modify_data: NodeModify) -> Node:
         update_data['panel_client_key_pem'] = update_data.pop('panel_client_key')
 
     for key, value in update_data.items():
-        if hasattr(dbnode_obj, key): setattr(dbnode_obj, key, value)
+        if hasattr(dbnode_obj, key):
+            setattr(dbnode_obj, key, value)
 
     if 'status' in update_data:
         if dbnode_obj.status == NodeStatus.disabled:
@@ -771,7 +775,8 @@ def update_node_status(db: Session, dbnode_obj: Node, status: NodeStatus, messag
     if dbnode_obj.status != status or dbnode_obj.message != message or (version is not None and dbnode_obj.xray_version != version):
         dbnode_obj.status = status
         dbnode_obj.message = message
-        if version is not None: dbnode_obj.xray_version = version
+        if version is not None:
+            dbnode_obj.xray_version = version
         dbnode_obj.last_status_change = datetime.utcnow()
         db.commit()
         db.refresh(dbnode_obj)
@@ -1197,12 +1202,12 @@ def get_certificate_authority(db: Session):
 def create_or_update_certificate_authority(db: Session, cert_info) -> None:
     """Create or update the CA certificate in database."""
     from app.db.models import CertificateAuthority
-    
+
     # Remove existing CA if any
     existing_ca = db.query(CertificateAuthority).first()
     if existing_ca:
         db.delete(existing_ca)
-    
+
     # Create new CA record
     ca_record = CertificateAuthority(
         certificate_pem=cert_info.certificate_pem,
@@ -1214,10 +1219,10 @@ def create_or_update_certificate_authority(db: Session, cert_info) -> None:
         valid_from=cert_info.valid_from,
         valid_until=cert_info.valid_until
     )
-    
+
     db.add(ca_record)
     db.commit()
-    
+
 
 def get_node_certificate(db: Session, node_name: str):
     """Get node certificates from database."""
@@ -1228,12 +1233,12 @@ def get_node_certificate(db: Session, node_name: str):
 def create_or_update_node_certificate(db: Session, node_name: str, server_cert, panel_client_cert):
     """Create or update node certificates in database."""
     from app.db.models import NodeCertificate
-    
+
     # Remove existing certificates for this node
     existing_cert = db.query(NodeCertificate).filter(NodeCertificate.node_name == node_name).first()
     if existing_cert:
         db.delete(existing_cert)
-    
+
     # Create new certificate record
     cert_record = NodeCertificate(
         node_name=node_name,
@@ -1250,7 +1255,7 @@ def create_or_update_node_certificate(db: Session, node_name: str, server_cert, 
         valid_until=server_cert.valid_until,
         last_rotation=datetime.utcnow()
     )
-    
+
     db.add(cert_record)
     db.commit()
 
@@ -1264,19 +1269,19 @@ def get_node_by_name(db: Session, node_name: str):
 def get_expiring_certificates(db: Session, days_ahead: int = 30):
     """Get certificates that are expiring within specified days."""
     from app.db.models import NodeCertificate, CertificateAuthority
-    
+
     expiry_threshold = datetime.utcnow() + timedelta(days=days_ahead)
-    
+
     # Check CA certificate
     ca_expiring = db.query(CertificateAuthority).filter(
         CertificateAuthority.valid_until <= expiry_threshold
     ).first()
-    
+
     # Check node certificates
     nodes_expiring = db.query(NodeCertificate).filter(
         NodeCertificate.valid_until <= expiry_threshold
     ).all()
-    
+
     return {
         "ca": ca_expiring,
         "nodes": nodes_expiring

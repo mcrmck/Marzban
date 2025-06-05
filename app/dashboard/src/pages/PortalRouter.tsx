@@ -9,7 +9,7 @@ import { ClientProtectedRoute } from "./client/ClientProtectedRoute";
 import { ClientLandingPage } from "./client/ClientLandingPage";
 import ClientRegisterPage from "./client/ClientRegisterPage";
 import { ClientLayout } from "../components/client/ClientLayout";
-import { ClientNodeSelector } from '../components/ClientNodeSelector';
+import { ClientNodeSelector } from '../components/shared/ClientNodeSelector';
 import { ReactElement } from 'react';
 
 const wrapWithLayout = (element: ReactElement) => (

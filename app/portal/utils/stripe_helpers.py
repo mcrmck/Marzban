@@ -11,7 +11,6 @@ from app.portal.plans import get_plan_by_id
 async def get_or_create_stripe_customer(user: UserResponse, db: Session):
     """Get existing Stripe customer or create a new one."""
     try:
-        # Check if user already has a Stripe customer ID
         existing_payment = db.query(Payment).filter(
             Payment.user_id == user.id,
             Payment.stripe_customer_id.isnot(None)
@@ -30,8 +29,3 @@ async def get_or_create_stripe_customer(user: UserResponse, db: Session):
 
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-def get_plan_by_id(plan_id: str) -> Plan:
-    """Get plan by ID from the centralized plan configuration."""
-    return get_plan_by_id(plan_id)
