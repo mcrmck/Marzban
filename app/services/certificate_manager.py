@@ -398,11 +398,7 @@ class CertificateManager:
             ]),
             critical=True,
         ).add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName(node_name),
-                x509.DNSName(node_address),
-                x509.IPAddress(self._parse_ip_address(node_address)),
-            ]),
+            x509.SubjectAlternativeName(self._build_san_list(node_name, node_address)),
             critical=False,
         ).add_extension(
             x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()),
@@ -563,3 +559,34 @@ class CertificateManager:
         except ValueError:
             # If not an IP, use localhost
             return ipaddress.ip_address("127.0.0.1")
+    
+    def _build_san_list(self, node_name: str, node_address: str) -> list:
+        """Build Subject Alternative Names list for node certificates"""
+        san_list = []
+        
+        # Always include the node name as DNS
+        san_list.append(x509.DNSName(node_name))
+        
+        # Try to parse node_address as IP first
+        try:
+            ip_addr = self._parse_ip_address(node_address)
+            san_list.append(x509.IPAddress(ip_addr))
+            
+            # If node_address is different from node_name, add it as DNS too
+            if node_address != node_name:
+                san_list.append(x509.DNSName(node_address))
+                
+        except Exception:
+            # If IP parsing fails, treat as DNS name
+            if node_address != node_name:
+                san_list.append(x509.DNSName(node_address))
+        
+        # Add common localhost entries for development
+        try:
+            import ipaddress
+            san_list.append(x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')))
+            san_list.append(x509.DNSName('localhost'))
+        except Exception:
+            pass
+            
+        return san_list
