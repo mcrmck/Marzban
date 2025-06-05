@@ -36,9 +36,7 @@ def create_admin_token(username: str, is_sudo=False) -> str:
 
 def get_admin_payload(token: str) -> Union[dict, None]:
     try:
-        logger.debug(f"Attempting to decode token: {token[:20]}...")
         payload = jwt.decode(token, get_secret_key(), algorithms=["HS256"])
-        logger.debug(f"Decoded payload: {payload}")
 
         username: str = payload.get("sub")
         access: str = payload.get("access")
@@ -48,7 +46,6 @@ def get_admin_payload(token: str) -> Union[dict, None]:
 
         try:
             created_at = datetime.utcfromtimestamp(payload['iat'])
-            logger.debug(f"Token created_at: {created_at}")
         except KeyError:
             logger.warning("Token missing 'iat' claim")
             created_at = None
@@ -57,7 +54,6 @@ def get_admin_payload(token: str) -> Union[dict, None]:
             created_at = None
 
         result = {"username": username, "is_sudo": access == "sudo", "created_at": created_at}
-        logger.debug(f"Returning admin payload: {result}")
         return result
     except jwt.exceptions.PyJWTError as e:
         logger.error(f"JWT decode error: {str(e)}")

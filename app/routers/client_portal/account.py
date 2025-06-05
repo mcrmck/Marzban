@@ -45,11 +45,7 @@ elif not MOCK_STRIPE_PAYMENT and not STRIPE_SECRET_KEY:
     logging.getLogger("marzban").warning("Stripe secret key not found and not in mock payment mode. Real payments will fail.")
 
 
-router = APIRouter(prefix="/api/portal/account", tags=["Client Portal API"])
-templates = Jinja2Templates(directory="app/portal/templates")
-templates.env.globals['datetime'] = datetime
-templates.env.globals['UserStatus'] = UserStatus # For using UserStatus.value in templates
-templates.env.globals["os"] = os # If you need os module in templates
+router = APIRouter(prefix="/account", tags=["Client Portal API"])
 
 # --- Jinja Filters ---
 def readable_bytes_filter(size_in_bytes):
@@ -98,9 +94,6 @@ def time_until_expiry_filter(timestamp):
         logging.getLogger("marzban").error(f"Error in time_until_expiry_filter for timestamp {timestamp}: {e}")
         return "Invalid Expiry"
 
-templates.env.filters["readable_bytes"] = readable_bytes_filter
-templates.env.filters["timestamp_to_datetime_str"] = timestamp_to_datetime_str_filter
-templates.env.filters["time_until_expiry"] = time_until_expiry_filter
 
 # --- Helper function to activate user plan ---
 async def _activate_user_plan(
@@ -238,6 +231,16 @@ async def get_account_details(
         frontend_url=FRONTEND_URL,
         stripe_enabled=bool(STRIPE_PUBLIC_KEY)
     )
+
+# Add route without trailing slash to avoid redirects from frontend
+@router.get("", response_model=PortalAccountDetailsResponse)
+async def get_account_details_no_slash(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user_orm: DBUser = Depends(get_current_user)
+):
+    """Get comprehensive account details for the authenticated client (no trailing slash)."""
+    return await get_account_details(request, db, current_user_orm)
 
 @router.get("/servers", response_model=List[NodeResponse])
 async def get_servers(

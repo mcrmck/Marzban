@@ -86,7 +86,8 @@ const Login: FC = () => {
     fetch.post<{ access_token: string }>("/api/admin/token", formData)
       .then(({ access_token: token }) => {
         setAuthToken(token);
-        navigate("/");
+        // Redirect to admin dashboard root
+        window.location.href = "http://localhost:3000/admin/#/";
       })
       .catch((err: any) => setError(err?.response?._data?.detail ?? "Error"))
       .finally(() => setLoading(false));

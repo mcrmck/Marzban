@@ -35,7 +35,6 @@ finally:
     logger.info(f"Target XRay config file path: {actual_xray_config_path}")
 
     if os.path.exists(actual_xray_config_path):
-        logger.info(f"XRayConfig file FOUND at {actual_xray_config_path}. Initializing global XRayConfig with this path.")
         config = XRayConfig(base_template_path=actual_xray_config_path, node_api_port=api_port_to_use)
     else:
         logger.error(f"CRITICAL: XRayConfig file NOT FOUND at {actual_xray_config_path}. Using default config structure.")
@@ -44,8 +43,7 @@ finally:
     # Clean up variables from port search
     if 'port_candidate' in locals():
         del port_candidate
-    # No need to delete api_port_found or api_port_to_use as they are not large or sensitive here
-    # and api_port_to_use is passed to XRayConfig.
+
 
 
 # No global 'api' client for a local core
@@ -111,7 +109,7 @@ class XRayModule:
         self.types = types
         self.XRayConfig = XRayConfig
         self.XRayNode = XRayNode
-    
+
     @property
     def operations(self):
         if self._operations is None:

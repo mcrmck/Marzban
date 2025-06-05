@@ -1,6 +1,8 @@
 {
   "active": "active",
-  "activeUsers": "active users",
+  "activeUsers": "Active Users",
+  "dataUsage": "Data Usage",
+  "memoryUsage": "Memory Usage",
   "apply": "Apply",
   "cancel": "Cancel",
   "delete": "Delete",
@@ -231,6 +233,7 @@
   "nodes": {
     "title": "Using Marzban-Node, you are able to scale up your connection quality by adding different nodes on different servers.",
     "addNode": "Add Node", 
+    "addNewNode": "Add New Node",
     "addNewMarzbanNode": "Add New Marzban Node",
     "editNode": "Update Node",
     "deleteNode": "Delete Node",

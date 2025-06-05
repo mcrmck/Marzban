@@ -58,8 +58,8 @@ def get_system_stats(
         users_expired=users_expired,
         users_limited=users_limited,
         online_users=online_users,
-        incoming_bandwidth=system.downlink,
-        outgoing_bandwidth=system.uplink,
+        incoming_bandwidth=system.downlink if system else 0,
+        outgoing_bandwidth=system.uplink if system else 0,
         incoming_bandwidth_speed=realtime_bandwidth_stats.incoming_bytes,
         outgoing_bandwidth_speed=realtime_bandwidth_stats.outgoing_bytes
     )

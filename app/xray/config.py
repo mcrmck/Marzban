@@ -95,7 +95,6 @@ class XRayConfig(dict):
         logger.debug(f"XRayConfig.__init__: Finished precomputing inbound maps. Final config keys: {list(self.keys())}")
 
     def _precompute_inbound_maps(self):
-        logger.debug("XRayConfig._precompute_inbound_maps: Precomputing inbound protocol and tag maps.")
         from collections import defaultdict
         self.inbounds_by_protocol = defaultdict(list)
         self.inbounds_by_tag = {}  # Simplified to a flat dict with tag as key

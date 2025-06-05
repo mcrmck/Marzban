@@ -48,9 +48,39 @@ def add_node(
     db: Session = Depends(get_db),
     _: Admin = Depends(Admin.check_sudo_admin),
 ):
-    """Add a new node to the database."""
+    """Add a new node to the database with automatic certificate generation."""
     try:
+        # Create the node in database first
         dbnode = crud.create_node(db, new_node)
+        
+        # Automatically generate certificates for the new node
+        from app.services.certificate_manager import CertificateManager
+        cert_manager = CertificateManager(db)
+        
+        try:
+            # Generate certificates using node name and address
+            node_certs = cert_manager.generate_node_certificates(
+                node_name=dbnode.name,
+                node_address=dbnode.address
+            )
+            
+            # Update the node with the generated client certificates
+            # This stores the panel's client cert in the existing node table fields
+            dbnode.panel_client_cert_pem = node_certs.panel_client_cert.certificate_pem
+            dbnode.panel_client_key_pem = node_certs.panel_client_cert.private_key_pem
+            db.commit()
+            
+            logging.getLogger("marzban").info(
+                f'Certificates automatically generated for node "{dbnode.name}"'
+            )
+            
+        except Exception as cert_error:
+            logging.getLogger("marzban").warning(
+                f'Failed to generate certificates for node "{dbnode.name}": {cert_error}'
+            )
+            # Don't fail the node creation if certificate generation fails
+            # The certificates can be generated later via the certificate management API
+            
     except IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -59,7 +89,7 @@ def add_node(
 
     bg.add_task(xray.operations.connect_node, node_id=dbnode.id)
 
-    logging.getLogger("marzban").info(f'New node "{dbnode.name}" added')
+    logging.getLogger("marzban").info(f'New node "{dbnode.name}" added with automatic certificate generation')
     return dbnode
 
 

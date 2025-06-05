@@ -1182,3 +1182,102 @@ def delete_plan(db: Session, plan_id: str) -> bool:
     db.delete(plan)
     db.commit()
     return True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Certificate Management CRUD Operations
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_certificate_authority(db: Session):
+    """Get the current CA certificate from database."""
+    from app.db.models import CertificateAuthority
+    return db.query(CertificateAuthority).first()
+
+
+def create_or_update_certificate_authority(db: Session, cert_info) -> None:
+    """Create or update the CA certificate in database."""
+    from app.db.models import CertificateAuthority
+    
+    # Remove existing CA if any
+    existing_ca = db.query(CertificateAuthority).first()
+    if existing_ca:
+        db.delete(existing_ca)
+    
+    # Create new CA record
+    ca_record = CertificateAuthority(
+        certificate_pem=cert_info.certificate_pem,
+        private_key_pem=cert_info.private_key_pem,
+        public_key_pem=cert_info.public_key_pem,
+        subject_name=cert_info.subject_name,
+        issuer_name=cert_info.issuer_name,
+        serial_number=cert_info.serial_number,
+        valid_from=cert_info.valid_from,
+        valid_until=cert_info.valid_until
+    )
+    
+    db.add(ca_record)
+    db.commit()
+    
+
+def get_node_certificate(db: Session, node_name: str):
+    """Get node certificates from database."""
+    from app.db.models import NodeCertificate
+    return db.query(NodeCertificate).filter(NodeCertificate.node_name == node_name).first()
+
+
+def create_or_update_node_certificate(db: Session, node_name: str, server_cert, panel_client_cert):
+    """Create or update node certificates in database."""
+    from app.db.models import NodeCertificate
+    
+    # Remove existing certificates for this node
+    existing_cert = db.query(NodeCertificate).filter(NodeCertificate.node_name == node_name).first()
+    if existing_cert:
+        db.delete(existing_cert)
+    
+    # Create new certificate record
+    cert_record = NodeCertificate(
+        node_name=node_name,
+        server_certificate_pem=server_cert.certificate_pem,
+        server_private_key_pem=server_cert.private_key_pem,
+        server_public_key_pem=server_cert.public_key_pem,
+        panel_client_certificate_pem=panel_client_cert.certificate_pem,
+        panel_client_private_key_pem=panel_client_cert.private_key_pem,
+        panel_client_public_key_pem=panel_client_cert.public_key_pem,
+        subject_name=server_cert.subject_name,
+        issuer_name=server_cert.issuer_name,
+        serial_number=server_cert.serial_number,
+        valid_from=server_cert.valid_from,
+        valid_until=server_cert.valid_until,
+        last_rotation=datetime.utcnow()
+    )
+    
+    db.add(cert_record)
+    db.commit()
+
+
+def get_node_by_name(db: Session, node_name: str):
+    """Get node by name from database."""
+    from app.db.models import Node
+    return db.query(Node).filter(Node.name == node_name).first()
+
+
+def get_expiring_certificates(db: Session, days_ahead: int = 30):
+    """Get certificates that are expiring within specified days."""
+    from app.db.models import NodeCertificate, CertificateAuthority
+    
+    expiry_threshold = datetime.utcnow() + timedelta(days=days_ahead)
+    
+    # Check CA certificate
+    ca_expiring = db.query(CertificateAuthority).filter(
+        CertificateAuthority.valid_until <= expiry_threshold
+    ).first()
+    
+    # Check node certificates
+    nodes_expiring = db.query(NodeCertificate).filter(
+        NodeCertificate.valid_until <= expiry_threshold
+    ).all()
+    
+    return {
+        "ca": ca_expiring,
+        "nodes": nodes_expiring
+    }

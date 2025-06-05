@@ -318,7 +318,7 @@ export function createUsageConfig(
   series: any = [],
   labels: any = []
 ) {
-  const total = formatBytes((series as [number]).reduce((t, c) => (t += c), 0));
+  const total = formatBytes(Array.isArray(series) ? series.reduce((t, c) => (t += c), 0) : 0);
   return {
     series: series,
     options: {

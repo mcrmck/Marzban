@@ -355,3 +355,52 @@ class Plan(Base):
     features = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CertificateAuthority(Base):
+    """Certificate Authority storage for automated certificate management"""
+    __tablename__ = "certificate_authority"
+
+    id = Column(Integer, primary_key=True)
+    certificate_pem = Column(String(4096), nullable=False)  # CA certificate in PEM format
+    private_key_pem = Column(String(4096), nullable=False)  # CA private key in PEM format (encrypted)
+    public_key_pem = Column(String(2048), nullable=False)   # CA public key in PEM format
+    subject_name = Column(String(256), nullable=False)      # Certificate subject name
+    issuer_name = Column(String(256), nullable=False)       # Certificate issuer name  
+    serial_number = Column(String(64), nullable=False)      # Certificate serial number
+    valid_from = Column(DateTime, nullable=False)           # Certificate validity start
+    valid_until = Column(DateTime, nullable=False)          # Certificate validity end
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class NodeCertificate(Base):
+    """Node certificate storage for automated certificate management"""
+    __tablename__ = "node_certificates"
+
+    id = Column(Integer, primary_key=True)
+    node_name = Column(String(256), nullable=False, unique=True, index=True)
+    
+    # Server certificate (for node HTTPS server)
+    server_certificate_pem = Column(String(4096), nullable=False)
+    server_private_key_pem = Column(String(4096), nullable=False)
+    server_public_key_pem = Column(String(2048), nullable=False)
+    
+    # Panel client certificate (for panel to authenticate with node)
+    panel_client_certificate_pem = Column(String(4096), nullable=False)
+    panel_client_private_key_pem = Column(String(4096), nullable=False)
+    panel_client_public_key_pem = Column(String(2048), nullable=False)
+    
+    # Certificate metadata
+    subject_name = Column(String(256), nullable=False)
+    issuer_name = Column(String(256), nullable=False)
+    serial_number = Column(String(64), nullable=False)
+    valid_from = Column(DateTime, nullable=False)
+    valid_until = Column(DateTime, nullable=False)
+    
+    # Certificate lifecycle management
+    auto_renew = Column(Boolean, default=True)
+    last_rotation = Column(DateTime, default=datetime.utcnow)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

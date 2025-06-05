@@ -1,15 +1,17 @@
 import { createHashRouter } from "react-router-dom";
 import { fetch } from "../../lib/api/http";
-import { getAuthToken } from "../../lib/utils/authStorage";
 import { Dashboard } from "./Dashboard";
 import Login from "../shared/Login";
 
-const fetchAdminLoader = () => {
-    return fetch.get("/admin", {
-        headers: {
-            Authorization: `Bearer ${getAuthToken()}`,
-        },
-    });
+const fetchAdminLoader = async () => {
+    try {
+        const result = await fetch.get("/admin");
+        console.log("Admin loader success:", result);
+        return result;
+    } catch (error) {
+        console.error("Admin loader failed:", error);
+        throw error;
+    }
 };
 
 export const adminRouter = createHashRouter([

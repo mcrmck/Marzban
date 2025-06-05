@@ -58,7 +58,7 @@ export const Header: FC<HeaderProps> = () => {
   return (
     <HStack gap={2} justify="space-between" position="relative">
       <Text as="h1" fontWeight="semibold" fontSize="2xl">
-        {t("users")}
+        {t("admin.users")}
       </Text>
 
       <Box overflow="auto" css={{ direction: "rtl" }}>

@@ -6,21 +6,23 @@ export const $fetch = ohMyFetch.create({
 });
 
 const createFetcher = () => {
-  const token = getAuthToken();
-  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const getHeaders = () => {
+    const token = getAuthToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
 
   return {
     get: <T>(url: string, options: FetchOptions<"json"> = {}) => {
-      return $fetch<T>(url, { ...options, method: 'GET', headers });
+      return $fetch<T>(url, { ...options, method: 'GET', headers: getHeaders() });
     },
     post: <T>(url: string, data?: any, options: FetchOptions<"json"> = {}) => {
-      return $fetch<T>(url, { ...options, method: 'POST', body: data, headers });
+      return $fetch<T>(url, { ...options, method: 'POST', body: data, headers: getHeaders() });
     },
     put: <T>(url: string, data?: any, options: FetchOptions<"json"> = {}) => {
-      return $fetch<T>(url, { ...options, method: 'PUT', body: data, headers });
+      return $fetch<T>(url, { ...options, method: 'PUT', body: data, headers: getHeaders() });
     },
     delete: <T>(url: string, options: FetchOptions<"json"> = {}) => {
-      return $fetch<T>(url, { ...options, method: 'DELETE', headers });
+      return $fetch<T>(url, { ...options, method: 'DELETE', headers: getHeaders() });
     },
   };
 };

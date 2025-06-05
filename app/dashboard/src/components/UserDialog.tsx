@@ -278,7 +278,7 @@ export const UserDialog: FC = () => {
   /* usage chart state */
   const usageTitle = t("userDialog.total");
   const [usage, setUsage] = useState(
-    createUsageConfig(colorMode ?? "light", usageTitle, [[], []]),
+    createUsageConfig(usageTitle, [], []),
   );
   const [usageVisible, setUsageVisible] = useState(false);
   const [usageFilter, setUsageFilter] = useState("1m");

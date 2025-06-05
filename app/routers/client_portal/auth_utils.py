@@ -41,7 +41,8 @@ def extract_token(request: Request) -> Optional[str]:
 async def get_current_user(
     request: Request,
     db: Session = Depends(get_db)
-) -> UserResponse:
+):
+    """Return the current user as a database ORM object."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials - user not logged in",
@@ -67,13 +68,7 @@ async def get_current_user(
     if not db_user_orm:
         raise credentials_exception
 
-    try:
-        user = UserResponse.model_validate(db_user_orm, context={'db': db})
-        return user
-    except ValidationError:
-        raise credentials_exception
-    except Exception:
-        raise credentials_exception
+    return db_user_orm
 
 async def get_current_user_optional(
     request: Request,

@@ -49,8 +49,8 @@ export const Dashboard: FC = () => {
 
         <Tabs.Root defaultValue="users">
           <TabsList>
-            <TabsTrigger value="users">{t("users")}</TabsTrigger>
-            <TabsTrigger value="nodes">{t("nodes")}</TabsTrigger>
+            <TabsTrigger value="users">{t("admin.users")}</TabsTrigger>
+            <TabsTrigger value="nodes">{t("admin.nodes")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="users">

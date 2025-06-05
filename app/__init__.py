@@ -37,7 +37,6 @@ app = FastAPI(
     debug=DEBUG
 )
 
-logger.info(f"APP_INIT: Top of file executing. Version: {__version__}, DEBUG: {DEBUG}")
 
 scheduler = BackgroundScheduler(
     {"apscheduler.job_defaults.max_instances": 20}, timezone="UTC"

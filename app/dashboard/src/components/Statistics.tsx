@@ -50,47 +50,27 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
       p={6}
       borderWidth="1px"
       borderColor="gray.200"
-      bg="gray.50"
-      _dark={{ borderColor: "gray.600", bg: "gray.750" }}
+      bg="white"
+      _dark={{ borderColor: "gray.600", bg: "gray.800" }}
       borderStyle="solid"
-      boxShadow="none"
-      borderRadius="12px"
+      boxShadow="sm"
+      borderRadius="lg"
       width="full"
-      display="flex"
-      justifyContent="space-between"
-      flexDirection="row"
+      transition="all 0.2s"
+      _hover={{
+        boxShadow: "md",
+        transform: "translateY(-1px)"
+      }}
     >
-      <Box display="flex" alignItems="center" gap={4}>
+      <Box display="flex" alignItems="center" gap={3} mb={4}>
         <Box
-          p={2}
-          position="relative"
+          p={3}
+          bg="blue.500"
+          borderRadius="lg"
           color="white"
-          _before={{
-            content: `""`,
-            position: "absolute",
-            top: 0,
-            left: 0,
-            bg: "blue.400",
-            display: "block",
-            w: "full",
-            h: "full",
-            borderRadius: "5px",
-            opacity: 0.5,
-            zIndex: 1,
-          }}
-          _after={{
-            content: `""`,
-            position: "absolute",
-            top: "-5px",
-            left: "-5px",
-            bg: "blue.400",
-            display: "block",
-            w: "calc(100% + 10px)",
-            h: "calc(100% + 10px)",
-            borderRadius: "8px",
-            opacity: 0.4,
-            zIndex: 1,
-          }}
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
         >
           <IconWrapper>{icon}</IconWrapper>
         </Box>
@@ -100,14 +80,20 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
             color: "gray.300",
           }}
           fontWeight="medium"
-          textTransform="capitalize"
           fontSize="sm"
+          lineHeight="1.2"
         >
           {title}
         </Text>
       </Box>
-      <Box fontSize="3xl" fontWeight="semibold" mt={2}>
-        {content}
+      <Box 
+        fontSize="2xl" 
+        fontWeight="bold" 
+        color="gray.900"
+        _dark={{ color: "white" }}
+        lineHeight="1.2"
+      >
+        {content || "—"}
       </Box>
     </Box>
   );
@@ -135,22 +121,21 @@ export const Statistics: FC<BoxProps> = (props) => {
   return (
     <Box
       display="grid"
-      gridTemplateColumns={{ base: "1fr", lg: "repeat(3, 1fr)" }}
-      gap={4}
+      gridTemplateColumns={{ base: "1fr", md: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" }}
+      gap={6}
       {...props}
     >
       <StatisticCard
         title={t("activeUsers")}
         content={
           systemData && (
-            <Box display="flex" alignItems="flex-end">
-              <Text>{numberWithCommas(systemData.users_active)}</Text>
+            <Box display="flex" alignItems="baseline" gap={1}>
+              <Text fontSize="2xl" fontWeight="bold">{numberWithCommas(systemData.users_active)}</Text>
               <Text
-                fontWeight="normal"
-                fontSize="lg"
-                as="span"
-                display="inline-block"
-                pb="5px"
+                fontSize="md"
+                fontWeight="medium"
+                color="gray.500"
+                _dark={{ color: "gray.400" }}
               >
                 / {numberWithCommas(systemData.total_user)}
               </Text>
@@ -173,17 +158,20 @@ export const Statistics: FC<BoxProps> = (props) => {
         title={t("memoryUsage")}
         content={
           systemData && (
-            <Box display="flex" alignItems="flex-end">
-              <Text>{formatBytes(systemData.mem_used, 1, true)[0]}</Text>
+            <Box display="flex" alignItems="baseline" gap={1}>
+              <Text fontSize="2xl" fontWeight="bold">
+                {formatBytes(systemData.mem_used, 1, true)[0]}
+                <Text as="span" fontSize="sm" fontWeight="medium" color="gray.500">
+                  {formatBytes(systemData.mem_used, 1, true)[1]}
+                </Text>
+              </Text>
               <Text
-                fontWeight="normal"
-                fontSize="lg"
-                as="span"
-                display="inline-block"
-                pb="5px"
+                fontSize="md"
+                fontWeight="medium"
+                color="gray.500"
+                _dark={{ color: "gray.400" }}
               >
-                {formatBytes(systemData.mem_used, 1, true)[1]} /{" "}
-                {formatBytes(systemData.mem_total, 1)}
+                / {formatBytes(systemData.mem_total, 1)}
               </Text>
             </Box>
           )

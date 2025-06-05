@@ -14,7 +14,7 @@ import os
 from datetime import datetime # Import datetime
 
 # Create two routers - one for HTML pages and one for API endpoints
-api_router = APIRouter(prefix="/api/portal/auth", tags=["Client Portal API"])
+api_router = APIRouter(prefix="/auth", tags=["Client Portal API"])
 
 
 def readable_bytes_filter_auth(size_in_bytes):
