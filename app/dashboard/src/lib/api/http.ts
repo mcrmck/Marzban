@@ -6,7 +6,7 @@ export const $fetch = ohMyFetch.create({
 });
 
 const createFetcher = () => {
-  const getHeaders = () => {
+  const getHeaders = (): Record<string, string> => {
     const token = getAuthToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   };

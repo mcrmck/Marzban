@@ -19,6 +19,7 @@ import { RevokeSubscriptionDialog } from "components/RevokeSubscriptionModal";
 import { UserDialog } from "components/UserDialog";
 import { UsersTable } from "components/UsersTable";
 import { NodesTable } from "components/NodesTable";
+import { CertificateManagement } from "components/CertificateManagement";
 import { fetchInbounds, useDashboard } from "../../lib/stores/DashboardContext";
 import { FC, useEffect } from "react";
 import { Statistics } from "../../components/Statistics";
@@ -51,6 +52,7 @@ export const Dashboard: FC = () => {
           <TabsList>
             <TabsTrigger value="users">{t("admin.users")}</TabsTrigger>
             <TabsTrigger value="nodes">{t("admin.nodes")}</TabsTrigger>
+            <TabsTrigger value="certificates">{t("admin.certificates", "Certificates")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="users">
@@ -87,6 +89,10 @@ export const Dashboard: FC = () => {
 
           <TabsContent value="nodes">
             <NodesTable />
+          </TabsContent>
+
+          <TabsContent value="certificates">
+            <CertificateManagement />
           </TabsContent>
         </Tabs.Root>
 
