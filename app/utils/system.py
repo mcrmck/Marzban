@@ -4,11 +4,14 @@ import secrets
 import socket
 import time
 from dataclasses import dataclass
-
+import platform
 import psutil
+import logging
+from typing import Optional
+
 import requests
 
-from app import scheduler
+logger = logging.getLogger("marzban")
 
 
 @dataclass
@@ -71,7 +74,6 @@ rt_bw = RealtimeBandwidth(
 
 
 # sample time is 2 seconds, values lower than this may not produce good results
-@scheduler.scheduled_job("interval", seconds=2, coalesce=True, max_instances=1)
 def record_realtime_bandwidth() -> None:
     global rt_bw
     last_perf_counter = rt_bw.last_perf_counter
@@ -98,14 +100,13 @@ def random_password() -> str:
 
 
 def check_port(port: int) -> bool:
-    s = socket.socket()
-    try:
-        s.connect(('127.0.0.1', port))
-        return True
-    except socket.error:
-        return False
-    finally:
-        s.close()
+    """Check if a port is available."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('', port))
+            return True
+        except OSError:
+            return False
 
 
 def get_public_ip():
@@ -173,3 +174,91 @@ def readable_size(size_bytes):
     p = math.pow(1024, i)
     s = round(size_bytes / p, 2)
     return f'{s} {size_name[i]}'
+
+
+def get_system_info() -> dict:
+    """Get system information."""
+    try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+
+        return {
+            "cpu_usage": cpu_percent,
+            "memory_usage": memory.percent,
+            "disk_usage": disk.percent,
+            "platform": platform.platform(),
+            "python_version": platform.python_version()
+        }
+    except Exception as e:
+        logger.error(f"Error getting system info: {e}")
+        return {
+            "error": str(e),
+            "platform": platform.platform(),
+            "python_version": platform.python_version()
+        }
+
+
+def get_process_info(pid: int) -> Optional[dict]:
+    """Get information about a process."""
+    try:
+        process = psutil.Process(pid)
+        return {
+            "pid": process.pid,
+            "name": process.name(),
+            "status": process.status(),
+            "cpu_percent": process.cpu_percent(),
+            "memory_percent": process.memory_percent(),
+            "create_time": process.create_time()
+        }
+    except psutil.NoSuchProcess:
+        return None
+    except Exception as e:
+        logger.error(f"Error getting process info: {e}")
+        return None
+
+
+def get_network_info() -> dict:
+    """Get network interface information."""
+    try:
+        interfaces = {}
+        for interface, addrs in psutil.net_if_addrs().items():
+            interfaces[interface] = {
+                "addresses": [addr.address for addr in addrs if addr.family == socket.AF_INET],
+                "netmasks": [addr.netmask for addr in addrs if addr.family == socket.AF_INET],
+                "broadcasts": [addr.broadcast for addr in addrs if addr.family == socket.AF_INET]
+            }
+        return interfaces
+    except Exception as e:
+        logger.error(f"Error getting network info: {e}")
+        return {}
+
+
+def get_disk_io() -> dict:
+    """Get disk I/O statistics."""
+    try:
+        io_counters = psutil.disk_io_counters()
+        return {
+            "read_bytes": io_counters.read_bytes,
+            "write_bytes": io_counters.write_bytes,
+            "read_count": io_counters.read_count,
+            "write_count": io_counters.write_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting disk I/O info: {e}")
+        return {}
+
+
+def get_network_io() -> dict:
+    """Get network I/O statistics."""
+    try:
+        io_counters = psutil.net_io_counters()
+        return {
+            "bytes_sent": io_counters.bytes_sent,
+            "bytes_recv": io_counters.bytes_recv,
+            "packets_sent": io_counters.packets_sent,
+            "packets_recv": io_counters.packets_recv
+        }
+    except Exception as e:
+        logger.error(f"Error getting network I/O info: {e}")
+        return {}

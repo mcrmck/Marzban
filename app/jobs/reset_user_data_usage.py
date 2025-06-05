@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app import logger, scheduler, xray
+import logging
 from app.db import crud, GetDB, get_users
 from app.models.user import UserDataLimitResetStrategy, UserStatus
 
@@ -37,7 +37,7 @@ def reset_user_data_usage():
             if user.status == UserStatus.limited:
                 xray.operations.add_user(user)
 
-            logger.info(f"User data usage reset for User \"{user.username}\"")
+            logging.getLogger("marzban").info(f"User data usage reset for User \"{user.username}\"")
 
 
-scheduler.add_job(reset_user_data_usage, 'interval', coalesce=True, hours=1)
+# Job registration moved to app/jobs/__init__.py to avoid circular imports

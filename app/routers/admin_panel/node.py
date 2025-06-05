@@ -6,7 +6,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, WebSocke
 from sqlalchemy.exc import IntegrityError
 from starlette.websockets import WebSocketDisconnect
 
-from app import logger, xray
+import logging
+from app import xray
 from app.db import Session, crud, get_db, GetDB
 from app.dependencies import get_dbnode, validate_dates
 from app.models.admin import Admin
@@ -58,7 +59,7 @@ def add_node(
 
     bg.add_task(xray.operations.connect_node, node_id=dbnode.id)
 
-    logger.info(f'New node "{dbnode.name}" added')
+    logging.getLogger("marzban").info(f'New node "{dbnode.name}" added')
     return dbnode
 
 
@@ -77,27 +78,27 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
         "Authorization", ""
     ).removeprefix("Bearer ")
 
-    logger.info(f"Node logs WS: Attempting connection for node_id {node_id} with token prefix: {token[:20]}...") # Log token prefix
+    logging.getLogger("marzban").info(f"Node logs WS: Attempting connection for node_id {node_id} with token prefix: {token[:20]}...") # Log token prefix
 
     admin = Admin.get_admin(token, db)
     if not admin:
-        logger.warning(f"Node logs WS: Unauthorized for node_id {node_id}. Admin not found for token.")
+        logging.getLogger("marzban").warning(f"Node logs WS: Unauthorized for node_id {node_id}. Admin not found for token.")
         return await websocket.close(reason="Unauthorized", code=4401)
 
     # Log the admin details fetched
-    logger.info(f"Node logs WS: Admin '{admin.username}' attempting access to logs for node_id {node_id}. Is Sudo: {admin.is_sudo}")
+    logging.getLogger("marzban").info(f"Node logs WS: Admin '{admin.username}' attempting access to logs for node_id {node_id}. Is Sudo: {admin.is_sudo}")
 
     if not admin.is_sudo:
-        logger.warning(f"Node logs WS: Access denied for admin '{admin.username}' to node_id {node_id} logs. Reason: Not a sudo admin.")
+        logging.getLogger("marzban").warning(f"Node logs WS: Access denied for admin '{admin.username}' to node_id {node_id} logs. Reason: Not a sudo admin.")
         return await websocket.close(reason="You're not allowed", code=4403)
 
     if not xray.nodes.get(node_id):
-        logger.warning(f"Node logs WS: Node ID {node_id} not found in tracked xray.nodes.")
+        logging.getLogger("marzban").warning(f"Node logs WS: Node ID {node_id} not found in tracked xray.nodes.")
         return await websocket.close(reason="Node not found", code=4404)
 
     node_instance = xray.nodes[node_id] # Get the node instance more safely
     if not node_instance.connected:
-        logger.warning(f"Node logs WS: Node ID {node_id} ('{node_instance.address}') is not connected. Attempting to connect...")
+        logging.getLogger("marzban").warning(f"Node logs WS: Node ID {node_id} ('{node_instance.address}') is not connected. Attempting to connect...")
         try:
             # Try to connect the node
             xray.operations.connect_node(node_id)
@@ -108,10 +109,10 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
                 await asyncio.sleep(0.5)
 
             if not node_instance.connected:
-                logger.warning(f"Node logs WS: Node ID {node_id} failed to connect within timeout.")
+                logging.getLogger("marzban").warning(f"Node logs WS: Node ID {node_id} failed to connect within timeout.")
                 return await websocket.close(reason="Node connection timeout", code=4400)
         except Exception as e:
-            logger.error(f"Node logs WS: Error connecting to node {node_id}: {e}")
+            logging.getLogger("marzban").error(f"Node logs WS: Error connecting to node {node_id}: {e}")
             return await websocket.close(reason="Node connection error", code=4400)
 
     await websocket.accept()
@@ -176,7 +177,7 @@ def modify_node(
     if updated_node.status != NodeStatus.disabled:
         bg.add_task(xray.operations.connect_node, node_id=updated_node.id)
 
-    logger.info(f'Node "{dbnode.name}" modified')
+    logging.getLogger("marzban").info(f'Node "{dbnode.name}" modified')
     return dbnode
 
 
@@ -201,7 +202,7 @@ def remove_node(
     crud.remove_node(db, dbnode)
     xray.operations.remove_node(dbnode.id)
 
-    logger.info(f'Node "{dbnode.name}" deleted')
+    logging.getLogger("marzban").info(f'Node "{dbnode.name}" deleted')
     return {}
 
 

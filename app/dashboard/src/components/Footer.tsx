@@ -14,12 +14,12 @@ export const Footer: FC<StackProps> = (props) => {
         color="gray.500"
         fontSize="xs"
       >
-        <Link color="brand.400" href={REPO_URL}>
-          Marzban
+        <Link color="jade.solid" href={REPO_URL}>
+          Jade
         </Link>
         {version ? ` (v${version}), ` : ", "}
-        Made with ❤️ in{" "}
-        <Link color="brand.400" href={ORGANIZATION_URL}>
+        Based on Marzban, Made with ❤️ in{" "}
+        <Link color="jade.solid" href={ORGANIZATION_URL}>
           Gozargah
         </Link>
       </Text>

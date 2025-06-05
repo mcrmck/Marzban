@@ -1,14 +1,20 @@
 import time
 import traceback
 
-from app import app, logger, scheduler, xray
+import logging
 from app.db import GetDB, crud
 from app.models.node import NodeStatus
 from config import JOB_CORE_HEALTH_CHECK_INTERVAL
 from xray_api import exc as xray_exc
 
+# Import app, scheduler, and xray but avoid circular import
+def get_app_components():
+    from app import app, scheduler, xray
+    return app, scheduler, xray
+
 
 def core_health_check():
+    app, scheduler, xray = get_app_components()
     config = None  # Initialize config as it might be needed for node operations
 
     # nodes' core
@@ -31,19 +37,19 @@ def core_health_check():
             xray.operations.connect_node(node_id, config)
 
 
-@app.on_event("startup")
 def start_core():
-    logger.info("Panel startup: Preparing to connect to configured Xray nodes.")
+    app, scheduler, xray = get_app_components()
+    logging.getLogger("marzban").info("Panel startup: Preparing to connect to configured Xray nodes.")
 
     # Generate the base configuration that might be used for connecting nodes
     # This assumes xray.config.include_db_users() is still the way to get a suitable config
     # for external nodes. This might need adjustment later if config handling changes significantly.
     start_time = time.time()
     config_for_nodes = xray.config.include_db_users()
-    logger.info(f"Base node config generated in {(time.time() - start_time):.2f} seconds")
+    logging.getLogger("marzban").info(f"Base node config generated in {(time.time() - start_time):.2f} seconds")
 
     # Connect to all enabled nodes defined in the database
-    logger.info("Attempting to connect to enabled Xray nodes.")
+    logging.getLogger("marzban").info("Attempting to connect to enabled Xray nodes.")
     with GetDB() as db:
         dbnodes = crud.get_nodes(db=db, enabled=True)
         node_ids_to_connect = []
@@ -64,15 +70,15 @@ def start_core():
                       coalesce=True, max_instances=1)
 
 
-@app.on_event("shutdown")
 def app_shutdown():
-    logger.info("Panel shutdown: Disconnecting from all managed Xray nodes.")
+    app, scheduler, xray = get_app_components()
+    logging.getLogger("marzban").info("Panel shutdown: Disconnecting from all managed Xray nodes.")
     for node_id in list(xray.nodes.keys()): # Iterate by keys to avoid issues if node disconnects itself from dict
         node = xray.nodes.get(node_id)
         if node:
             try:
-                logger.info(f"Disconnecting from node ID: {node_id}")
+                logging.getLogger("marzban").info(f"Disconnecting from node ID: {node_id}")
                 node.disconnect()
             except Exception as e:
-                logger.error(f"Error disconnecting from node ID {node_id}: {e}")
+                logging.getLogger("marzban").error(f"Error disconnecting from node ID {node_id}: {e}")
                 pass

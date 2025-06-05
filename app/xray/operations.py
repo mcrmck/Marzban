@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import Depends
 import time
+import logging
 
-from app import logger, xray # xray.api, xray.nodes, xray.config, xray.exc
+from app import xray # xray.api, xray.nodes, xray.config, xray.exc
 from app.db import GetDB, crud # crud is used for node status updates
 from app.db import models as db_models
 from app.models.node import NodeStatus
@@ -18,6 +19,8 @@ from app.xray.node import XRayNode # For type hinting if node objects are passed
 from xray_api.types.account import Account, XTLSFlows # Account models for Xray API
 from app.xray.config import XRayConfig  # Keep for type hints
 import config
+
+logger = logging.getLogger("marzban")
 
 if TYPE_CHECKING:
     # from app.db import User as DBUser # No longer directly type hinting DBUser in public functions

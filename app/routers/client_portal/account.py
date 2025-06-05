@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 import uuid
 from pydantic import BaseModel
 
-from app import logger, xray
+import logging
+from app import xray
 from app.db import get_db, crud
 from app.db.models import User as DBUser
 from app.portal.models.plan import Plan
@@ -41,7 +42,7 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8000") # Default if n
 if not MOCK_STRIPE_PAYMENT and STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 elif not MOCK_STRIPE_PAYMENT and not STRIPE_SECRET_KEY:
-    logger.warning("Stripe secret key not found and not in mock payment mode. Real payments will fail.")
+    logging.getLogger("marzban").warning("Stripe secret key not found and not in mock payment mode. Real payments will fail.")
 
 
 router = APIRouter(prefix="/api/portal/account", tags=["Client Portal API"])
@@ -94,7 +95,7 @@ def time_until_expiry_filter(timestamp):
         if minutes > 0: return f"{minutes} minutes"
         return "Less than a minute"
     except (ValueError, TypeError, OSError) as e:
-        logger.error(f"Error in time_until_expiry_filter for timestamp {timestamp}: {e}")
+        logging.getLogger("marzban").error(f"Error in time_until_expiry_filter for timestamp {timestamp}: {e}")
         return "Invalid Expiry"
 
 templates.env.filters["readable_bytes"] = readable_bytes_filter
@@ -126,12 +127,12 @@ async def _activate_user_plan(
     """
     db_user_orm = crud.get_user(db, account_number=user_account_number)
     if not db_user_orm:
-        logger.error(f"_activate_user_plan: User {user_account_number} not found.")
+        logging.getLogger("marzban").error(f"_activate_user_plan: User {user_account_number} not found.")
         return False
 
     plan = get_plan_by_id(db, plan_id)
     if not plan:
-        logger.error(f"_activate_user_plan: Plan {plan_id} not found for user {user_account_number}.")
+        logging.getLogger("marzban").error(f"_activate_user_plan: Plan {plan_id} not found for user {user_account_number}.")
         return False
 
     new_data_limit = db_user_orm.data_limit
@@ -169,7 +170,7 @@ async def _activate_user_plan(
     try:
         user_modify_payload = UserModify(**filtered_payload_dict)
     except Exception as e:
-        logger.error(f"_activate_user_plan: Pydantic validation error for UserModify for user {user_account_number}: {e}. Payload: {filtered_payload_dict}", exc_info=True)
+        logging.getLogger("marzban").error(f"_activate_user_plan: Pydantic validation error for UserModify for user {user_account_number}: {e}. Payload: {filtered_payload_dict}", exc_info=True)
         return False
 
     try:
@@ -178,11 +179,11 @@ async def _activate_user_plan(
         # If traffic reset is desired upon plan activation (e.g., new data limit applied)
         # and the plan implies it, you might call it here.
         if plan.data_limit is not None: # Or some other condition indicating traffic reset
-            logger.info(f"_activate_user_plan: Plan includes data limit, resetting traffic for user {user_account_number}.")
+            logging.getLogger("marzban").info(f"_activate_user_plan: Plan includes data limit, resetting traffic for user {user_account_number}.")
             updated_user_orm = crud.reset_user_data_usage(db=db, dbuser=updated_user_orm) # Returns the updated user
 
         # Ensure user has all default proxy types
-        logger.info(f"_activate_user_plan: Ensuring default proxy types for user {user_account_number}")
+        logging.getLogger("marzban").info(f"_activate_user_plan: Ensuring default proxy types for user {user_account_number}")
         crud.ensure_all_default_proxies_for_user(db=db, user_id=updated_user_orm.id)
 
         # Refresh the user object to get the updated proxies
@@ -191,11 +192,11 @@ async def _activate_user_plan(
 
         background_tasks.add_task(xray.operations.update_user, user_id=updated_user_orm.id)
 
-        logger.info(f"_activate_user_plan: User {user_account_number} processed for plan {plan_id}. Xray update task scheduled.")
+        logging.getLogger("marzban").info(f"_activate_user_plan: User {user_account_number} processed for plan {plan_id}. Xray update task scheduled.")
         return True
     except Exception as e:
         db.rollback()
-        logger.error(f"_activate_user_plan: Error updating user {user_account_number} or scheduling Xray: {e}", exc_info=True)
+        logging.getLogger("marzban").error(f"_activate_user_plan: Error updating user {user_account_number} or scheduling Xray: {e}", exc_info=True)
         return False
 
 
@@ -316,7 +317,7 @@ async def create_checkout_session(
         )
         return {"url": checkout_session.url}
     except Exception as e:
-        logger.error(f"Error creating Stripe checkout session: {e}")
+        logging.getLogger("marzban").error(f"Error creating Stripe checkout session: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create checkout session"
@@ -433,20 +434,10 @@ async def get_available_plans(
     plans = crud.get_plans(db)
     return plans  # PlanResponse inherits from Plan, so we can return plans directly
 
-# Example of XRAY_SUBSCRIPTION_PATH from config, if needed for url_for fallback in account_page
-try:
-    from config import XRAY_SUBSCRIPTION_PATH
-except ImportError:
-    XRAY_SUBSCRIPTION_PATH = "sub" # Default fallback
-
-router = APIRouter(tags=["Account"], responses={401: responses._401})
-
-
 class NodeActivationRequest(BaseModel):
     node_id: int
 
-
-@router.post("/account/nodes/activate", response_model=UserResponse)
+@router.post("/nodes/activate", response_model=UserResponse)
 async def activate_user_node(
     activation_request: NodeActivationRequest,
     db: Session = Depends(get_db),
@@ -466,3 +457,9 @@ async def activate_user_node(
 
     # Return the pre-validated user response with database context
     return user_response
+
+# Example of XRAY_SUBSCRIPTION_PATH from config, if needed for url_for fallback in account_page
+try:
+    from config import XRAY_SUBSCRIPTION_PATH
+except ImportError:
+    XRAY_SUBSCRIPTION_PATH = "sub" # Default fallback

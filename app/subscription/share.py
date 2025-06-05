@@ -12,7 +12,7 @@ from jdatetime import date as jd # type: ignore
 
 # Ensure xray, logger are available. If xray.config or xray.hosts are not yet populated
 # when this module loads, their usage in functions must be robust.
-from app import xray, logger # Main app logger
+from app import xray
 from app.utils.system import get_public_ip, get_public_ipv6, readable_size
 from app.models.proxy import ProxyTypes, ShadowsocksSettings
 from app.db import crud as db_crud # For fetching node details
@@ -217,19 +217,19 @@ def process_inbounds_and_tags(
 
     # Use the main app logger or a specific one for this module
     _logger = logging.getLogger(f"{__name__}.process_inbounds_and_tags") # More specific
-    _logger.info(f"Processing inbounds for user {format_variables.get('ACCOUNT_NUMBER', 'N/A')}, active_node_id: {active_node_id}")
-    _logger.debug(f"Received user_inbounds: {user_inbounds}")
-    _logger.debug(f"Received user_proxies keys: {[k.value for k in user_proxies.keys()] if user_proxies else 'None'}")
+    logging.getLogger("marzban").info(f"Processing inbounds for user {format_variables.get('ACCOUNT_NUMBER', 'N/A')}, active_node_id: {active_node_id}")
+    logging.getLogger("marzban").debug(f"Received user_inbounds: {user_inbounds}")
+    logging.getLogger("marzban").debug(f"Received user_proxies keys: {[k.value for k in user_proxies.keys()] if user_proxies else 'None'}")
 
     if not xray.config or not xray.config.inbounds_by_tag:
-        _logger.error("Global xray.config or xray.config.inbounds_by_tag is not loaded/available. Cannot generate links.")
+        logging.getLogger("marzban").error("Global xray.config or xray.config.inbounds_by_tag is not loaded/available. Cannot generate links.")
         return conf.render(reverse=reverse) # type: ignore
 
-    _logger.debug(f"Available global XRay inbound tags (xray.config.inbounds_by_tag.keys()): {list(xray.config.inbounds_by_tag.keys())}")
+    logging.getLogger("marzban").debug(f"Available global XRay inbound tags (xray.config.inbounds_by_tag.keys()): {list(xray.config.inbounds_by_tag.keys())}")
 
     all_user_tags_with_protocol = []
     if not user_inbounds:
-        _logger.warning("User has no specific inbounds (user_inbounds map is empty). No links will be generated.")
+        logging.getLogger("marzban").warning("User has no specific inbounds (user_inbounds map is empty). No links will be generated.")
         return conf.render(reverse=reverse) # type: ignore
 
     for protocol_enum, tags_for_protocol in user_inbounds.items():
@@ -237,10 +237,10 @@ def process_inbounds_and_tags(
             all_user_tags_with_protocol.append({'protocol': protocol_enum, 'tag': tag_name})
 
     if not all_user_tags_with_protocol:
-        _logger.warning("No tags to process after parsing user_inbounds. No links generated.")
+        logging.getLogger("marzban").warning("No tags to process after parsing user_inbounds. No links generated.")
         return conf.render(reverse=reverse) # type: ignore
 
-    _logger.debug(f"Total tags to process for user: {all_user_tags_with_protocol}")
+    logging.getLogger("marzban").debug(f"Total tags to process for user: {all_user_tags_with_protocol}")
 
     # Sorting based on global XRay config order (if still desired)
     global_inbound_order_map = {tag: index for index, tag in enumerate(xray.config.inbounds_by_tag.keys())}
@@ -248,7 +248,7 @@ def process_inbounds_and_tags(
         all_user_tags_with_protocol,
         key=lambda x: global_inbound_order_map.get(x['tag'], float('inf')) # Tags not in global config go last
     )
-    _logger.debug(f"Sorted tags for processing: {sorted_user_tags_with_protocol}")
+    logging.getLogger("marzban").debug(f"Sorted tags for processing: {sorted_user_tags_with_protocol}")
 
 
     node_public_address = None
@@ -265,16 +265,16 @@ def process_inbounds_and_tags(
                 # And a 'name' field for remarks.
                 node_public_address = active_node_orm.address
                 node_name_for_remark = active_node_orm.name
-                _logger.info(f"  Fetched active node {active_node_id}: Name='{node_name_for_remark}', PublicAddress='{node_public_address}'")
+                logging.getLogger("marzban").info(f"  Fetched active node {active_node_id}: Name='{node_name_for_remark}', PublicAddress='{node_public_address}'")
                 if not node_public_address:
-                    _logger.warning(f"  Active node {active_node_id} ('{node_name_for_remark}') has no public address configured. Link generation may fail or use fallbacks.")
+                    logging.getLogger("marzban").warning(f"  Active node {active_node_id} ('{node_name_for_remark}') has no public address configured. Link generation may fail or use fallbacks.")
             else:
-                _logger.error(f"  Active node with ID {active_node_id} not found in database. Cannot determine public address for links.")
+                logging.getLogger("marzban").error(f"  Active node with ID {active_node_id} not found in database. Cannot determine public address for links.")
                 return conf.render(reverse=reverse) # type: ignore
         finally:
             db_for_node_fetch.close()
     else:
-        _logger.info("  No active_node_id provided; link generation will rely on global SERVER_IP or addresses within XRay config if public.")
+        logging.getLogger("marzban").info("  No active_node_id provided; link generation will rely on global SERVER_IP or addresses within XRay config if public.")
         # If no active_node_id, we might use a globally defined SERVER_IP or assume service listen address is public.
         # This path is less common if users always activate specific nodes.
         node_public_address = SERVER_IP # Fallback, or handle as error if specific node address is always expected
@@ -284,20 +284,20 @@ def process_inbounds_and_tags(
         protocol_enum: ProxyTypes = item_data['protocol']
         service_tag_name: str = item_data['tag'] # e.g., 'marzban_service_1'
 
-        _logger.info(f"  Processing user's service tag {item_idx + 1}/{len(sorted_user_tags_with_protocol)}: Protocol='{protocol_enum.value}', Tag='{service_tag_name}' for NodeID={active_node_id}")
+        logging.getLogger("marzban").info(f"  Processing user's service tag {item_idx + 1}/{len(sorted_user_tags_with_protocol)}: Protocol='{protocol_enum.value}', Tag='{service_tag_name}' for NodeID={active_node_id}")
 
         user_protocol_settings = user_proxies.get(protocol_enum)
         if not user_protocol_settings:
-            _logger.warning(f"    User {format_variables.get('ACCOUNT_NUMBER')} missing proxy settings for protocol {protocol_enum.value}. Skipping tag '{service_tag_name}'.")
+            logging.getLogger("marzban").warning(f"    User {format_variables.get('ACCOUNT_NUMBER')} missing proxy settings for protocol {protocol_enum.value}. Skipping tag '{service_tag_name}'.")
             continue
 
         # Get the full XRay inbound configuration for this specific tag from the panel's loaded XRay config
         # This 'actual_xray_inbound_config' is the source of truth for ports, paths, SNI from XRay's perspective.
         actual_xray_inbound_config = xray.config.inbounds_by_tag.get(service_tag_name)
         if not actual_xray_inbound_config:
-            _logger.warning(f"    Service tag '{service_tag_name}' (for user protocol {protocol_enum.value}) not found in the panel's loaded XRay configuration (xray.config.inbounds_by_tag). Skipping.")
+            logging.getLogger("marzban").warning(f"    Service tag '{service_tag_name}' (for user protocol {protocol_enum.value}) not found in the panel's loaded XRay configuration (xray.config.inbounds_by_tag). Skipping.")
             continue
-        _logger.debug(f"    Found XRay inbound config for tag '{service_tag_name}': Port={actual_xray_inbound_config.get('port')}, Listen='{actual_xray_inbound_config.get('listen')}'")
+        logging.getLogger("marzban").debug(f"    Found XRay inbound config for tag '{service_tag_name}': Port={actual_xray_inbound_config.get('port')}, Listen='{actual_xray_inbound_config.get('listen')}'")
 
 
         # Determine the final public address for the link
@@ -307,9 +307,9 @@ def process_inbounds_and_tags(
             xray_listen_addr = actual_xray_inbound_config.get("listen", "0.0.0.0")
             if xray_listen_addr and xray_listen_addr not in ["0.0.0.0", "127.0.0.1", "::"]:
                 final_link_address = xray_listen_addr
-                _logger.info(f"    Using XRay listen address '{xray_listen_addr}' as public address for tag '{service_tag_name}' (node public address was not available).")
+                logging.getLogger("marzban").info(f"    Using XRay listen address '{xray_listen_addr}' as public address for tag '{service_tag_name}' (node public address was not available).")
             else:
-                _logger.error(f"    Cannot determine a public address for tag '{service_tag_name}' (NodeID: {active_node_id}, NodeAddr: {node_public_address}, XRayListen: {xray_listen_addr}). Skipping link generation for this tag.")
+                logging.getLogger("marzban").error(f"    Cannot determine a public address for tag '{service_tag_name}' (NodeID: {active_node_id}, NodeAddr: {node_public_address}, XRayListen: {xray_listen_addr}). Skipping link generation for this tag.")
                 continue
 
         final_link_port = actual_xray_inbound_config.get("port") # Port should come from XRay config
@@ -318,9 +318,9 @@ def process_inbounds_and_tags(
         link_specific_details = actual_xray_inbound_config.copy() # Includes port, protocol, settings, streamSettings
         stream_settings = link_specific_details.get("streamSettings", {})
 
-        _logger.debug(f"    Actual XRay inbound config for tag '{service_tag_name}':")
-        _logger.debug(f"      Full config: {json.dumps(actual_xray_inbound_config, default=str, indent=2)}")
-        _logger.debug(f"      Stream settings: {json.dumps(stream_settings, default=str, indent=2)}")
+        logging.getLogger("marzban").debug(f"    Actual XRay inbound config for tag '{service_tag_name}':")
+        logging.getLogger("marzban").debug(f"      Full config: {json.dumps(actual_xray_inbound_config, default=str, indent=2)}")
+        logging.getLogger("marzban").debug(f"      Stream settings: {json.dumps(stream_settings, default=str, indent=2)}")
 
         # Extract and format SNI, Path, Host header for the link generation classes
         link_specific_details['sni'] = stream_settings.get("tlsSettings", {}).get("serverName") or \
@@ -334,7 +334,7 @@ def process_inbounds_and_tags(
         # Extract network type from stream settings
         network_type = stream_settings.get("network", "tcp")
         link_specific_details['network'] = network_type
-        _logger.debug(f"      Network type: {network_type}")
+        logging.getLogger("marzban").debug(f"      Network type: {network_type}")
 
         # Set header_type based on network type and stream settings
         if network_type == "ws":
@@ -345,7 +345,7 @@ def process_inbounds_and_tags(
             link_specific_details['header_type'] = "grpc"
         else:
             link_specific_details['header_type'] = "none"
-        _logger.debug(f"      Header type: {link_specific_details['header_type']}")
+        logging.getLogger("marzban").debug(f"      Header type: {link_specific_details['header_type']}")
 
         # Add TLS settings
         link_specific_details['tls'] = stream_settings.get("security", "") # 'tls', 'reality', or empty
@@ -360,9 +360,9 @@ def process_inbounds_and_tags(
             path_val = stream_settings["grpcSettings"].get("serviceName", "")
         # Apply formatting to path if it uses variables (less common for direct XRay config values)
         link_specific_details['path'] = path_val.format_map(format_variables) if path_val else ""
-        _logger.debug(f"      Path: {link_specific_details['path']}")
+        logging.getLogger("marzban").debug(f"      Path: {link_specific_details['path']}")
 
-        _logger.debug(f"      Final link_specific_details: {json.dumps(link_specific_details, default=str, indent=2)}")
+        logging.getLogger("marzban").debug(f"      Final link_specific_details: {json.dumps(link_specific_details, default=str, indent=2)}")
 
         remark_str = f"{node_name_for_remark} - {protocol_enum.value.upper()}"
         if format_variables.get("ACCOUNT_NUMBER"): # Add user identifier to remark
@@ -375,12 +375,12 @@ def process_inbounds_and_tags(
             if 'method' in user_protocol_settings_dict and hasattr(user_protocol_settings_dict['method'], 'value'):
                 user_protocol_settings_dict['method'] = user_protocol_settings_dict['method'].value
 
-        _logger.debug(f"    Final components for conf.add for tag '{service_tag_name}':")
-        _logger.debug(f"      Remark: '{remark_str}'")
-        _logger.debug(f"      Address: '{final_link_address}'")
-        _logger.debug(f"      Port: {final_link_port}") # Port is part of link_specific_details from XRay config
-        _logger.debug(f"      User Protocol Settings (passed as 'settings'): {user_protocol_settings_dict}")
-        _logger.debug(f"      Link Specific Details (passed as 'inbound'): {json.dumps(link_specific_details, default=str, indent=2)}")
+        logging.getLogger("marzban").debug(f"    Final components for conf.add for tag '{service_tag_name}':")
+        logging.getLogger("marzban").debug(f"      Remark: '{remark_str}'")
+        logging.getLogger("marzban").debug(f"      Address: '{final_link_address}'")
+        logging.getLogger("marzban").debug(f"      Port: {final_link_port}") # Port is part of link_specific_details from XRay config
+        logging.getLogger("marzban").debug(f"      User Protocol Settings (passed as 'settings'): {user_protocol_settings_dict}")
+        logging.getLogger("marzban").debug(f"      Link Specific Details (passed as 'inbound'): {json.dumps(link_specific_details, default=str, indent=2)}")
 
 
         try:
@@ -392,17 +392,17 @@ def process_inbounds_and_tags(
                 inbound=link_specific_details,   # This now carries port, sni, path, host, tls, fp etc from actual_xray_inbound_config
                 settings=user_protocol_settings_dict # User's VLESS id, SS pass/method etc.
             )
-            _logger.info(f"    Successfully added configuration for tag '{service_tag_name}' to subscription builder.")
+            logging.getLogger("marzban").info(f"    Successfully added configuration for tag '{service_tag_name}' to subscription builder.")
         except Exception as e_add:
-            _logger.error(f"    Error adding config for tag '{service_tag_name}', remark '{remark_str}': {e_add}", exc_info=True)
+            logging.getLogger("marzban").error(f"    Error adding config for tag '{service_tag_name}', remark '{remark_str}': {e_add}", exc_info=True)
 
     rendered_config = conf.render(reverse=reverse) # type: ignore
     if isinstance(rendered_config, list) and not rendered_config:
-        _logger.warning(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: conf.render() produced an empty list. No links were successfully added.")
+        logging.getLogger("marzban").warning(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: conf.render() produced an empty list. No links were successfully added.")
     elif isinstance(rendered_config, str) and not rendered_config.strip():
-         _logger.warning(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: conf.render() produced an empty string. No config generated.")
+         logging.getLogger("marzban").warning(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: conf.render() produced an empty string. No config generated.")
     else:
-        _logger.info(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: Successfully rendered subscription content.")
+        logging.getLogger("marzban").info(f"User {format_variables.get('ACCOUNT_NUMBER', 'N/A')}: Successfully rendered subscription content.")
 
     return rendered_config
 

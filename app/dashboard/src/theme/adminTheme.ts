@@ -1,17 +1,19 @@
 /**
  * Admin theme configuration for Chakra UI v3
- * Blue-based color scheme for administrative interface
+ * Sage green color scheme for administrative interface (Jade VPN)
  */
 
-import { createSystem, defaultConfig } from "@chakra-ui/react";
-import { baseColors, baseSemanticTokens, baseTypography, baseSpacing } from "./base";
+import { createSystem, defaultConfig, defineConfig } from "@chakra-ui/react";
+import { baseConfig, baseColors, baseSemanticTokens, baseTypography, baseSpacing } from "./base";
 
-const adminTheme = createSystem(defaultConfig, {
+// Admin-specific configuration extending base
+const adminConfig = defineConfig({
   theme: {
     tokens: {
       colors: {
         ...baseColors,
-        primary: baseColors.blue,
+        // Admin uses sage as brand for professional look
+        brand: baseColors.sage,
       },
       ...baseTypography,
       spacing: baseSpacing,
@@ -19,54 +21,57 @@ const adminTheme = createSystem(defaultConfig, {
     semanticTokens: {
       colors: {
         ...baseSemanticTokens.colors,
-        // Admin-specific semantic colors
-        "admin-primary": {
-          default: { value: "{colors.blue.500}" },
-          _dark: { value: "{colors.blue.400}" },
+        // Admin uses sage as brand color
+        "brand.solid": {
+          value: { base: "{colors.sage.500}", _dark: "{colors.sage.400}" },
         },
-        "admin-primary-hover": {
-          default: { value: "{colors.blue.600}" },
-          _dark: { value: "{colors.blue.300}" },
+        "brand.contrast": {
+          value: { base: "white", _dark: "{colors.gray.900}" },
         },
-        "admin-secondary": {
-          default: { value: "{colors.gray.500}" },
-          _dark: { value: "{colors.gray.400}" },
+        "brand.fg": {
+          value: { base: "{colors.sage.600}", _dark: "{colors.sage.300}" },
         },
-        "admin-secondary-hover": {
-          default: { value: "{colors.gray.600}" },
-          _dark: { value: "{colors.gray.300}" },
+        "brand.muted": {
+          value: { base: "{colors.sage.400}", _dark: "{colors.sage.500}" },
         },
-        // Component-specific colors
-        "admin-card-bg": {
-          default: { value: "white" },
-          _dark: { value: "{colors.gray.800}" },
+        "brand.subtle": {
+          value: { base: "{colors.sage.50}", _dark: "{colors.sage.950}" },
         },
-        "admin-sidebar-bg": {
-          default: { value: "white" },
-          _dark: { value: "{colors.gray.900}" },
+        "brand.emphasized": {
+          value: { base: "{colors.sage.100}", _dark: "{colors.sage.900}" },
         },
-        "admin-sidebar-hover": {
-          default: { value: "{colors.gray.100}" },
-          _dark: { value: "{colors.gray.700}" },
+        "brand.focusRing": {
+          value: { base: "{colors.sage.500}", _dark: "{colors.sage.400}" },
         },
-        "admin-sidebar-active": {
-          default: { value: "{colors.blue.50}" },
-          _dark: { value: "{colors.blue.900}" },
+        
+        // Override primary semantic colors for admin
+        "colorPalette.solid": {
+          value: { base: "{colors.sage.500}", _dark: "{colors.sage.400}" },
+        },
+        "colorPalette.contrast": {
+          value: { base: "white", _dark: "{colors.gray.900}" },
+        },
+        "colorPalette.fg": {
+          value: { base: "{colors.sage.600}", _dark: "{colors.sage.300}" },
+        },
+        "colorPalette.muted": {
+          value: { base: "{colors.sage.400}", _dark: "{colors.sage.500}" },
+        },
+        "colorPalette.subtle": {
+          value: { base: "{colors.sage.50}", _dark: "{colors.sage.950}" },
+        },
+        "colorPalette.emphasized": {
+          value: { base: "{colors.sage.100}", _dark: "{colors.sage.900}" },
+        },
+        "colorPalette.focusRing": {
+          value: { base: "{colors.sage.500}", _dark: "{colors.sage.400}" },
         },
       },
-      shadows: {
-        ...baseSemanticTokens.shadows,
-        "admin-card": {
-          default: { value: "{shadows.base}" },
-          _dark: { value: "{shadows.base}" },
-        },
-        "admin-dropdown": {
-          default: { value: "{shadows.md}" },
-          _dark: { value: "{shadows.md}" },
-        },
-      },
+      shadows: baseSemanticTokens.shadows,
     },
   },
 });
+
+const adminTheme = createSystem(defaultConfig, adminConfig);
 
 export default adminTheme;

@@ -28,6 +28,12 @@ i18n
             },
             react: {
                 useSuspense: false,
+                transSupportBasicHtmlNodes: true,
+                transKeepBasicHtmlNodesFor: ['br', 'strong', 'i', 'em'],
+                bindI18n: 'languageChanged',
+                bindI18nStore: '',
+                transEmptyNodeValue: '',
+                transWrapTextNodes: '',
             },
             load: "languageOnly",
             detection: {

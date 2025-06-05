@@ -1,4 +1,5 @@
 from typing import Optional
+import logging
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -9,6 +10,7 @@ from app.db import Session, crud, get_db
 from app.utils.jwt import get_admin_payload
 from config import SUDOERS
 
+logger = logging.getLogger("marzban")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/admin/token")  # Admin view url
 
@@ -38,76 +40,83 @@ class Admin(BaseModel):
 
     @classmethod
     def get_admin(cls, token: str, db: Session) -> Optional["Admin"]: # Return type is Pydantic Admin
+        logger.debug(f"Validating admin token: {token[:20]}...")
         payload = get_admin_payload(token)
         if not payload:
+            logger.warning("get_admin_payload returned None")
             return None
 
         username_from_token = payload.get('username')
         if not username_from_token:
+            logger.warning("Token payload missing username")
             return None
 
+        logger.debug(f"Looking up admin in database: {username_from_token}")
         db_admin_orm = crud.get_admin(db, username_from_token)
 
         if not db_admin_orm:
-            # logger.warning(f"Pydantic Admin.get_admin: Admin ORM object not found in DB for username '{username_from_token}'. Authentication will fail.")
-            return None # Admin MUST exist in the database to be considered valid by this method.
+            logger.warning(f"Admin not found in database: {username_from_token}")
+            return None
 
         # Check if password was reset after token issuance
         if db_admin_orm.password_reset_at:
-            token_created_at_payload = payload.get("created_at") # Assuming "created_at" is a Unix timestamp in the JWT payload
-            if token_created_at_payload is not None: # Ensure the claim exists
-                # Convert db_admin_orm.password_reset_at (datetime) to timestamp for comparison
+            token_created_at_payload = payload.get("created_at")
+            if token_created_at_payload is not None:
+                logger.debug(f"Checking password reset time: {db_admin_orm.password_reset_at} vs token created at: {token_created_at_payload}")
                 if db_admin_orm.password_reset_at.timestamp() > token_created_at_payload:
-                    # logger.warning(f"Pydantic Admin.get_admin: Token for '{username_from_token}' is invalid due to password reset after token creation.")
+                    logger.warning(f"Token invalidated by password reset for admin: {username_from_token}")
                     return None
             else:
-                # logger.warning(f"Pydantic Admin.get_admin: Token for '{username_from_token}' is missing 'created_at' claim, cannot validate against password_reset_at.")
-                # Depending on security policy, you might deny access if created_at is missing and password_reset_at is set
+                logger.warning(f"Token missing created_at claim for admin: {username_from_token}")
                 return None
 
         # Create Pydantic model from the ORM model fetched from the database
         pydantic_admin_instance = cls.model_validate(db_admin_orm)
 
         # Now, if the username is in SUDOERS, ensure their is_sudo status is True
-        # This means SUDOERS acts as an override or guarantee for sudo status for DB users.
         if username_from_token in SUDOERS:
+            logger.debug(f"Admin {username_from_token} is in SUDOERS, ensuring is_sudo=True")
             pydantic_admin_instance.is_sudo = True
-            # Optional: You might want to log if db_admin_orm.is_sudo was False but SUDOERS made it True,
-            # or even update the DB record to reflect this, though this function's primary role is auth.
-            # if not db_admin_orm.is_sudo:
-            #     logger.info(f"Admin '{username_from_token}' is in SUDOERS, ensuring is_sudo=True (DB was {db_admin_orm.is_sudo}).")
 
+        logger.debug(f"Successfully validated admin token for: {username_from_token}")
         return pydantic_admin_instance
 
     @classmethod
     def get_current(cls,
                     db: Session = Depends(get_db),
                     token: str = Depends(oauth2_scheme)):
+        logger.debug("Validating current admin token")
         admin = cls.get_admin(token, db)
         if not admin:
+            logger.warning("Failed to validate current admin token")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        logger.debug(f"Successfully validated current admin: {admin.username}")
         return admin
 
     @classmethod
     def check_sudo_admin(cls,
                          db: Session = Depends(get_db),
                          token: str = Depends(oauth2_scheme)):
+        logger.debug("Validating sudo admin token")
         admin = cls.get_admin(token, db)
         if not admin:
+            logger.warning("Failed to validate sudo admin token")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         if not admin.is_sudo:
+            logger.warning(f"Non-sudo admin {admin.username} attempted sudo operation")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You're not allowed"
             )
+        logger.debug(f"Successfully validated sudo admin: {admin.username}")
         return admin
 
 

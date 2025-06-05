@@ -1,17 +1,20 @@
 /**
  * Client theme configuration for Chakra UI v3
- * Green-based color scheme for client portal interface
+ * Jade green color scheme for client portal interface (Jade VPN)
  */
 
-import { createSystem, defaultConfig } from "@chakra-ui/react";
-import { baseColors, baseSemanticTokens, baseTypography, baseSpacing } from "./base";
+import { createSystem, defaultConfig, defineConfig } from "@chakra-ui/react";
+import { baseConfig, baseColors, baseSemanticTokens, baseTypography, baseSpacing } from "./base";
 
-const clientTheme = createSystem(defaultConfig, {
+// Client-specific configuration extending base
+const clientConfig = defineConfig({
   theme: {
     tokens: {
       colors: {
         ...baseColors,
-        primary: baseColors.green,
+        // Client uses jade as primary for vibrant look
+        brand: baseColors.jade,
+        accent: baseColors.teal,
       },
       ...baseTypography,
       spacing: baseSpacing,
@@ -19,67 +22,83 @@ const clientTheme = createSystem(defaultConfig, {
     semanticTokens: {
       colors: {
         ...baseSemanticTokens.colors,
-        // Client-specific semantic colors
-        "client-primary": {
-          default: { value: "{colors.green.500}" },
-          _dark: { value: "{colors.green.400}" },
+        
+        // Brand color palette (jade) following Chakra guidelines
+        "brand.solid": {
+          value: { base: "{colors.brand.500}", _dark: "{colors.brand.400}" },
         },
-        "client-primary-hover": {
-          default: { value: "{colors.green.600}" },
-          _dark: { value: "{colors.green.300}" },
+        "brand.contrast": {
+          value: { base: "white", _dark: "{colors.gray.900}" },
         },
-        "client-secondary": {
-          default: { value: "{colors.gray.500}" },
-          _dark: { value: "{colors.gray.400}" },
+        "brand.fg": {
+          value: { base: "{colors.brand.600}", _dark: "{colors.brand.300}" },
         },
-        "client-secondary-hover": {
-          default: { value: "{colors.gray.600}" },
-          _dark: { value: "{colors.gray.300}" },
+        "brand.muted": {
+          value: { base: "{colors.brand.400}", _dark: "{colors.brand.500}" },
         },
-        // Component-specific colors
-        "client-card-bg": {
-          default: { value: "white" },
-          _dark: { value: "{colors.gray.800}" },
+        "brand.subtle": {
+          value: { base: "{colors.brand.50}", _dark: "{colors.brand.950}" },
         },
-        "client-sidebar-bg": {
-          default: { value: "white" },
-          _dark: { value: "{colors.gray.900}" },
+        "brand.emphasized": {
+          value: { base: "{colors.brand.100}", _dark: "{colors.brand.900}" },
         },
-        "client-sidebar-hover": {
-          default: { value: "{colors.gray.100}" },
-          _dark: { value: "{colors.gray.700}" },
+        "brand.focusRing": {
+          value: { base: "{colors.brand.500}", _dark: "{colors.brand.400}" },
         },
-        "client-sidebar-active": {
-          default: { value: "{colors.green.50}" },
-          _dark: { value: "{colors.green.900}" },
+        
+        // Color palette tokens for components
+        "colorPalette.solid": {
+          value: { base: "{colors.brand.500}", _dark: "{colors.brand.400}" },
         },
-        // Status colors for VPN states
-        "status-connected": {
-          default: { value: "{colors.green.500}" },
-          _dark: { value: "{colors.green.400}" },
+        "colorPalette.contrast": {
+          value: { base: "white", _dark: "{colors.gray.900}" },
         },
-        "status-connecting": {
-          default: { value: "{colors.yellow.500}" },
-          _dark: { value: "{colors.yellow.400}" },
+        "colorPalette.fg": {
+          value: { base: "{colors.brand.600}", _dark: "{colors.brand.300}" },
         },
-        "status-disconnected": {
-          default: { value: "{colors.red.500}" },
-          _dark: { value: "{colors.red.400}" },
+        "colorPalette.muted": {
+          value: { base: "{colors.brand.400}", _dark: "{colors.brand.500}" },
+        },
+        "colorPalette.subtle": {
+          value: { base: "{colors.brand.50}", _dark: "{colors.brand.950}" },
+        },
+        "colorPalette.emphasized": {
+          value: { base: "{colors.brand.100}", _dark: "{colors.brand.900}" },
+        },
+        "colorPalette.focusRing": {
+          value: { base: "{colors.brand.500}", _dark: "{colors.brand.400}" },
+        },
+        
+        // Override background colors with jade-themed backgrounds
+        "bg.canvas": {
+          value: { base: "{colors.brand.50}", _dark: "{colors.gray.900}" },
+        },
+        "bg.surface": {
+          value: { base: "white", _dark: "{colors.gray.800}" },
+        },
+        "bg.subtle": {
+          value: { base: "{colors.brand.100}", _dark: "{colors.gray.800}" },
+        },
+        
+        // VPN status semantic colors
+        "status.connected": {
+          value: { base: "{colors.brand.500}", _dark: "{colors.brand.400}" },
+        },
+        "status.connecting": {
+          value: { base: "{colors.yellow.500}", _dark: "{colors.yellow.400}" },
+        },
+        "status.disconnected": {
+          value: { base: "{colors.red.500}", _dark: "{colors.red.400}" },
+        },
+        "status.paused": {
+          value: { base: "{colors.sage.500}", _dark: "{colors.sage.400}" },
         },
       },
-      shadows: {
-        ...baseSemanticTokens.shadows,
-        "client-card": {
-          default: { value: "{shadows.base}" },
-          _dark: { value: "{shadows.base}" },
-        },
-        "client-dropdown": {
-          default: { value: "{shadows.md}" },
-          _dark: { value: "{shadows.md}" },
-        },
-      },
+      shadows: baseSemanticTokens.shadows,
     },
   },
 });
+
+const clientTheme = createSystem(defaultConfig, clientConfig);
 
 export default clientTheme;

@@ -38,14 +38,14 @@ def validate_discord_webhook(value: str) -> Union[str, None]:
 
 def calculate_admin_usage(admin_id: int) -> str:
     with GetDB() as db:
-        usage = db.query(func.sum(User.used_traffic)).filter_by(admin_id=admin_id).first()[0]
-        return readable_size(int(usage or 0))
+        # Since we don't have admin_id in users table, return 0 for now
+        return readable_size(0)
 
 
 def calculate_admin_reseted_usage(admin_id: int) -> str:
     with GetDB() as db:
-        usage = db.query(func.sum(User.reseted_usage)).filter_by(admin_id=admin_id).scalar()
-        return readable_size(int(usage or 0))
+        # Since we don't have admin_id in users table, return 0 for now
+        return readable_size(0)
 
 
 @app.command(name="list")
@@ -179,7 +179,6 @@ def import_from_env(yes_to_all: bool = typer.Option(False, *utils.FLAGS["yes_to_
 
     What does it do?
       - Creates a sudo admin according to `SUDO_USERNAME` and `SUDO_PASSWORD`.
-      - Links any user which doesn't have an `admin_id` to the imported sudo admin.
     """
     try:
         username, password = config("SUDO_USERNAME"), config("SUDO_PASSWORD")
@@ -216,11 +215,7 @@ def import_from_env(yes_to_all: bool = typer.Option(False, *utils.FLAGS["yes_to_
                 is_sudo=True
             ))
 
-        updated_user_count = db.query(User).filter_by(admin_id=None).update({"admin_id": admin.id})
-        db.commit()
-
         utils.success(
             f'Admin "{username}" imported successfully.\n'
-            f"{updated_user_count} users' admin_id set to the {username}'s id.\n"
             'You must delete SUDO_USERNAME and SUDO_PASSWORD from your env file now.'
         )

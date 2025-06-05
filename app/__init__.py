@@ -13,21 +13,20 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .version import __version__
 from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH, DEBUG, HOME_PAGE_TEMPLATE
 
-# Configure logging
-if not logging.getLogger().hasHandlers():
-    logging.basicConfig(
-        level=logging.INFO,  # Set default level to INFO
-        format='%(levelname)s:%(name)s:%(message)s'
-    )
+from app.db import init_db
+# Routers are imported via the main aggregator router
 
-# Reduce verbosity of specific loggers
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+logger = logging.getLogger("marzban")
+
+# Configure APScheduler logging
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
 logging.getLogger('apscheduler.executors.default').setLevel(logging.WARNING)
-logging.getLogger('apscheduler.scheduler').setLevel(logging.WARNING)
-
-# Set app logger level
-logger = logging.getLogger("marzban.app_init")
-logger.setLevel(logging.INFO if not DEBUG else logging.DEBUG)
 
 app = FastAPI(
     title="MarzbanAPI",
@@ -108,6 +107,34 @@ def on_app_init_startup():
             scheduler.start()
         else:
             logger.info("APP_INIT_STARTUP_EVENT: Scheduler was already running.")
+
+        # Register bandwidth monitoring job
+        from app.utils.system import record_realtime_bandwidth
+        scheduler.add_job(
+            record_realtime_bandwidth,
+            "interval",
+            seconds=2,
+            coalesce=True,
+            max_instances=1,
+            id="realtime_bandwidth"
+        )
+
+        # Start telegram bot if configured
+        from app.telegram import start_bot
+        start_bot()
+
+        # Initialize XRay core and jobs
+        from app.jobs.send_notifications import register_webhook_jobs
+        from app.jobs import register_all_jobs
+        register_webhook_jobs()
+        register_all_jobs()
+
+        # Import from jobs module with numeric name
+        import importlib
+        xray_core_jobs = importlib.import_module('app.jobs.0_xray_core')
+        xray_core_jobs.start_core()
+
+        init_db()
     except Exception as e_init_startup:
         logger.error(f"APP_INIT_STARTUP_EVENT: EXCEPTION: {e_init_startup}", exc_info=True)
 
@@ -127,4 +154,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content=jsonable_encoder({"detail": details}),
     )
+
+# Router includes are now handled by the main_api_aggregator_router above
+
 logger.debug("APP_INIT: End of file reached")

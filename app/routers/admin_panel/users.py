@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 
-from app import logger, xray
+from app import xray
 from app.db import Session, crud, get_db
 from app.db.models import User as DBUser
 from app.db.models import Admin as DBAdmin
@@ -27,7 +27,7 @@ from app.models.proxy import ProxyTypes
 from app.utils import report, responses
 
 # Set logging level to DEBUG
-logger.setLevel(logging.DEBUG)
+logging.getLogger("marzban").setLevel(logging.DEBUG)
 
 router = APIRouter(tags=["Users"], responses={401: responses._401})
 
@@ -42,59 +42,59 @@ def add_user(
     generated_account_number = generated_account_number.lower()
 
     # Default proxy configurations logic
-    logger.info(f"POST /api/admin/users: Initializing default proxy configurations for new user '{generated_account_number}'.")
+    logging.getLogger("marzban").info(f"POST /api/admin/users: Initializing default proxy configurations for new user '{generated_account_number}'.")
     default_proxy_configurations_to_ensure = {}
     if new_user.proxies is None:
         new_user.proxies = {}
 
-    logger.debug(f"Current xray.config.inbounds_by_protocol: {xray.config.inbounds_by_protocol}")
+    logging.getLogger("marzban").debug(f"Current xray.config.inbounds_by_protocol: {xray.config.inbounds_by_protocol}")
     for pt_enum_member in ProxyTypes:
-        logger.debug(f"Checking default proxy for {pt_enum_member.value}")
+        logging.getLogger("marzban").debug(f"Checking default proxy for {pt_enum_member.value}")
         if xray.config.inbounds_by_protocol.get(pt_enum_member.value):
             settings_model_class = pt_enum_member.settings_model
             if settings_model_class:
                 if pt_enum_member not in new_user.proxies:
-                    logger.debug(f"Protocol '{pt_enum_member.value}' is enabled. Adding its default settings for user '{generated_account_number}'.")
+                    logging.getLogger("marzban").debug(f"Protocol '{pt_enum_member.value}' is enabled. Adding its default settings for user '{generated_account_number}'.")
                     default_proxy_configurations_to_ensure[pt_enum_member] = settings_model_class()
             else:
-                logger.warning(f"Protocol '{pt_enum_member.value}' is enabled but has no associated settings_model.")
+                logging.getLogger("marzban").warning(f"Protocol '{pt_enum_member.value}' is enabled but has no associated settings_model.")
         else:
-            logger.info(f"Protocol '{pt_enum_member.value}' is not configured/disabled. Skipping default for '{generated_account_number}'.")
+            logging.getLogger("marzban").info(f"Protocol '{pt_enum_member.value}' is not configured/disabled. Skipping default for '{generated_account_number}'.")
 
     for proxy_type_enum, default_settings_instance in default_proxy_configurations_to_ensure.items():
         new_user.proxies[proxy_type_enum] = default_settings_instance
 
     # Protocol Validation
-    logger.debug(f"POST /api/admin/users: Validating final proxy set for user '{generated_account_number}'.")
+    logging.getLogger("marzban").debug(f"POST /api/admin/users: Validating final proxy set for user '{generated_account_number}'.")
     if new_user.proxies:
         proxies_to_check = list(new_user.proxies.keys())
         for proxy_type_enum_value in proxies_to_check:
             proxy_type_enum = ProxyTypes(proxy_type_enum_value)
             if not xray.config.inbounds_by_protocol.get(proxy_type_enum.value):
-                logger.warning(f"POST /api/admin/users: Validation failed for '{generated_account_number}' - Protocol '{proxy_type_enum.value}' is disabled. Raising 400.")
+                logging.getLogger("marzban").warning(f"POST /api/admin/users: Validation failed for '{generated_account_number}' - Protocol '{proxy_type_enum.value}' is disabled. Raising 400.")
                 raise HTTPException(
                     status_code=400,
                     detail=f"Protocol {proxy_type_enum.value} is disabled on your server or has no defined inbounds.",
                 )
 
-    logger.info(f"POST /api/admin/users: Fetching admin '{current_admin.username}' for ownership.")
+    logging.getLogger("marzban").info(f"POST /api/admin/users: Fetching admin '{current_admin.username}' for ownership.")
     db_admin_orm = crud.get_admin(db, current_admin.username)
     if not db_admin_orm:
-        logger.error(f"POST /api/admin/users: CRITICAL - Admin '{current_admin.username}' NOT FOUND. Raising 403.")
+        logging.getLogger("marzban").error(f"POST /api/admin/users: CRITICAL - Admin '{current_admin.username}' NOT FOUND. Raising 403.")
         raise HTTPException(status_code=403, detail="Performing admin not found in database.")
 
     try:
-        logger.info(f"POST /api/admin/users: Calling crud.create_user for '{generated_account_number}'.")
+        logging.getLogger("marzban").info(f"POST /api/admin/users: Calling crud.create_user for '{generated_account_number}'.")
         db_user_orm = crud.create_user(
             db, account_number=generated_account_number, user=new_user, admin=db_admin_orm
         )
-        logger.info(f"POST /api/admin/users: crud.create_user successful for '{generated_account_number}', New User ID: {db_user_orm.id}.")
+        logging.getLogger("marzban").info(f"POST /api/admin/users: crud.create_user successful for '{generated_account_number}', New User ID: {db_user_orm.id}.")
     except IntegrityError:
-        logger.error(f"POST /api/admin/users: IntegrityError for '{generated_account_number}'.", exc_info=True)
+        logging.getLogger("marzban").error(f"POST /api/admin/users: IntegrityError for '{generated_account_number}'.", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=409, detail="User with this account number or details already exists")
     except Exception as e:
-        logger.error(f"POST /api/admin/users: Unexpected error during crud.create_user for '{generated_account_number}': {e}", exc_info=True)
+        logging.getLogger("marzban").error(f"POST /api/admin/users: Unexpected error during crud.create_user for '{generated_account_number}': {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail="An unexpected error occurred while creating the user.")
 
@@ -105,7 +105,7 @@ def add_user(
         by=current_admin,
         user_admin=db_user_orm.admin
     )
-    logger.info(f'New user with account number "{db_user_orm.account_number}" added to DB. No XRay activation yet.')
+    logging.getLogger("marzban").info(f'New user with account number "{db_user_orm.account_number}" added to DB. No XRay activation yet.')
     return user_response
 
 
@@ -142,7 +142,7 @@ def modify_user(
         user_admin=dbuser_updated_orm.admin,
         by=current_admin
     )
-    logger.info(f'User "{dbuser_updated_orm.account_number}" modified.')
+    logging.getLogger("marzban").info(f'User "{dbuser_updated_orm.account_number}" modified.')
 
     if dbuser_updated_orm.status != old_status:
         report.status_change(
@@ -152,7 +152,7 @@ def modify_user(
             user_admin=dbuser_updated_orm.admin,
             by=current_admin,
         )
-        logger.info(
+        logging.getLogger("marzban").info(
             f'User "{dbuser_updated_orm.account_number}" status changed from {old_status.value} to {dbuser_updated_orm.status.value}'
         )
     return user_response_for_bg_and_report
@@ -170,10 +170,10 @@ def remove_user_endpoint(
     active_node_id_at_deletion = db_user_orm.active_node_id
 
     if active_node_id_at_deletion is not None:
-        logger.info(f"User '{user_account_number}' is active on node {active_node_id_at_deletion}. Scheduling deactivation from XRay.")
+        logging.getLogger("marzban").info(f"User '{user_account_number}' is active on node {active_node_id_at_deletion}. Scheduling deactivation from XRay.")
         bg.add_task(xray.operations.deactivate_user_from_active_node, account_number=user_account_number)
     else:
-        logger.info(f"User '{user_account_number}' has no active node. No XRay deactivation needed.")
+        logging.getLogger("marzban").info(f"User '{user_account_number}' has no active node. No XRay deactivation needed.")
 
     crud.remove_user(db, db_user_orm)
 
@@ -182,7 +182,7 @@ def remove_user_endpoint(
         user_admin=user_admin_orm,
         by=current_admin
     )
-    logger.info(f'User "{user_account_number}" deleted from DB.')
+    logging.getLogger("marzban").info(f'User "{user_account_number}" deleted from DB.')
     return {"detail": "User successfully deleted"}
 
 
@@ -200,12 +200,12 @@ def reset_user_data_usage(
 
     if active_node_id_before_reset is not None:
         if dbuser_reset_orm.status in [UserStatus.active, UserStatus.on_hold]:
-            logger.info(f"User {dbuser_reset_orm.account_number} data reset, status {dbuser_reset_orm.status}. Re-activating on node {active_node_id_before_reset}.")
+            logging.getLogger("marzban").info(f"User {dbuser_reset_orm.account_number} data reset, status {dbuser_reset_orm.status}. Re-activating on node {active_node_id_before_reset}.")
             bg.add_task(xray.operations.activate_user_on_node,
                         account_number=dbuser_reset_orm.account_number,
                         node_id=active_node_id_before_reset)
         else:
-            logger.info(f"User {dbuser_reset_orm.account_number} data reset, status {dbuser_reset_orm.status}. Deactivating from node {active_node_id_before_reset}.")
+            logging.getLogger("marzban").info(f"User {dbuser_reset_orm.account_number} data reset, status {dbuser_reset_orm.status}. Deactivating from node {active_node_id_before_reset}.")
             bg.add_task(xray.operations.deactivate_user_from_active_node,
                         account_number=dbuser_reset_orm.account_number)
 
@@ -214,7 +214,7 @@ def reset_user_data_usage(
         user_admin=dbuser_reset_orm.admin,
         by=current_admin
     )
-    logger.info(f'User "{dbuser_reset_orm.account_number}"\'s usage was reset')
+    logging.getLogger("marzban").info(f'User "{dbuser_reset_orm.account_number}"\'s usage was reset')
     return user_response_for_bg_and_report
 
 
@@ -232,7 +232,7 @@ def revoke_user_subscription(
 
     if active_node_id_before_revoke is not None:
         if dbuser_revoked_orm.status in [UserStatus.active, UserStatus.on_hold]:
-            logger.info(f"User {dbuser_revoked_orm.account_number} subscription revoked. Re-activating on node {active_node_id_before_revoke} with new settings.")
+            logging.getLogger("marzban").info(f"User {dbuser_revoked_orm.account_number} subscription revoked. Re-activating on node {active_node_id_before_revoke} with new settings.")
             bg.add_task(xray.operations.activate_user_on_node,
                         account_number=dbuser_revoked_orm.account_number,
                         node_id=active_node_id_before_revoke)
@@ -242,7 +242,7 @@ def revoke_user_subscription(
         user_admin=dbuser_revoked_orm.admin,
         by=current_admin
     )
-    logger.info(f'User "{dbuser_revoked_orm.account_number}" subscription revoked')
+    logging.getLogger("marzban").info(f'User "{dbuser_revoked_orm.account_number}" subscription revoked')
     return user_response_for_bg_and_report
 
 
@@ -292,23 +292,23 @@ def reset_all_users_data_usage(
 
     crud.reset_all_users_data_usage(db=db, admin=None if current_admin.is_sudo else db_admin_orm_performing_reset)
 
-    logger.info("All users' data usage reset. Scheduling XRay updates for affected active users.")
+    logging.getLogger("marzban").info("All users' data usage reset. Scheduling XRay updates for affected active users.")
     for user_before_reset in all_users_before_reset:
         if user_before_reset.active_node_id:
             user_after_reset = crud.get_user_by_id(db, user_before_reset.id)
             if user_after_reset:
                 user_payload_for_xray = UserResponse.model_validate(user_after_reset, context={'db': db})
                 if user_after_reset.status in [UserStatus.active, UserStatus.on_hold]:
-                    logger.debug(f"User {user_after_reset.account_number} active on node {user_after_reset.active_node_id} after global reset. Re-activating.")
+                    logging.getLogger("marzban").debug(f"User {user_after_reset.account_number} active on node {user_after_reset.active_node_id} after global reset. Re-activating.")
                     bg.add_task(xray.operations.activate_user_on_node,
                                 account_number=user_after_reset.account_number,
                                 node_id=user_after_reset.active_node_id)
                 else:
-                    logger.debug(f"User {user_after_reset.account_number} inactive after global reset. Deactivating from node {user_before_reset.active_node_id}.")
+                    logging.getLogger("marzban").debug(f"User {user_after_reset.account_number} inactive after global reset. Deactivating from node {user_before_reset.active_node_id}.")
                     bg.add_task(xray.operations.deactivate_user_from_active_node,
                                 account_number=user_after_reset.account_number)
 
-    logger.info(f"All users' data usage reset by admin '{current_admin.username}'. XRay updates scheduled.")
+    logging.getLogger("marzban").info(f"All users' data usage reset by admin '{current_admin.username}'. XRay updates scheduled.")
     return {"detail": "All users' data usage successfully reset. XRay updates processing."}
 
 
@@ -341,7 +341,7 @@ def active_next_plan(
 
     if active_node_id_before_next_plan is not None:
         if dbuser_reset_orm.status in [UserStatus.active, UserStatus.on_hold]:
-            logger.info(f"User {dbuser_reset_orm.account_number} activated next plan. Re-activating on node {active_node_id_before_next_plan}.")
+            logging.getLogger("marzban").info(f"User {dbuser_reset_orm.account_number} activated next plan. Re-activating on node {active_node_id_before_next_plan}.")
             bg.add_task(xray.operations.activate_user_on_node,
                         account_number=dbuser_reset_orm.account_number,
                         node_id=active_node_id_before_next_plan)
@@ -351,7 +351,7 @@ def active_next_plan(
         user_admin=dbuser_reset_orm.admin,
         by=current_admin
     )
-    logger.info(f'User "{dbuser_reset_orm.account_number}"\'s usage was reset by next plan')
+    logging.getLogger("marzban").info(f'User "{dbuser_reset_orm.account_number}"\'s usage was reset by next plan')
     return user_response_for_bg_and_report
 
 
@@ -403,7 +403,7 @@ def delete_expired_users_endpoint(
     for user_orm in expired_users_orm_list:
         removed_users_accounts.append(user_orm.account_number)
         if user_orm.active_node_id is not None:
-            logger.info(f"Expired user '{user_orm.account_number}' active on node {user_orm.active_node_id}. Scheduling deactivation.")
+            logging.getLogger("marzban").info(f"Expired user '{user_orm.account_number}' active on node {user_orm.active_node_id}. Scheduling deactivation.")
             bg.add_task(xray.operations.deactivate_user_from_active_node, account_number=user_orm.account_number)
 
         user_admin_for_report = user_orm.admin
@@ -414,7 +414,7 @@ def delete_expired_users_endpoint(
             user_admin=user_admin_for_report,
             by=current_admin,
         )
-        logger.info(f'Expired user "{user_orm.account_number}" scheduled for deletion by admin "{current_admin.username}"')
+        logging.getLogger("marzban").info(f'Expired user "{user_orm.account_number}" scheduled for deletion by admin "{current_admin.username}"')
 
     if expired_users_orm_list:
         crud.remove_users(db, expired_users_orm_list)

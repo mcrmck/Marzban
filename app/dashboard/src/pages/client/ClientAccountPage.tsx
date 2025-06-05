@@ -86,7 +86,7 @@ export const ClientAccountPage = () => {
                             <Text fontWeight="medium" color="gray.600">
                                 Account Number
                             </Text>
-                            <Text fontSize="lg">{clientDetails?.user.username}</Text>
+                            <Text fontSize="lg">{clientDetails?.user.account_number}</Text>
                         </Box>
 
                         <Box>

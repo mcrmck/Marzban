@@ -1,5 +1,6 @@
 import time
 import jwt
+import logging
 from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -10,12 +11,16 @@ from typing import Union
 
 from config import JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 
+logger = logging.getLogger("marzban")
+
 
 @lru_cache(maxsize=None)
 def get_secret_key():
     from app.db import GetDB, get_jwt_secret_key
     with GetDB() as db:
-        return get_jwt_secret_key(db)
+        key = get_jwt_secret_key(db)
+        logger.debug(f"Retrieved JWT secret key: {key[:10]}...")
+        return key
 
 
 def create_admin_token(username: str, is_sudo=False) -> str:
@@ -23,24 +28,42 @@ def create_admin_token(username: str, is_sudo=False) -> str:
     if JWT_ACCESS_TOKEN_EXPIRE_MINUTES > 0:
         expire = datetime.utcnow() + timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
         data["exp"] = expire
+    logger.debug(f"Creating admin token with data: {data}")
     encoded_jwt = jwt.encode(data, get_secret_key(), algorithm="HS256")
+    logger.debug(f"Created admin token: {encoded_jwt[:20]}...")
     return encoded_jwt
 
 
 def get_admin_payload(token: str) -> Union[dict, None]:
     try:
+        logger.debug(f"Attempting to decode token: {token[:20]}...")
         payload = jwt.decode(token, get_secret_key(), algorithms=["HS256"])
+        logger.debug(f"Decoded payload: {payload}")
+
         username: str = payload.get("sub")
         access: str = payload.get("access")
         if not username or access not in ('admin', 'sudo'):
+            logger.warning(f"Invalid payload - username: {username}, access: {access}")
             return
+
         try:
             created_at = datetime.utcfromtimestamp(payload['iat'])
+            logger.debug(f"Token created_at: {created_at}")
         except KeyError:
+            logger.warning("Token missing 'iat' claim")
+            created_at = None
+        except Exception as e:
+            logger.error(f"Error processing 'iat' claim: {str(e)}")
             created_at = None
 
-        return {"username": username, "is_sudo": access == "sudo", "created_at": created_at}
-    except jwt.exceptions.PyJWTError:
+        result = {"username": username, "is_sudo": access == "sudo", "created_at": created_at}
+        logger.debug(f"Returning admin payload: {result}")
+        return result
+    except jwt.exceptions.PyJWTError as e:
+        logger.error(f"JWT decode error: {str(e)}")
+        return
+    except Exception as e:
+        logger.error(f"Unexpected error in get_admin_payload: {str(e)}")
         return
 
 

@@ -1,47 +1,91 @@
 /**
  * Base theme configuration for Chakra UI v3
  * Shared foundation for both admin and client themes
+ * Following official Chakra UI v3 theming guidelines
  */
 
-import { createSystem, defaultConfig } from "@chakra-ui/react";
+import { createSystem, defaultConfig, defineConfig } from "@chakra-ui/react";
 
-// Base color palette - extending Chakra's default colors
+// Jade nature-inspired color palette
 const baseColors = {
+  // Natural off-white and warm grays inspired by stone and earth
   gray: {
-    50: { value: "#f7fafc" },
-    100: { value: "#edf2f7" },
-    200: { value: "#e2e8f0" },
-    300: { value: "#cbd5e0" },
-    400: { value: "#a0aec0" },
-    500: { value: "#718096" },
-    600: { value: "#4a5568" },
-    700: { value: "#2d3748" },
-    800: { value: "#1a202c" },
-    900: { value: "#171923" },
+    50: { value: "#fafaf9" },   // Warm off-white
+    100: { value: "#f5f5f4" },  // Light stone
+    200: { value: "#e7e5e4" },  // Lighter stone
+    300: { value: "#d6d3d1" },  // Medium stone
+    400: { value: "#a8a29e" },  // Warm gray
+    500: { value: "#78716c" },  // Stone gray
+    600: { value: "#57534e" },  // Dark stone
+    700: { value: "#44403c" },  // Charcoal
+    800: { value: "#292524" },  // Dark charcoal
+    900: { value: "#1c1917" },  // Near black
+  },
+  // Sage and forest green palette inspired by jade and nature
+  jade: {
+    50: { value: "#f0fdf4" },   // Lightest mint
+    100: { value: "#dcfce7" },  // Light mint
+    200: { value: "#bbf7d0" },  // Soft green
+    300: { value: "#86efac" },  // Light jade
+    400: { value: "#4ade80" },  // Jade green
+    500: { value: "#22c55e" },  // Primary jade
+    600: { value: "#16a34a" },  // Deep jade
+    700: { value: "#15803d" },  // Forest green
+    800: { value: "#166534" },  // Dark forest
+    900: { value: "#14532d" },  // Deep forest
+    950: { value: "#0f2419" },  // Darkest forest
+  },
+  // Sage green for secondary elements
+  sage: {
+    50: { value: "#f6f7f6" },   // Light sage
+    100: { value: "#e8eae7" },  // Soft sage
+    200: { value: "#d1d5ce" },  // Medium sage
+    300: { value: "#b3bab0" },  // Darker sage
+    400: { value: "#8b9488" },  // Deep sage
+    500: { value: "#6b7066" },  // Primary sage
+    600: { value: "#565b52" },  // Dark sage
+    700: { value: "#454942" },  // Forest sage
+    800: { value: "#363834" },  // Deep sage
+    900: { value: "#2a2c28" },  // Darkest sage
+    950: { value: "#1c1e1b" },  // Deepest sage
+  },
+  // Blue-green for accents
+  teal: {
+    50: { value: "#f0fdfa" },
+    100: { value: "#ccfbf1" },
+    200: { value: "#99f6e4" },
+    300: { value: "#5eead4" },
+    400: { value: "#2dd4bf" },
+    500: { value: "#14b8a6" },
+    600: { value: "#0d9488" },
+    700: { value: "#0f766e" },
+    800: { value: "#115e59" },
+    900: { value: "#134e4a" },
+  },
+  // Keep existing colors for compatibility
+  green: {
+    50: { value: "#f0fdf4" },
+    100: { value: "#dcfce7" },
+    200: { value: "#bbf7d0" },
+    300: { value: "#86efac" },
+    400: { value: "#4ade80" },
+    500: { value: "#22c55e" },
+    600: { value: "#16a34a" },
+    700: { value: "#15803d" },
+    800: { value: "#166534" },
+    900: { value: "#14532d" },
   },
   blue: {
-    50: { value: "#ebf8ff" },
-    100: { value: "#bee3f8" },
-    200: { value: "#90cdf4" },
-    300: { value: "#63b3ed" },
-    400: { value: "#4299e1" },
-    500: { value: "#3182ce" },
-    600: { value: "#2b6cb0" },
-    700: { value: "#2c5282" },
-    800: { value: "#2a4365" },
-    900: { value: "#1a365d" },
-  },
-  green: {
-    50: { value: "#f0fff4" },
-    100: { value: "#c6f6d5" },
-    200: { value: "#9ae6b4" },
-    300: { value: "#68d391" },
-    400: { value: "#48bb78" },
-    500: { value: "#38a169" },
-    600: { value: "#2f855a" },
-    700: { value: "#276749" },
-    800: { value: "#22543d" },
-    900: { value: "#1c4532" },
+    50: { value: "#eff6ff" },
+    100: { value: "#dbeafe" },
+    200: { value: "#bfdbfe" },
+    300: { value: "#93c5fd" },
+    400: { value: "#60a5fa" },
+    500: { value: "#3b82f6" },
+    600: { value: "#2563eb" },
+    700: { value: "#1d4ed8" },
+    800: { value: "#1e40af" },
+    900: { value: "#1e3a8a" },
   },
   red: {
     50: { value: "#fff5f5" },
@@ -69,24 +113,81 @@ const baseColors = {
   },
 };
 
-// Base semantic tokens
+// Semantic tokens following Chakra UI v3 guidelines
 const baseSemanticTokens = {
   colors: {
+    // Base Chakra tokens
     "chakra-body-text": {
-      default: { value: "{colors.gray.800}" },
-      _dark: { value: "white" },
+      value: { base: "{colors.gray.800}", _dark: "{colors.gray.100}" },
     },
     "chakra-body-bg": {
-      default: { value: "white" },
-      _dark: { value: "{colors.gray.900}" },
+      value: { base: "{colors.gray.50}", _dark: "{colors.gray.900}" },
     },
     "chakra-border-color": {
-      default: { value: "{colors.gray.200}" },
-      _dark: { value: "{colors.gray.700}" },
+      value: { base: "{colors.gray.200}", _dark: "{colors.gray.700}" },
     },
     "chakra-placeholder-color": {
-      default: { value: "{colors.gray.400}" },
-      _dark: { value: "{colors.gray.500}" },
+      value: { base: "{colors.gray.400}", _dark: "{colors.gray.500}" },
+    },
+    
+    // Jade semantic color system following guidelines
+    "jade.solid": {
+      value: { base: "{colors.jade.500}", _dark: "{colors.jade.400}" },
+    },
+    "jade.contrast": {
+      value: { base: "white", _dark: "{colors.gray.900}" },
+    },
+    "jade.fg": {
+      value: { base: "{colors.jade.600}", _dark: "{colors.jade.300}" },
+    },
+    "jade.muted": {
+      value: { base: "{colors.jade.400}", _dark: "{colors.jade.500}" },
+    },
+    "jade.subtle": {
+      value: { base: "{colors.jade.50}", _dark: "{colors.jade.950}" },
+    },
+    "jade.emphasized": {
+      value: { base: "{colors.jade.100}", _dark: "{colors.jade.900}" },
+    },
+    "jade.focusRing": {
+      value: { base: "{colors.jade.500}", _dark: "{colors.jade.400}" },
+    },
+    
+    // Sage semantic colors for secondary elements
+    "sage.solid": {
+      value: { base: "{colors.sage.500}", _dark: "{colors.sage.400}" },
+    },
+    "sage.contrast": {
+      value: { base: "white", _dark: "{colors.gray.900}" },
+    },
+    "sage.fg": {
+      value: { base: "{colors.sage.600}", _dark: "{colors.sage.300}" },
+    },
+    "sage.muted": {
+      value: { base: "{colors.sage.400}", _dark: "{colors.sage.500}" },
+    },
+    "sage.subtle": {
+      value: { base: "{colors.sage.50}", _dark: "{colors.sage.950}" },
+    },
+    "sage.emphasized": {
+      value: { base: "{colors.sage.100}", _dark: "{colors.sage.900}" },
+    },
+    
+    // Generic surface colors
+    "bg.canvas": {
+      value: { base: "{colors.gray.50}", _dark: "{colors.gray.900}" },
+    },
+    "bg.surface": {
+      value: { base: "white", _dark: "{colors.gray.800}" },
+    },
+    "bg.subtle": {
+      value: { base: "{colors.gray.100}", _dark: "{colors.gray.800}" },
+    },
+    "border.default": {
+      value: { base: "{colors.gray.200}", _dark: "{colors.gray.700}" },
+    },
+    "border.emphasized": {
+      value: { base: "{colors.gray.300}", _dark: "{colors.gray.600}" },
     },
   },
   shadows: {
@@ -178,111 +279,13 @@ const baseSpacing = {
   96: { value: "24rem" },
 };
 
-// Component-specific theme tokens
-const components = {
-  Button: {
-    baseStyle: {
-      fontWeight: "semibold",
-      borderRadius: "md",
-    },
-    variants: {
-      solid: {
-        bg: "primary.500",
-        color: "white",
-        _hover: {
-          bg: "primary.600",
-        },
-      },
-      outline: {
-        borderColor: "primary.500",
-        color: "primary.500",
-        _hover: {
-          bg: "primary.50",
-        },
-      },
-      ghost: {
-        color: "primary.500",
-        _hover: {
-          bg: "primary.50",
-        },
-      },
-    },
-    sizes: {
-      sm: {
-        px: 3,
-        py: 1,
-        fontSize: "sm",
-      },
-      md: {
-        px: 4,
-        py: 2,
-        fontSize: "md",
-      },
-      lg: {
-        px: 6,
-        py: 3,
-        fontSize: "lg",
-      },
-    },
-  },
-  Card: {
-    baseStyle: {
-      p: 6,
-      bg: "white",
-      borderRadius: "lg",
-      boxShadow: "base",
-    },
-  },
-  Input: {
-    baseStyle: {
-      field: {
-        bg: "white",
-        borderRadius: "md",
-        _hover: {
-          borderColor: "primary.500",
-        },
-        _focus: {
-          borderColor: "primary.500",
-          boxShadow: "0 0 0 1px var(--chakra-colors-primary-500)",
-        },
-      },
-    },
-  },
-  Select: {
-    baseStyle: {
-      field: {
-        bg: "white",
-        borderRadius: "md",
-        _hover: {
-          borderColor: "primary.500",
-        },
-        _focus: {
-          borderColor: "primary.500",
-          boxShadow: "0 0 0 1px var(--chakra-colors-primary-500)",
-        },
-      },
-    },
-  },
-  Table: {
-    baseStyle: {
-      th: {
-        fontWeight: "semibold",
-        textTransform: "none",
-        letterSpacing: "normal",
-      },
-      td: {
-        py: 4,
-      },
-    },
-  },
+// Component recipes following Chakra UI v3 guidelines
+const recipes = {
+  // Update component theming to use recipes instead of baseStyle
 };
 
-// Create base system
-export const baseSystem = createSystem(defaultConfig, {
-  config: {
-    initialColorMode: "system",
-    useSystemColorMode: true,
-  },
+// Base configuration following Chakra UI v3 guidelines
+export const baseConfig = defineConfig({
   theme: {
     tokens: {
       colors: baseColors,
@@ -301,8 +304,11 @@ export const baseSystem = createSystem(defaultConfig, {
       },
     },
     semanticTokens: baseSemanticTokens,
-    components,
+    recipes,
   },
 });
 
-export { baseColors, baseSemanticTokens, baseTypography, baseSpacing, components };
+// Create base system
+export const baseSystem = createSystem(defaultConfig, baseConfig);
+
+export { baseColors, baseSemanticTokens, baseTypography, baseSpacing, recipes };

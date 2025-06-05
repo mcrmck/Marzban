@@ -112,7 +112,7 @@ const Login: FC = () => {
             <VStack>
               <Logo width={48} height={48} />
               <Text fontSize="2xl" fontWeight="semibold">
-                {t("login.loginYourAccount")}
+                {t("login.title")}
               </Text>
               <Text color="gray.600" _dark={{ color: "gray.400" }}>
                 {t("login.welcomeBack")}

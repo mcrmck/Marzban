@@ -438,3 +438,47 @@ class XRayConfig(dict):
 
         logger.debug(f"XRayConfig._update_inbound_maps: Updated maps after {action} action. "
                     f"Now have {len(self.inbounds_by_tag)} tags and {len(self.inbounds_by_protocol)} protocols")
+
+    def include_db_users(self) -> "XRayConfig":
+        """Include all users from the database in the XRay configuration.
+
+        Returns:
+            XRayConfig: A new configuration instance with all users included.
+        """
+        from app.db import GetDB, crud
+        from app.db.models import User, UserStatus
+
+        logger.info("Including all active users in XRay configuration")
+
+        # Create a copy of the current configuration
+        config_copy = self.copy()
+
+        # Get all active users from the database
+        with GetDB() as db:
+            active_users = crud.get_users(db, status=[UserStatus.active])
+
+            # For each user, add their configuration to the appropriate inbounds
+            for user in active_users:
+                for proxy in user.proxies:
+                    # Find the inbound with matching protocol
+                    matching_inbounds = config_copy.inbounds_by_protocol.get(proxy.type.value, [])
+
+                    for inbound in matching_inbounds:
+                        # Add user to the inbound's settings
+                        if 'settings' not in inbound:
+                            inbound['settings'] = {}
+                        if 'clients' not in inbound['settings']:
+                            inbound['settings']['clients'] = []
+
+                        # Create client configuration
+                        client = {
+                            'email': f"{user.id}.{user.account_number}",
+                            **proxy.settings
+                        }
+
+                        # Add client to inbound if not already present
+                        if not any(c.get('email') == client['email'] for c in inbound['settings']['clients']):
+                            inbound['settings']['clients'].append(client)
+
+        logger.info("Successfully included all active users in XRay configuration")
+        return config_copy

@@ -45,8 +45,8 @@ export const ClientHeader: FC = () => {
       right={0}
       zIndex="sticky"
       borderBottom="1px"
-      borderColor={theme === "dark" ? "gray.700" : "gray.200"}
-      bg={theme === "dark" ? "gray.800" : "white"}
+      borderColor="border.default"
+      bg="bg.surface"
       boxShadow="sm"
     >
       <Flex
@@ -59,29 +59,29 @@ export const ClientHeader: FC = () => {
       >
         <HStack gap={8}>
           <Link to="/">
-            <Text fontSize="xl" fontWeight="bold" color="brand.500">
-              Jade
+            <Text fontSize="xl" fontWeight="bold" color="colorPalette.solid">
+              {t("app.name")}
             </Text>
           </Link>
           <HStack gap={4}>
             <Link to="/servers">
               <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
-                {t("servers")}
+                {t("client.servers")}
               </Text>
             </Link>
             <Link to="/nodes">
               <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
-                {t("nodes")}
+                {t("admin.nodes")}
               </Text>
             </Link>
             <Link to="/plans">
               <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
-                {t("plans")}
+                {t("client.plans")}
               </Text>
             </Link>
             <Link to="/account">
               <Text color={theme === "dark" ? "white" : "gray.700"} _hover={{ color: "brand.500" }}>
-                {t("account")}
+                {t("client.account")}
               </Text>
             </Link>
           </HStack>

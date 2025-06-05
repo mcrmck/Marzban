@@ -3,9 +3,10 @@
  * Consolidates all app-level providers for both admin and client
  */
 
-import { ReactNode } from "react";
+import { ReactNode, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ChakraProvider } from "@chakra-ui/react";
+import { ChakraProvider, Spinner, Box } from "@chakra-ui/react";
+import { ColorModeProvider } from "../../lib/theme/colorMode";
 
 // Theme imports
 import adminTheme from "../../theme/adminTheme";
@@ -27,14 +28,35 @@ const queryClient = new QueryClient({
   },
 });
 
+// Loading component for Suspense
+const I18nLoading = () => (
+  <Box
+    height="100vh"
+    display="flex"
+    alignItems="center"
+    justifyContent="center"
+  >
+    <Spinner size="xl" color="jade.solid" />
+  </Box>
+);
+
 export const GlobalProviders = ({ children, mode = "admin" }: GlobalProvidersProps) => {
   const theme = mode === "admin" ? adminTheme : clientTheme;
 
   return (
-    <ChakraProvider value={theme}>
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
-    </ChakraProvider>
+    <ColorModeProvider 
+      attribute="class" 
+      defaultTheme="system" 
+      enableSystem
+      disableTransitionOnChange={false}
+    >
+      <ChakraProvider value={theme}>
+        <QueryClientProvider client={queryClient}>
+          <Suspense fallback={<I18nLoading />}>
+            {children}
+          </Suspense>
+        </QueryClientProvider>
+      </ChakraProvider>
+    </ColorModeProvider>
   );
 };

@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from fastapi.encoders import jsonable_encoder
 from requests import Session
 
-from app import app, logger, scheduler
+import logging
 from app.db import GetDB
 from app.db.models import NotificationReminder
 from app.utils.notification import queue
@@ -41,13 +41,13 @@ def send(data: List[Dict[Any, Any]]) -> bool:
 
 def send_req(w_address: str, data):
     try:
-        logger.debug(f"Sending {len(data)} webhook updates to {w_address}")
+        logging.getLogger("marzban").info(f"Sending {len(data)} webhook updates to {w_address}")
         r = session.post(w_address, json=data, headers=headers)
         if r.ok:
             return True
-        logger.error(r)
+        logging.getLogger("marzban").error(r)
     except Exception as err:
-        logger.error(err)
+        logging.getLogger("marzban").error(err)
     return False
 
 
@@ -85,14 +85,18 @@ def delete_expired_reminders() -> None:
         db.commit()
 
 
-if WEBHOOK_ADDRESS:
-    @app.on_event("shutdown")
-    def app_shutdown():
-        logger.info("Sending pending notifications before shutdown...")
-        send_notifications()
+# Function to register webhook jobs and shutdown handler
+def register_webhook_jobs():
+    if WEBHOOK_ADDRESS:
+        from app import app, scheduler
 
-    logger.info("Send webhook job started")
-    scheduler.add_job(send_notifications, "interval",
-                      seconds=JOB_SEND_NOTIFICATIONS_INTERVAL,
-                      replace_existing=True)
-    scheduler.add_job(delete_expired_reminders, "interval", hours=2, start_date=dt.utcnow() + td(minutes=1))
+        @app.on_event("shutdown")
+        def app_shutdown():
+            logging.getLogger("marzban").info("Sending pending notifications before shutdown...")
+            send_notifications()
+
+        logging.getLogger("marzban").info("Send webhook job started")
+        scheduler.add_job(send_notifications, "interval",
+                          seconds=JOB_SEND_NOTIFICATIONS_INTERVAL,
+                          replace_existing=True)
+        scheduler.add_job(delete_expired_reminders, "interval", hours=2, start_date=dt.utcnow() + td(minutes=1))

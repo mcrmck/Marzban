@@ -1,4 +1,5 @@
 from typing import List, Optional
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -12,6 +13,7 @@ from app.utils import report, responses
 from app.utils.jwt import create_admin_token
 from config import LOGIN_NOTIFY_WHITE_LIST
 
+logger = logging.getLogger("marzban")
 router = APIRouter(tags=["Admin"], responses={401: responses._401})
 
 
@@ -33,9 +35,11 @@ def admin_token(
 ):
     """Authenticate an admin and issue a token."""
     client_ip = get_client_ip(request)
+    logger.debug(f"Admin login attempt from {client_ip} for user {form_data.username}")
 
     dbadmin = validate_admin(db, form_data.username, form_data.password)
     if not dbadmin:
+        logger.warning(f"Failed login attempt for user {form_data.username} from {client_ip}")
         report.login(form_data.username, form_data.password, client_ip, False)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -46,7 +50,10 @@ def admin_token(
     if client_ip not in LOGIN_NOTIFY_WHITE_LIST:
         report.login(form_data.username, "🔒", client_ip, True)
 
-    return Token(access_token=create_admin_token(form_data.username, dbadmin.is_sudo))
+    logger.debug(f"Creating token for admin {form_data.username} (sudo: {dbadmin.is_sudo})")
+    token = create_admin_token(form_data.username, dbadmin.is_sudo)
+    logger.debug(f"Token created successfully for {form_data.username}")
+    return Token(access_token=token)
 
 
 @router.post(

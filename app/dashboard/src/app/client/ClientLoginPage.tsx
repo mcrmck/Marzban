@@ -12,6 +12,7 @@ import {
 } from "@chakra-ui/react";
 import { toaster, Toaster } from "@/components/ui/toaster";
 import { useClientPortalStore } from "../../lib/stores";
+import { useTranslation } from "react-i18next";
 
 interface LocationState {
     from?: {
@@ -20,6 +21,7 @@ interface LocationState {
 }
 
 const ClientLoginPage = () => {
+    const { t } = useTranslation();
     const navigate = useNavigate();
     const location = useLocation();
     const { login, isLoadingAuth, error, isAuthenticated } = useClientPortalStore();
@@ -37,7 +39,7 @@ const ClientLoginPage = () => {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!accountNumber.trim()) {
-            setFormError("Account number is required");
+            setFormError(t("login.fieldRequired"));
             return;
         }
         try {
@@ -45,8 +47,8 @@ const ClientLoginPage = () => {
             // Navigation will be handled by the useEffect above
         } catch (err) {
             toaster.create({
-                title: "Login Failed",
-                description: error || "Please check your account number and try again.",
+                title: t("login.loginFailed"),
+                description: error || t("client.noAccountFound"),
                 type: "error",
                 duration: 5000,
                 closable: true,
@@ -60,14 +62,14 @@ const ClientLoginPage = () => {
             <Container maxW="container.sm" py={10}>
                 <VStack gap={8} align="stretch">
                     <Box textAlign="center">
-                        <Heading size="xl" mb={2}>Client Portal Login</Heading>
-                        <Text color="gray.600">Enter your account number to access your portal</Text>
+                        <Heading size="xl" mb={2}>{t("client.portal")}</Heading>
+                        <Text color="gray.600">{t("client.loginPrompt")}</Text>
                     </Box>
 
                     <Box as="form" onSubmit={handleSubmit}>
                         <VStack gap={4}>
                             <Field.Root invalid={!!formError}>
-                                <Field.Label>Account Number</Field.Label>
+                                <Field.Label>{t("client.accountNumber")}</Field.Label>
                                 <Input
                                     type="text"
                                     value={accountNumber}
@@ -75,7 +77,7 @@ const ClientLoginPage = () => {
                                         setAccountNumber(e.target.value);
                                         setFormError("");
                                     }}
-                                    placeholder="Enter your account number"
+                                    placeholder={t("client.loginPrompt")}
                                     size="lg"
                                 />
                                 {formError && <Field.ErrorText>{formError}</Field.ErrorText>}
@@ -83,13 +85,13 @@ const ClientLoginPage = () => {
 
                             <Button
                                 type="submit"
-                                colorScheme="brand"
+                                colorPalette="brand"
                                 size="lg"
                                 width="full"
                                 loading={isLoadingAuth}
-                                loadingText="Logging in..."
+                                loadingText={t("loading")}
                             >
-                                Login
+                                {t("client.loginButton")}
                             </Button>
 
                             <Text fontSize="sm" color="gray.500">

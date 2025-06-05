@@ -1,6 +1,6 @@
 import datetime
+import logging
 
-from app import logger
 from app.db.models import User
 from app.telegram import bot
 from telebot.apihelper import ApiTelegramException
@@ -24,7 +24,7 @@ def report(text: str, chat_id: int = None, parse_mode="html", keyboard=None):
             if chat_id:
                 bot.send_message(chat_id, text, parse_mode=parse_mode)
         except ApiTelegramException as e:
-            logger.error(e)
+            logging.getLogger("marzban").error(e)
 
 
 def report_new_user(

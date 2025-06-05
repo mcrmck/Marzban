@@ -3,15 +3,15 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
-from app import logger, scheduler, xray
-from app.db import (GetDB, get_notification_reminder, get_users,
-                    start_user_expire, update_user_status, reset_user_by_next)
-from app.models.user import ReminderType, UserResponse, UserStatus
+import logging
+from app.db import GetDB
+from app.db.crud import get_users, update_user_status, start_user_expire, get_notification_reminder, reset_user_by_next
+from app.db.models import UserStatus
+from app.models.user import UserResponse, ReminderType
+from app.xray import xray
 from app.utils import report
-from app.utils.helpers import (calculate_expiration_days,
-                               calculate_usage_percent)
-from config import (JOB_REVIEW_USERS_INTERVAL, NOTIFY_DAYS_LEFT,
-                    NOTIFY_REACHED_USAGE_PERCENT, WEBHOOK_ADDRESS)
+from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
+from config import WEBHOOK_ADDRESS, JOB_REVIEW_USERS_INTERVAL, NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT
 
 if TYPE_CHECKING:
     from app.db.models import User
@@ -104,7 +104,7 @@ def review():
             report.status_change(username=user.username, status=status,
                                  user=UserResponse.model_validate(user, context={'db': db}), user_admin=user.admin)
 
-            logger.info(f"User \"{user.username}\" status changed to {status}")
+            logging.getLogger("marzban").debug(f"User \"{user.username}\" status changed to {status}")
 
         for user in get_users(db, status=UserStatus.on_hold):
 
@@ -130,9 +130,7 @@ def review():
             report.status_change(username=user.username, status=status,
                                  user=UserResponse.model_validate(user, context={'db': db}), user_admin=user.admin)
 
-            logger.info(f"User \"{user.username}\" status changed to {status}")
+            logging.getLogger("marzban").debug(f"User \"{user.username}\" status changed to {status}")
 
 
-scheduler.add_job(review, 'interval',
-                  seconds=JOB_REVIEW_USERS_INTERVAL,
-                  coalesce=True, max_instances=1)
+# Job registration moved to app/jobs/__init__.py to avoid circular imports

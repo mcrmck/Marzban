@@ -29,11 +29,24 @@ from .crud import (create_admin, create_notification_reminder,  # noqa
                    get_system_usage,
                    get_tls_certificate, get_user, get_user_by_id, get_users,
                    get_users_count, remove_admin, remove_user, revoke_user_sub,
-                   set_owner, update_admin, update_user, update_user_status, reset_user_by_next,
+                   update_admin, update_user, update_user_status, reset_user_by_next,
                    update_user_sub, start_user_expire, get_admin_by_id,
                    get_admin_by_telegram_id)
 
 from .models import JWT, System, User  # noqa
+
+
+def init_db():
+    """Initialize database tables"""
+    try:
+        # Create all tables
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error creating database tables: {e}")
+        raise
+
 
 __all__ = [
     "get_user",
@@ -48,7 +61,6 @@ __all__ = [
     "update_user_sub",
     "reset_user_by_next",
     "revoke_user_sub",
-    "set_owner",
     "get_system_usage",
     "get_jwt_secret_key",
     "get_tls_certificate",
@@ -73,4 +85,5 @@ __all__ = [
 
     "Base",
     "Session",
+    "init_db",
 ]

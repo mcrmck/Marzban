@@ -5,14 +5,11 @@ from typing import TYPE_CHECKING, Dict, Sequence # Keep existing Sequence if use
 
 from app.utils.store import DictStorage
 from app.utils.system import check_port
-from app.xray import operations # Ensure this is how operations is meant to be imported
 from app.xray.config import XRayConfig
 from app.xray.node import XRayNode
-from xray_api import XRay as XRayAPI # Retaining, though direct use in this file is minimal
 from xray_api import exceptions, types
 from xray_api import exceptions as exc
 from config import XRAY_CONFIG_PATH
-from app.db.models import NodeServiceConfiguration # Add this import
 
 # Setup a logger for this module
 logger = logging.getLogger(__name__)
@@ -108,12 +105,19 @@ class XRayModule:
         self.config = config
         self.nodes = nodes
         self.hosts = hosts
-        self.operations = operations
+        self._operations = None  # Lazy load operations
         self.exceptions = exceptions
         self.exc = exc
         self.types = types
         self.XRayConfig = XRayConfig
         self.XRayNode = XRayNode
+    
+    @property
+    def operations(self):
+        if self._operations is None:
+            from app.xray import operations
+            self._operations = operations
+        return self._operations
 
 # Create and export the module instance
 xray = XRayModule()
@@ -123,7 +127,6 @@ __all__ = [
     "config",  # The global XRayConfig instance
     "hosts",
     "nodes",
-    "operations",
     "exceptions",
     "exc",
     "types",

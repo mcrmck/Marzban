@@ -6,13 +6,14 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
 from .models import TLS
+import logging
 
 from sqlalchemy import and_, delete, func, or_, select  # Add select here
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
-
-from app import logger  # Add logger import
 from app.models.plan import Plan  # Add Plan model import
+
+logger = logging.getLogger("marzban")
 
 from app.db.models import (
     JWT,
@@ -27,7 +28,6 @@ from app.db.models import (
     Proxy,
     System,
     User as DBUser, # Renamed to avoid conflict with Pydantic model
-    UserTemplate,
     UserUsageResetLogs,
     NodeServiceConfiguration,
 )
@@ -44,7 +44,6 @@ from app.models.user import (
     UserStatus,
     UserUsageResponse
 )
-from app.models.user_template import UserTemplateCreate, UserTemplateModify
 from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
 from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODELETE_DAYS
 import logging
@@ -57,7 +56,6 @@ logger.setLevel(logging.DEBUG)
 
 def get_user_queryset(db: Session) -> Query:
     return db.query(DBUser).options(
-        joinedload(DBUser.admin),
         joinedload(DBUser.next_plan),
         joinedload(DBUser.proxies),
         joinedload(DBUser.usage_logs),
@@ -251,7 +249,6 @@ def create_user(db: Session, account_number: str, user: UserCreate, admin: Optio
         status=user.status if user.status is not None else UserStatus.disabled, # Default status
         data_limit=user.data_limit,
         expire=user.expire,
-        admin_id=admin.id if admin else None,
         data_limit_reset_strategy=user.data_limit_reset_strategy,
         note=user.note,
         on_hold_expire_duration=user.on_hold_expire_duration,
@@ -347,22 +344,17 @@ def update_user(db: Session, dbuser: DBUser, modify: UserModify) -> DBUser:
     # Expire change side effects
     if 'expire' in update_data:
         value = update_data['expire']
-        print(f"[DEBUG] update_user: Processing expire change to {value}")
         if dbuser.status in (UserStatus.active, UserStatus.expired, UserStatus.limited):
             if not value or (datetime.fromtimestamp(value) > datetime.utcnow() if value is not None else True):
                 if dbuser.status == UserStatus.expired:
-                    print(f"[DEBUG] update_user: Setting status to active due to expire change")
                     setattr(dbuser, 'status', UserStatus.active)
                     dbuser.last_status_change = datetime.utcnow()
             elif value is not None and datetime.fromtimestamp(value) <= datetime.utcnow():
-                print(f"[DEBUG] update_user: Setting status to expired due to expire change")
                 setattr(dbuser, 'status', UserStatus.expired)
                 dbuser.last_status_change = datetime.utcnow()
 
-    print(f"[DEBUG] update_user: Committing changes")
     dbuser.edit_at = datetime.utcnow()
     db.commit()
-    print(f"[DEBUG] update_user: Refreshing user object")
     db.refresh(dbuser)
     print(f"[DEBUG] update_user: Update complete for user {dbuser.account_number}")
     return get_user_by_id(db, dbuser.id) or dbuser
@@ -604,7 +596,13 @@ def get_system_usage(db: Session) -> Optional[System]:
 
 def get_jwt_secret_key(db: Session) -> Optional[str]:
     jwt_record = db.query(JWT).first()
-    return jwt_record.secret_key if jwt_record else None
+    if not jwt_record:
+        # Create a new JWT record with a random secret key
+        jwt_record = JWT()
+        db.add(jwt_record)
+        db.commit()
+        db.refresh(jwt_record)
+    return jwt_record.secret_key
 
 def get_tls_certificate(db: Session) -> Optional[TLS]:
     return db.query(TLS).first()
@@ -680,68 +678,6 @@ def reset_admin_usage(db: Session, dbadmin: Admin) -> Admin:
     db.commit()
     db.refresh(dbadmin)
     return dbadmin
-
-# --- User Template --- (Largely unchanged)
-def create_user_template(db: Session, user_template_data: UserTemplateCreate) -> UserTemplate:
-    inbound_tags_list: List[str] = []
-    if user_template_data.inbounds:
-        for _, tag_list_val in user_template_data.inbounds.items():
-            inbound_tags_list.extend(tag_list_val)
-
-    # Get service configurations instead of ProxyInbound
-    db_inbounds_for_template_list = []
-    if inbound_tags_list:
-        db_inbounds_for_template_list = db.query(NodeServiceConfiguration).filter(
-            NodeServiceConfiguration.xray_inbound_tag.in_(inbound_tags_list)
-        ).all()
-
-    dbuser_template_obj = UserTemplate(
-        name=user_template_data.name,
-        data_limit=user_template_data.data_limit if user_template_data.data_limit is not None else 0,
-        expire_duration=user_template_data.expire_duration if user_template_data.expire_duration is not None else 0,
-        username_prefix=user_template_data.username_prefix,
-        username_suffix=user_template_data.username_suffix,
-        service_configurations=db_inbounds_for_template_list  # Updated to use service_configurations
-    )
-    db.add(dbuser_template_obj)
-    db.commit()
-    db.refresh(dbuser_template_obj)
-    return dbuser_template_obj
-
-def update_user_template(db: Session, dbuser_template_obj: UserTemplate, modified_user_template_data: UserTemplateModify) -> UserTemplate:
-    update_data = modified_user_template_data.model_dump(exclude_unset=True, exclude={'inbounds'})
-    for key, value in update_data.items():
-        if hasattr(dbuser_template_obj, key): setattr(dbuser_template_obj, key, value)
-
-    if modified_user_template_data.inbounds is not None:
-        inbound_tags_list: List[str] = []
-        for _, tag_list_val in modified_user_template_data.inbounds.items():
-            inbound_tags_list.extend(tag_list_val)
-
-        # Get service configurations instead of ProxyInbound
-        db_inbounds_for_template_list = []
-        if inbound_tags_list:
-            db_inbounds_for_template_list = db.query(NodeServiceConfiguration).filter(
-                NodeServiceConfiguration.xray_inbound_tag.in_(inbound_tags_list)
-            ).all()
-        dbuser_template_obj.service_configurations = db_inbounds_for_template_list  # Updated to use service_configurations
-
-    db.commit()
-    db.refresh(dbuser_template_obj)
-    return dbuser_template_obj
-
-def remove_user_template(db: Session, dbuser_template_obj: UserTemplate): # Renamed param
-    db.delete(dbuser_template_obj)
-    db.commit()
-
-def get_user_template(db: Session, user_template_id: int) -> Optional[UserTemplate]:
-    return db.query(UserTemplate).options(joinedload(UserTemplate.inbounds)).filter(UserTemplate.id == user_template_id).first()
-
-def get_user_templates(db: Session, offset: Optional[int] = None, limit: Optional[int] = None) -> List[UserTemplate]:
-    query = db.query(UserTemplate).options(joinedload(UserTemplate.inbounds))
-    if offset is not None: query = query.offset(offset)
-    if limit is not None: query = query.limit(limit)
-    return query.all()
 
 # --- Node --- (Largely unchanged regarding direct user linking in these CRUDs)
 def get_node(db: Session, name: str) -> Optional[Node]:

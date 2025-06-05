@@ -11,7 +11,7 @@ export const ClientLayout: FC<ClientLayoutProps> = ({ children }) => {
   const { theme } = useTheme();
 
   return (
-    <Box minH="100vh" bg={theme === "dark" ? "gray.900" : "gray.50"}>
+    <Box minH="100vh" bg="bg.canvas">
       <ClientHeader />
       <Container maxW="container.xl" py={8} mt="16">
         {children}

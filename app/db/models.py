@@ -159,13 +159,6 @@ class User(Base):
             ]
         return _
 
-template_inbounds_association = Table(
-    "template_inbounds_association",
-    Base.metadata,
-    Column("user_template_id", ForeignKey("user_templates.id")),
-    Column("inbound_tag", ForeignKey("node_service_configurations.xray_inbound_tag")),
-)
-
 
 class NextPlan(Base):
     __tablename__ = 'next_plans'
@@ -178,19 +171,6 @@ class NextPlan(Base):
     fire_on_either = Column(Boolean, nullable=False, default=True, server_default='0')
 
     user = relationship("User", back_populates="next_plan")
-
-
-class UserTemplate(Base):
-    __tablename__ = "user_templates"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String(64), nullable=False, unique=True)
-    data_limit = Column(BigInteger, default=0)
-    expire_duration = Column(BigInteger, default=0)  # in seconds
-    username_prefix = Column(String(20), nullable=True)
-    username_suffix = Column(String(20), nullable=True)
-
-    # Removed inbounds relationship as it's no longer needed
 
 
 class UserUsageResetLogs(Base):

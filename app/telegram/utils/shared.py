@@ -6,7 +6,6 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 
 from app.models.user import User, UserResponse, UserStatus
-from app.models.user_template import UserTemplate
 from app.utils.system import readable_size
 from app.crud import crud
 
@@ -81,25 +80,6 @@ def get_user_info_text(db_user: User, db: Session) -> str:
 📝 <b>Note:</b> <blockquote expandable>{user.note or "empty"}</blockquote>
 👨‍💻 <b>Admin:</b> <code>{db_user.admin.username if db_user.admin else "-"}</code>
 🚀 <b><a href="{user.subscription_url}">Subscription</a>:</b> <code>{user.subscription_url}</code>"""
-
-
-def get_template_info_text(template: UserTemplate):
-    protocols = ""
-    for p, inbounds in template.inbounds.items():
-        protocols += f"\n├─ <b>{p.upper()}</b>\n"
-        protocols += "├───" + ", ".join([f"<code>{i}</code>" for i in inbounds])
-    data_limit = readable_size(template.data_limit) if template.data_limit else "Unlimited"
-    expire = ((dt.now() + relativedelta(seconds=template.expire_duration))
-              .strftime("%Y-%m-%d")) if template.expire_duration else "Never"
-    text = f"""
-📊 Template Info:
-ID: <b>{template.id}</b>
-Data Limit: <b>{data_limit}</b>
-Expire Date: <b>{expire}</b>
-Username Prefix: <b>{template.username_prefix if template.username_prefix else "-"}</b>
-Username Suffix: <b>{template.username_suffix if template.username_suffix else "-"}</b>
-Protocols: {protocols}"""
-    return text
 
 
 def get_number_at_end(username: str):

@@ -15,6 +15,9 @@ import timezone from 'dayjs/plugin/timezone';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import './index.scss';
 
+// Initialize i18n
+import './locales/i18n';
+
 // Initialize dayjs plugins
 dayjs.extend(utc);
 dayjs.extend(timezone);
